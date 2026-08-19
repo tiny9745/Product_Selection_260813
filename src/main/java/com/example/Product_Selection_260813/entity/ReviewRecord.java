@@ -3,7 +3,9 @@ package com.example.Product_Selection_260813.entity;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
@@ -19,8 +21,10 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 @Entity
+@Table(name="review_records")
 public class ReviewRecord {
 
     @Id
@@ -105,9 +109,11 @@ public class ReviewRecord {
     @Column(name = "review_comment", columnDefinition = "TEXT")
     private String reviewComment;
 
+    @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 

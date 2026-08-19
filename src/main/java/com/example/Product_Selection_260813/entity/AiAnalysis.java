@@ -2,6 +2,8 @@ package com.example.Product_Selection_260813.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -33,10 +35,11 @@ public class AiAnalysis {
 	@Column(name = "reasons", columnDefinition = "TEXT")
 	private String reasons;
 
+	@CreationTimestamp // 需再確認是否要添加
 	@Column(name = "generated_at", nullable = false, updatable = false)
 	private LocalDateTime generatedAt;
 
-	@Column(name = "model_name")
+	@Column(name = "model_name", length = 100)
 	private String modelName;
 
 	public Long getId() {

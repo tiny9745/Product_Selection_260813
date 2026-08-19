@@ -2,13 +2,24 @@ package com.example.Product_Selection_260813.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
+@Table(
+	    name = "evaluation_modes",
+	    uniqueConstraints = @UniqueConstraint(
+	        name = "uk_evaluation_modes_code_version",
+	        columnNames = {"mode_code", "version"}
+	    )
+	)
 public class EvaluationMode {
 	@Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,6 +41,7 @@ public class EvaluationMode {
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = true;
 	
+	@CreationTimestamp
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 	
