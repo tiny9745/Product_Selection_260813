@@ -11,9 +11,16 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
-@Table(name="product_evaluations")
+@Table(
+	    name = "product_evaluations",
+	    uniqueConstraints = @UniqueConstraint(
+	        name = "uk_product_evaluations_product_id",
+	        columnNames = {"product_id"}
+	    )
+	)
 public class ProductEvaluation {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
