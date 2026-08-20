@@ -1,0 +1,5 @@
+# JWT相關設定範例，請將以下內容併入既有application.yml（或application.properties對應寫法）。
+# secret務必改由環境變數注入，不可寫死在版本控制內。
+jwt:
+  secret: ${JWT_SECRET:CHANGE_ME_to_a_random_string_at_least_32_bytes_long} # HS256要求至少256bit(32 bytes)
+  expiration-ms: 28800000 # 8小時，對應六-4 JWT設定決議
