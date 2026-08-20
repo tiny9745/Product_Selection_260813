@@ -46,8 +46,9 @@ public class FestiveCampaign {
     @Column(name = "preparation_lead_days", nullable = false)
     private Integer preparationLeadDays = 30;
 
-    @Column(name = "target_tags", nullable = false, length = 255)
-    private String targetTags;
+    // target_tags(VARCHAR)欄位已移除：無法記錄「這個標籤屬於核心/一般/弱命中」的分級，
+    // 改由festive_campaign_tags表承接（一檔期對多標籤、每個標籤各自帶match_tier），
+    // 見FestiveCampaignTag.java。標籤清單查詢改用FestiveCampaignTagRepository.findByCampaignId()。
 
     @Enumerated(EnumType.STRING)
     @Column(name = "campaign_status", nullable = false)
@@ -118,14 +119,6 @@ public class FestiveCampaign {
 
 	public void setPreparationLeadDays(Integer preparationLeadDays) {
 		this.preparationLeadDays = preparationLeadDays;
-	}
-
-	public String getTargetTags() {
-		return targetTags;
-	}
-
-	public void setTargetTags(String targetTags) {
-		this.targetTags = targetTags;
 	}
 
 	public FestiveCampaignStatus getCampaignStatus() {
