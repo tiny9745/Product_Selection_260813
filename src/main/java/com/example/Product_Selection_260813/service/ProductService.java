@@ -1,0 +1,399 @@
+package com.example.Product_Selection_260813.service;
+
+import java.math.BigDecimal;
+import java.util.Objects;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
+import com.example.Product_Selection_260813.dto.response.ProductResponse;
+import com.example.Product_Selection_260813.entity.AppUser;
+import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
+import com.example.Product_Selection_260813.enums.ProductItemStatus;
+import com.example.Product_Selection_260813.enums.ProductPricingStatus;
+import com.example.Product_Selection_260813.enums.ProductPricingType;
+import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.repository.AppUserRepository;
+import com.example.Product_Selection_260813.repository.ProductRepository;
+import com.example.Product_Selection_260813.repository.ProductTypeRepository;
+
+/**
+ * 對應 API總表 三、品項管理（不含四、評估／趨勢／AI，那些屬於ScoringService／
+ * TrendService／AiSelectionService的職責，見企劃書十二-13分層決議）：
+ *
+ *   GET    /api/products                         -&gt; searchProducts()
+ *   GET    /api/products/ai-suggested             -&gt; searchAiSuggested()
+ *   POST   /api/products/{id}/promote-to-candidate -&gt; promoteToCandidate()
+ *   GET    /api/products/{id}                     -&gt; getProduct()
+ *   POST   /api/products                          -&gt; createProduct()
+ *   PUT    /api/products/{id}                     -&gt; updateProduct()
+ *   DELETE /api/products/{id}                      -&gt; deleteProduct()
+ *   POST   /api/products/{id}/resubmit             -&gt; resubmit()
+ *   POST   /api/products/{id}/archive              -&gt; archive()
+ *   POST   /api/products/{id}/restore              -&gt; restore()
+ *
+ * （POST /api/products/ai-suggested/batch-generate屬於系統排程專用，由
+ *   AiSelectionService負責寫入AI_SUGGESTED商品，不在ProductService範圍內。）
+ *
+ * 例外處理沿用專案既有GlobalExceptionHandler慣例，不新增例外類別：
+ *   - 資源不存在（商品／商品類型查無資料）  -&gt; IllegalArgumentException（400）
+ *   - 目前狀態不允許此操作（狀態機不合法轉換、審核通過後改核心資料）-&gt; IllegalStateException（409）
+ */
+@Service
+public class ProductService {
+
+	@Autowired
+	private ProductRepository productRepository;
+
+	@Autowired
+	private ProductTypeRepository productTypeRepository;
+
+	@Autowired
+	private AppUserRepository appUserRepository;
+
+	// ========================= 查詢 =========================
+
+	/**
+	 * GET /api/products：品項管理主清單。
+	 *
+	 * candidateStatus刻意在這裡（Service層）而非Repository層預設為CANDIDATE：
+	 * 企劃書備註「候選狀態篩選器的實際作用範圍：主清單預設只顯示CANDIDATE的品項；
+	 * 此篩選器保留是為了UI擴充彈性」——代表這是「業務預設值」而非「查詢一定只能這樣」，
+	 * Repository.search()維持通用（null=不篩選），由呼叫端決定要不要套用預設值。
+	 */
+	@Transactional(readOnly = true)
+	public Page<ProductResponse> searchProducts(
+			ProductReviewStatus reviewStatus,
+			ProductItemStatus itemStatus,
+			ProductCandidateStatus candidateStatus,
+			Long productTypeId,
+			String keyword,
+			Pageable pageable) {
+
+		ProductCandidateStatus effectiveCandidateStatus =
+				candidateStatus != null ? candidateStatus : ProductCandidateStatus.CANDIDATE;
+
+		return productRepository
+				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword, pageable)
+				.map(ProductResponse::from);
+	}
+
+	/**
+	 * GET /api/products/ai-suggested：AI建議清單（candidate_status=AI_SUGGESTED）。
+	 */
+	@Transactional(readOnly = true)
+	public Page<ProductResponse> searchAiSuggested(Pageable pageable) {
+		return productRepository
+				.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable)
+				.map(ProductResponse::from);
+	}
+
+	/**
+	 * GET /api/products/{id}：商品核心資料。
+	 *
+	 * 評估／趨勢／AI／風險等聚合資料不在這裡組裝，見類別註解。
+	 */
+	@Transactional(readOnly = true)
+	public ProductResponse getProduct(Long id) {
+		return ProductResponse.from(findProductOrThrow(id));
+	}
+
+	// ========================= 新增 =========================
+
+	/**
+	 * POST /api/products：手動建立品項。
+	 *
+	 * 預設值（不開放Request傳入，見ProductCreateRequest類別註解）：
+	 *   review_status=PENDING、item_status=ACTIVE、candidate_status=CANDIDATE
+	 *   pricing_status：NEW -&gt; PENDING_PRICING；RESALE -&gt; 留空（null）
+	 */
+	@Transactional
+	public ProductResponse createProduct(ProductCreateRequest request, String username) {
+		if (!productTypeRepository.existsById(request.getProductTypeId())) {
+			throw new IllegalArgumentException("商品類型不存在");
+		}
+		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
+
+		Long userId = resolveUserId(username);
+
+		Product product = new Product();
+		product.setProductTypeId(request.getProductTypeId());
+		product.setPricingType(request.getPricingType());
+		product.setName(request.getName());
+		product.setDescription(request.getDescription());
+		product.setImageUrl(request.getImageUrl());
+		product.setSupplierName(request.getSupplierName());
+		product.setCostPrice(request.getCostPrice());
+		product.setSalePrice(request.getSalePrice());
+		product.setMarketPrice(request.getMarketPrice());
+		product.setCampaignTags(request.getCampaignTags());
+		product.setMoq(request.getMoq());
+		product.setSupplyStability(request.getSupplyStability());
+		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
+		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
+		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
+
+		// review_status／item_status／candidate_status：Entity欄位預設值已經是
+		// PENDING／ACTIVE／CANDIDATE（見Product.java），這裡不重複賦值。
+
+		product.setPricingStatus(
+				request.getPricingType() == ProductPricingType.NEW
+						? ProductPricingStatus.PENDING_PRICING
+						: null);
+
+		product.setCreatedBy(userId);
+		product.setUpdatedBy(userId);
+
+		return ProductResponse.from(productRepository.save(product));
+	}
+
+	// ========================= 修改 =========================
+
+	/**
+	 * PUT /api/products/{id}：整份覆蓋更新（見ProductUpdateRequest類別註解）。
+	 *
+	 * 欄位分組鎖定（四-2）：review_status=APPROVED時，「選品核心資料」群組
+	 * 若送來的值與目前值不同，直接409拒絕整次更新（不做「部分套用、部分忽略」，
+	 * 那樣前端會搞不清楚哪些欄位實際生效）。
+	 */
+	@Transactional
+	public ProductResponse updateProduct(Long id, ProductUpdateRequest request, String username) {
+		Product product = findProductOrThrow(id);
+
+		if (!productTypeRepository.existsById(request.getProductTypeId())) {
+			throw new IllegalArgumentException("商品類型不存在");
+		}
+		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
+
+		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
+			assertCoreDataUnchanged(product, request);
+		}
+
+		// 一般基本資料：任何審核狀態下都可改
+		product.setName(request.getName());
+		product.setDescription(request.getDescription());
+		product.setImageUrl(request.getImageUrl());
+		product.setSupplierName(request.getSupplierName());
+
+		// 選品核心資料：若APPROVED，上面assertCoreDataUnchanged()已經保證這裡的值
+		// 跟目前值相同（否則已經丟例外），直接寫入不會改變實質內容；
+		// 若非APPROVED，直接以Request內容整份覆蓋。
+		product.setProductTypeId(request.getProductTypeId());
+		product.setPricingType(request.getPricingType());
+		product.setCostPrice(request.getCostPrice());
+		product.setSalePrice(request.getSalePrice());
+		product.setMarketPrice(request.getMarketPrice());
+		product.setCampaignTags(request.getCampaignTags());
+		product.setMoq(request.getMoq());
+		product.setSupplyStability(request.getSupplyStability());
+		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
+		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
+		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
+
+		// pricing_status自動轉換規則（四-2備註）：僅NEW商品才有意義，
+		// RESALE商品pricing_status固定為null，不受這段邏輯影響。
+		if (product.getPricingType() == ProductPricingType.NEW
+				&& product.getCostPrice() != null
+				&& product.getSalePrice() != null
+				&& product.getPricingStatus() == ProductPricingStatus.PENDING_PRICING) {
+			product.setPricingStatus(ProductPricingStatus.PRICED);
+		}
+
+		product.setUpdatedBy(resolveUserId(username));
+
+		return ProductResponse.from(productRepository.save(product));
+	}
+
+	// ========================= 狀態轉換 =========================
+
+	/**
+	 * POST /api/products/{id}/promote-to-candidate：AI_SUGGESTED -&gt; CANDIDATE。
+	 */
+	@Transactional
+	public ProductResponse promoteToCandidate(Long id) {
+		Product product = findProductOrThrow(id);
+
+		if (product.getCandidateStatus() != ProductCandidateStatus.AI_SUGGESTED) {
+			throw new IllegalStateException("僅AI建議（尚未加入候選）的商品可執行此操作");
+		}
+
+		product.setCandidateStatus(ProductCandidateStatus.CANDIDATE);
+		return ProductResponse.from(productRepository.save(product));
+	}
+
+	/**
+	 * POST /api/products/{id}/resubmit：REJECTED -&gt; PENDING，submission_count+1。
+	 *
+	 * review_status的轉換沿用ProductRepository既有的conditionalUpdateReviewStatus()
+	 * （原本為POST /api/reviews的併發控制設計），這裡直接複用同一支條件式UPDATE：
+	 * 語意完全吻合（僅在目前狀態等於預期狀態時才更新成功），不需要另外重寫一次。
+	 * submission_count+1在條件式UPDATE確認轉換成功之後才執行——此時已經確保
+	 * 「當下改成PENDING的人就是我」，不會有競態問題。
+	 *
+	 * 這裡額外補上item_status==ACTIVE的前置檢查（原本沒有）：若不擋，REJECTED+
+	 * ARCHIVED商品可以被直接resubmit成PENDING+ARCHIVED，繞過剛補上的restore()
+	 * 路徑，一樣會產生「不會出現在GET /api/reviews/pending、卻又不是APPROVED
+	 * 無法restore」的孤兒狀態（見restore()方法註解）。加這道檢查後，
+	 * REJECTED+ARCHIVED商品必須先restore()解封存，才能resubmit()，
+	 * 狀態機不會再有繞過復用步驟的隱藏路徑。
+	 */
+	@Transactional
+	public ProductResponse resubmit(Long id) {
+		Product product = findProductOrThrow(id);
+
+		if (product.getReviewStatus() != ProductReviewStatus.REJECTED) {
+			throw new IllegalStateException("僅已審核拒絕的商品可重新送審");
+		}
+		if (product.getItemStatus() != ProductItemStatus.ACTIVE) {
+			throw new IllegalStateException("商品目前已封存，請先復用後再重新送審");
+		}
+
+		int updated = productRepository.conditionalUpdateReviewStatus(
+				id, ProductReviewStatus.REJECTED, ProductReviewStatus.PENDING);
+		if (updated == 0) {
+			// 兩個管理端剛好同時操作同一品項時才會發生（例如同時又被改了一次審核結果）
+			throw new IllegalStateException("商品狀態已被異動，請重新整理後再試");
+		}
+
+		Product refreshed = findProductOrThrow(id); // clearAutomatically=true已清空Persistence Context，重查取得最新值
+		refreshed.setSubmissionCount(refreshed.getSubmissionCount() + 1);
+		return ProductResponse.from(productRepository.save(refreshed));
+	}
+
+	/**
+	 * POST /api/products/{id}/archive：(APPROVED或REJECTED) 且 ACTIVE -&gt; ARCHIVED。
+	 */
+	@Transactional
+	public ProductResponse archive(Long id) {
+		Product product = findProductOrThrow(id);
+
+		boolean reviewStatusAllowed = product.getReviewStatus() == ProductReviewStatus.APPROVED
+				|| product.getReviewStatus() == ProductReviewStatus.REJECTED;
+		if (!reviewStatusAllowed) {
+			throw new IllegalStateException("僅已審核通過或已審核拒絕的商品可封存");
+		}
+		if (product.getItemStatus() != ProductItemStatus.ACTIVE) {
+			throw new IllegalStateException("商品目前並非使用中，無法封存");
+		}
+
+		product.setItemStatus(ProductItemStatus.ARCHIVED);
+		return ProductResponse.from(productRepository.save(product));
+	}
+
+	/**
+	 * POST /api/products/{id}/restore：(APPROVED或REJECTED) 且 ARCHIVED -&gt; ACTIVE。
+	 *
+	 * 補上REJECTED+ARCHIVED的復用路徑（原企劃書字面只開放APPROVED+ARCHIVED）：
+	 * 這裡只解封存，不動review_status——REJECTED維持REJECTED，操作人員復用後
+	 * 若要繼續走選品流程，再透過既有resubmit()送審，狀態機不因為這次修改多一條
+	 * 「復用時直接跳回PENDING」的例外路徑。
+	 *
+	 * 補這條路徑的原因：resubmit()目前不檢查item_status，REJECTED+ARCHIVED商品
+	 * 原本就能被resubmit成「PENDING+ARCHIVED」，但GET /api/reviews/pending的
+	 * 預設條件是「未審核＋使用中」，會讓這筆資料從審核佇列消失、卡在無法被任何
+	 * 端點再次轉換狀態的孤兒狀態；補上這條restore路徑後，操作人員可以先復用
+	 * （回到ACTIVE）再resubmit，走完整條正常狀態機，不會再產生孤兒資料。
+	 */
+	@Transactional
+	public ProductResponse restore(Long id) {
+		Product product = findProductOrThrow(id);
+
+		boolean reviewStatusAllowed = product.getReviewStatus() == ProductReviewStatus.APPROVED
+				|| product.getReviewStatus() == ProductReviewStatus.REJECTED;
+		if (!reviewStatusAllowed) {
+			throw new IllegalStateException("僅已審核通過或已審核拒絕的商品可復用");
+		}
+		if (product.getItemStatus() != ProductItemStatus.ARCHIVED) {
+			throw new IllegalStateException("商品目前並非已封存，無法復用");
+		}
+
+		product.setItemStatus(ProductItemStatus.ACTIVE);
+		return ProductResponse.from(productRepository.save(product));
+	}
+
+	// ========================= 刪除 =========================
+
+	/**
+	 * DELETE /api/products/{id}：僅限「未審核＋無正式審核紀錄」。
+	 *
+	 * review_status=PENDING 且 submission_count=0 這個組合等價於「無審核紀錄」：
+	 * 狀態機只有PENDING-&gt;APPROVED/REJECTED（審核）、REJECTED-&gt;PENDING（resubmit，
+	 * 且必定submission_count&gt;=1）兩條路徑會離開/回到PENDING，因此「PENDING且
+	 * submission_count=0」只可能是「從未送審過」，不需要額外查review_records表
+	 * （企劃書三、品項管理「刪除品項」備註原文即此推導）。
+	 */
+	@Transactional
+	public void deleteProduct(Long id) {
+		Product product = findProductOrThrow(id);
+
+		boolean deletable = product.getReviewStatus() == ProductReviewStatus.PENDING
+				&& product.getSubmissionCount() != null
+				&& product.getSubmissionCount() == 0;
+		if (!deletable) {
+			throw new IllegalStateException("僅未審核且尚未送審過的商品可刪除");
+		}
+
+		productRepository.delete(product);
+	}
+
+	// ========================= 內部輔助方法 =========================
+
+	private Product findProductOrThrow(Long id) {
+		return productRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("商品不存在"));
+	}
+
+	/** username -&gt; app_users.id；沿用AuthService.getCurrentUser()同樣的重查邏輯與理由。 */
+	private Long resolveUserId(String username) {
+		AppUser user = appUserRepository.findByUsername(username)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+		return user.getId();
+	}
+
+	/**
+	 * market_price僅RESALE商品填寫，NEW商品不適用（十四-1）；
+	 * NEW商品若帶了market_price視為請求格式錯誤，而非靜默清空——
+	 * 靜默清空會讓前端誤以為送出的值有生效。
+	 */
+	private void validateMarketPriceOnlyForResale(ProductPricingType pricingType, BigDecimal marketPrice) {
+		if (pricingType == ProductPricingType.NEW && marketPrice != null) {
+			throw new IllegalArgumentException("市售價格僅適用於再販售(RESALE)商品");
+		}
+	}
+
+	/**
+	 * 已審核通過(APPROVED)商品的「選品核心資料」欄位群組比對：
+	 * 只要有任一欄位與目前值不同就整批拒絕（見updateProduct()方法註解）。
+	 */
+	private void assertCoreDataUnchanged(Product current, ProductUpdateRequest request) {
+		boolean unchanged =
+				Objects.equals(current.getProductTypeId(), request.getProductTypeId())
+				&& current.getPricingType() == request.getPricingType()
+				&& bigDecimalEquals(current.getCostPrice(), request.getCostPrice())
+				&& bigDecimalEquals(current.getSalePrice(), request.getSalePrice())
+				&& Objects.equals(current.getCampaignTags(), request.getCampaignTags())
+				&& Objects.equals(current.getMoq(), request.getMoq())
+				&& bigDecimalEquals(current.getSupplyStability(), request.getSupplyStability())
+				&& bigDecimalEquals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())
+				&& Objects.equals(current.getTargetCustomerDescription(), request.getTargetCustomerDescription())
+				&& bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate());
+
+		if (!unchanged) {
+			throw new IllegalStateException("商品已審核通過，選品核心資料禁止修改");
+		}
+	}
+
+	/** BigDecimal不能直接用equals比較（scale不同時會誤判不相等，例如25跟25.00），一律用compareTo。 */
+	private boolean bigDecimalEquals(BigDecimal a, BigDecimal b) {
+		if (a == null || b == null) {
+			return a == b;
+		}
+		return a.compareTo(b) == 0;
+	}
+}
