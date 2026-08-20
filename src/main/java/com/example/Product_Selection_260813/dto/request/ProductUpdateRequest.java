@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.dto.request;
 
 import java.math.BigDecimal;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 
 import jakarta.validation.constraints.NotBlank;
@@ -11,16 +12,16 @@ import jakarta.validation.constraints.NotNull;
  * PUT /api/products/{id} 的 Request Body。
  *
  * 採「整份覆蓋」語意（標準PUT），前端需送出商品目前完整的可編輯欄位，而非只送
- * 想改的欄位——與既有ProductRepository.search()等既有寫法一致，專案目前
- * 沒有Partial Update（PATCH）的既有慣例，這裡不額外引入。
+ * 想改的欄位——與既有ProductRepository.search()等既有寫法一致，專案目前 沒有Partial
+ * Update（PATCH）的既有慣例，這裡不額外引入。
  *
- * 欄位分組鎖定規則（四-2「欄位分組」）由ProductService.updateProduct()執行：
- *   - 一般基本資料（name/description/imageUrl/supplierName）：任何審核狀態下都可改
- *   - 選品核心資料（productTypeId/pricingType/costPrice/salePrice/campaignTags/
- *     moq/supplyStability/priceCompetitiveness/targetCustomerDescription/
- *     estimatedPurchaseRate）：review_status=APPROVED時，若送來的值與目前值不同，
- *     Service層會丟IllegalStateException(409)拒絕，而非靜默忽略——避免前端誤以為
- *     修改已生效但實際上後端沒有套用，造成資料落差。
+ * 欄位分組鎖定規則（四-2「欄位分組」）由ProductService.updateProduct()執行： -
+ * 一般基本資料（name/description/imageUrl/supplierName）：任何審核狀態下都可改 -
+ * 選品核心資料（productTypeId/pricingType/costPrice/salePrice/campaignTags/
+ * moq/supplyStability/priceCompetitiveness/targetCustomerDescription/
+ * estimatedPurchaseRate）：review_status=APPROVED時，若送來的值與目前值不同，
+ * Service層會丟IllegalStateException(409)拒絕，而非靜默忽略——避免前端誤以為
+ * 修改已生效但實際上後端沒有套用，造成資料落差。
  *
  * review_status／candidate_status／pricing_status／item_status／submission_count
  * 這五個狀態欄位刻意不開放由這支DTO傳入：狀態轉換一律透過對應的專屬端點
@@ -29,13 +30,13 @@ import jakarta.validation.constraints.NotNull;
  */
 public class ProductUpdateRequest {
 
-	@NotNull(message = "商品類型不可為空")
+	@NotNull(message = ValidationMessage.PRODUCT_TYPE_ID_NULL)
 	private Long productTypeId;
 
-	@NotNull(message = "商品分流不可為空")
+	@NotNull(message = ValidationMessage.PRODUCT_PRICING_TYPE_NULL)
 	private ProductPricingType pricingType;
 
-	@NotBlank(message = "商品名稱不可為空")
+	@NotBlank(message = ValidationMessage.PRODUCT_NAME_NULL)
 	private String name;
 
 	private String description;

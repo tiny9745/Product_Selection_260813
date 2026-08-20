@@ -1,5 +1,7 @@
 package com.example.Product_Selection_260813.dto.request;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
+
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -7,10 +9,10 @@ import jakarta.validation.constraints.NotBlank;
  */
 public class LoginRequest {
 
-	@NotBlank(message = "帳號不可為空")
+	@NotBlank(message = ValidationMessage.AUTH_USER_NAME)
 	private String username;
 
-	@NotBlank(message = "密碼不可為空")
+	@NotBlank(message = ValidationMessage.AUTH_PASSWORD)
 	private String password;
 
 	public String getUsername() {

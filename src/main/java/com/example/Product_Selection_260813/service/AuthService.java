@@ -88,7 +88,9 @@ public class AuthService {
 	@Transactional(readOnly = true)
 	public UserResponse getCurrentUser(String username) {
 		AppUser user = appUserRepository.findByUsername(username)
-				.orElseThrow(InvalidCredentialsException::new); // token有效但使用者已被刪除的邊界情況
+				// token有效但使用者已被刪除的邊界情況；不用「帳號或密碼錯誤」
+				// （那是登入流程的語意，這裡使用者根本沒有輸入帳密）
+				.orElseThrow(() -> new InvalidCredentialsException("登入狀態已失效，請重新登入"));
 
 		if (!Boolean.TRUE.equals(user.getEnabled())) {
 			throw new AccountDisabledException();

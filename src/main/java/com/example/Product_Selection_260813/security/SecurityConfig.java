@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -10,7 +11,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 
 /**
  * 對應 六-4 安全性設計（RBAC落實／JWT）與 十二-9 統一錯誤回應格式的認證/授權骨架。
@@ -25,9 +25,11 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 public class SecurityConfig {
 
 	private final JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final RestSecurityHandlers restSecurityHandlers;
 
-	public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+	public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, RestSecurityHandlers restSecurityHandlers) {
 		this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+		this.restSecurityHandlers = restSecurityHandlers;
 	}
 
 	@Bean
@@ -49,6 +51,12 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/api/auth/login").permitAll()
 				.anyRequest().authenticated()
+			)
+			// 未登入(401)／權限不足(403)一律回傳ApiResponse JSON格式，而非Spring Security預設行為，
+			// 見RestSecurityHandlers的說明。
+			.exceptionHandling(exceptions -> exceptions
+				.authenticationEntryPoint(restSecurityHandlers)
+				.accessDeniedHandler(restSecurityHandlers)
 			)
 			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

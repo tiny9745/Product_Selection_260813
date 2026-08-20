@@ -44,24 +44,19 @@ public class ProductController {
 	private ProductService productService;
 
 	/**
-	 * GET /api/products：品項管理主清單。
-	 * 支援關鍵字、審核狀態、品項狀態、候選狀態、商品類型篩選，以及分頁/排序參數。
+	 * GET /api/products：品項管理主清單。 支援關鍵字、審核狀態、品項狀態、候選狀態、商品類型篩選，以及分頁/排序參數。
 	 *
 	 * candidateStatus不帶時，ProductService.searchProducts()內部會預設帶入CANDIDATE
-	 * （見ProductService類別註解），Controller這裡刻意保留null傳遞的可能性，
-	 * 不在這層就寫死預設值，業務預設值只該有一個地方定義。
+	 * （見ProductService類別註解），Controller這裡刻意保留null傳遞的可能性， 不在這層就寫死預設值，業務預設值只該有一個地方定義。
 	 */
 	@GetMapping
-	public ResponseEntity<ApiResponse<Page<ProductResponse>>> search(
-			@RequestParam(required = false) String keyword,
+	public ResponseEntity<ApiResponse<Page<ProductResponse>>> search(@RequestParam(required = false) String keyword,
 			@RequestParam(required = false) ProductReviewStatus reviewStatus,
 			@RequestParam(required = false) ProductItemStatus itemStatus,
 			@RequestParam(required = false) ProductCandidateStatus candidateStatus,
-			@RequestParam(required = false) Long productTypeId,
-			@PageableDefault(size = 20) Pageable pageable
-	) {
-		Page<ProductResponse> result = productService.searchProducts(
-				reviewStatus, itemStatus, candidateStatus, productTypeId, keyword, pageable);
+			@RequestParam(required = false) Long productTypeId, @PageableDefault(size = 20) Pageable pageable) {
+		Page<ProductResponse> result = productService.searchProducts(reviewStatus, itemStatus, candidateStatus,
+				productTypeId, keyword, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
@@ -70,8 +65,7 @@ public class ProductController {
 	 */
 	@GetMapping("/ai-suggested")
 	public ResponseEntity<ApiResponse<Page<ProductResponse>>> searchAiSuggested(
-			@PageableDefault(size = 20) Pageable pageable
-	) {
+			@PageableDefault(size = 20) Pageable pageable) {
 		Page<ProductResponse> result = productService.searchAiSuggested(pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
@@ -92,10 +86,8 @@ public class ProductController {
 	 * POST /api/products：手動新增品項，直接為正式候選（CANDIDATE）。
 	 */
 	@PostMapping
-	public ResponseEntity<ApiResponse<ProductResponse>> createProduct(
-			@Valid @RequestBody ProductCreateRequest request,
-			@AuthenticationPrincipal String username
-	) {
+	public ResponseEntity<ApiResponse<ProductResponse>> createProduct(@Valid @RequestBody ProductCreateRequest request,
+			@AuthenticationPrincipal String username) {
 		ProductResponse result = productService.createProduct(request, username);
 		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
 	}
@@ -104,11 +96,8 @@ public class ProductController {
 	 * PUT /api/products/{id}：整份覆蓋更新，欄位鎖定規則見ProductService。
 	 */
 	@PutMapping("/{id}")
-	public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(
-			@PathVariable Long id,
-			@Valid @RequestBody ProductUpdateRequest request,
-			@AuthenticationPrincipal String username
-	) {
+	public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(@PathVariable Long id,
+			@Valid @RequestBody ProductUpdateRequest request, @AuthenticationPrincipal String username) {
 		ProductResponse result = productService.updateProduct(id, request, username);
 		return ResponseEntity.ok(ApiResponse.success("修改成功", result));
 	}

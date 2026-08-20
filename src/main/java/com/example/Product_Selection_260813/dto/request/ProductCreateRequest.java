@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.dto.request;
 
 import java.math.BigDecimal;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 
 import jakarta.validation.constraints.NotBlank;
@@ -10,8 +11,8 @@ import jakarta.validation.constraints.NotNull;
 /**
  * POST /api/products 的 Request Body。
  *
- * 對應企劃書「新增品項」：操作人員手動建立即代表已確認要送審，Service層會直接
- * 帶入 review_status=PENDING／item_status=ACTIVE／candidate_status=CANDIDATE，
+ * 對應企劃書「新增品項」：操作人員手動建立即代表已確認要送審，Service層會直接 帶入
+ * review_status=PENDING／item_status=ACTIVE／candidate_status=CANDIDATE，
  * 這三個狀態欄位不開放由這支DTO傳入（見QA4：手動新增不是AI_SUGGESTED，
  * 語意上這三個狀態欄位在「新增」當下本來就沒有選擇空間，不屬於Request的職責）。
  *
@@ -20,13 +21,13 @@ import jakarta.validation.constraints.NotNull;
  */
 public class ProductCreateRequest {
 
-	@NotNull(message = "商品類型不可為空")
+	@NotNull(message = ValidationMessage.PRODUCT_TYPE_ID_NULL)
 	private Long productTypeId;
 
-	@NotNull(message = "商品分流不可為空")
+	@NotNull(message = ValidationMessage.PRODUCT_PRICING_TYPE_NULL)
 	private ProductPricingType pricingType;
 
-	@NotBlank(message = "商品名稱不可為空")
+	@NotBlank(message = ValidationMessage.PRODUCT_NAME_NULL)
 	private String name;
 
 	private String description;

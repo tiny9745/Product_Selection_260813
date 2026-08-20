@@ -1,17 +1,21 @@
 package com.example.Product_Selection_260813.enums;
 
+/**
+ * 對應 app_users.role（ENUM('PURCHASER','MANAGER')）。
+ *
+ * 修正說明：原本這個enum在建構子裡帶了中文顯示名稱（"操作層"／"管理層"），
+ * 但資料表設計文件（四-1 app_users欄位備註）明確決議：
+ * 「role顯示名稱由前端自行轉譯」，後端不應該提供這個文案。
+ *
+ * 原因：
+ *   1. 一旦後端提供顯示名稱，就會出現兩種「操作層／管理層」的文案來源
+ *      （後端enum裡一份、前端或畫面文案裡通常也會需要一份），未來要改文案措辭
+ *      （例如「操作」改成「採購」）就得後端改一次、前端再對一次，多一個容易兜不起來的地方。
+ *   2. 後端回傳的角色字串本來就只用於「權限判斷」（Spring Security的hasRole）與
+ *      「前端顯示邏輯的依據」，不需要也不應該夾帶顯示文字，這是常見的職責分離原則：
+ *      後端給「代碼」，前端負責「代碼→文案」的對應，介面文字改版不需要動到後端。
+ */
 public enum UserRole {
-	PURCHASER("操作層"),//
-	MANAGER("管理層");
-
-	private final String userRole;
-
-	UserRole(String userRole) {
-		this.userRole = userRole;
-	}
-
-	public String getUserRole() {
-		return userRole;
-	}
-
+	PURCHASER,
+	MANAGER
 }
