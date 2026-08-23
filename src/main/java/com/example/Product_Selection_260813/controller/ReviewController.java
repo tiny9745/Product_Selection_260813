@@ -35,6 +35,13 @@ import jakarta.validation.Valid;
  * [僅管理]端點以@PreAuthorize("hasRole('MANAGER')")逐支落實RBAC（六-4決議），
  * 不僅靠前端選單隱藏；GET /api/products/{id}/reviews為[操作+管理]，
  * SecurityConfig預設規則「已登入即可」已涵蓋，刻意不加額外角色限制。
+ *
+ * @PathVariable一律明確指定名稱字串（如@PathVariable("productId")），不省略成
+ * @PathVariable Long productId：省略寫法需要javac的-parameters旗標才能在執行期
+ * 反射出參數名稱，該旗標是否生效依賴IDE/建置工具的編譯器設定同步（例如Eclipse
+ * Buildship對Gradle專案的compiler設定同步），實務上曾發生設定看似已套用、
+ * 執行期仍載入未帶該旗標之class檔的情況。明確指定名稱後，Spring完全不需要
+ * 依賴反射讀取參數名稱，從根源避免這個問題，不受編譯器旗標是否生效影響。
  */
 @RestController
 public class ReviewController {
@@ -58,7 +65,8 @@ public class ReviewController {
 	 */
 	@PreAuthorize("hasRole('MANAGER')")
 	@GetMapping("/api/reviews/{productId}")
-	public ResponseEntity<ApiResponse<ReviewDetailResponse>> getReviewDetail(@PathVariable Long productId) {
+	public ResponseEntity<ApiResponse<ReviewDetailResponse>> getReviewDetail(
+			@PathVariable("productId") Long productId) {
 		ReviewDetailResponse result = reviewService.getReviewDetail(productId);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
@@ -89,7 +97,8 @@ public class ReviewController {
 	 * GET /api/products/{id}/reviews：查詢單一商品歷次送審與審核結果。
 	 */
 	@GetMapping("/api/products/{id}/reviews")
-	public ResponseEntity<ApiResponse<List<ReviewRecordResponse>>> getProductReviewHistory(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<List<ReviewRecordResponse>>> getProductReviewHistory(
+			@PathVariable("id") Long id) {
 		List<ReviewRecordResponse> result = reviewService.getProductReviewHistory(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}

@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
 import com.example.Product_Selection_260813.entity.AppUser;
 
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;

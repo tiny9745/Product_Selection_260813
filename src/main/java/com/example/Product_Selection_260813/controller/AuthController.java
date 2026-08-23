@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -36,13 +37,29 @@ public class AuthController {
 	@Autowired
 	private AuthService authService;
 
+	/**
+	 * Cookie的Secure屬性，由設定檔決定而非寫死。
+	 *
+	 * Secure=true時瀏覽器只在HTTPS連線帶上此Cookie，正式環境必須為true；
+	 * 但本機開發若跑在http://localhost，寫死true會導致瀏覽器/Postman完全收不到
+	 * 也送不回這個Cookie，登入後呼叫其他API一律被擋401，開發階段等於測不到
+	 * 「瀏覽器自動帶Cookie」這條真實路徑（只能手動複製Cookie到Header繞過，
+	 * 與前端實際行為不同）。
+	 *
+	 * 預設值刻意設為true（安全預設）：設定檔漏掉這個key時走安全的那一邊，
+	 * 而不是不小心以不安全的設定跑在正式環境。開發環境需在application.properties
+	 * 明確寫cookie.secure=false，或以環境變數COOKIE_SECURE覆蓋。
+	 */
+	@Value("${cookie.secure:true}")
+	private boolean cookieSecure;
+
 	@PostMapping("/login")
 	public ResponseEntity<ApiResponse<UserResponse>> login(@Valid @RequestBody LoginRequest request,
 			HttpServletResponse response) {
 		LoginResult result = authService.login(request.getUsername(), request.getPassword());
 
 		ResponseCookie cookie = ResponseCookie.from(TOKEN_COOKIE_NAME, result.getToken()).httpOnly(true) // 防XSS竊取，六-4決議：不使用localStorage/sessionStorage
-				.secure(true) // 僅限HTTPS傳輸；本機開發若無HTTPS需另外調整
+				.secure(cookieSecure) // 僅限HTTPS傳輸，由cookie.secure設定控制（見欄位說明）
 				.sameSite("Strict") // 防CSRF：僅同站請求才會帶上此Cookie
 				.path("/").maxAge(result.getExpiresInSeconds()).build();
 		response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
@@ -63,7 +80,9 @@ public class AuthController {
 			HttpServletResponse response) {
 		authService.logout(username);
 
-		ResponseCookie expiredCookie = ResponseCookie.from(TOKEN_COOKIE_NAME, "").httpOnly(true).secure(true)
+		// 清除用的Cookie屬性必須與登入時設定的完全一致（含secure／sameSite／path），
+		// 否則瀏覽器會視為不同的Cookie而不會覆蓋掉原本那個，登出將失效。
+		ResponseCookie expiredCookie = ResponseCookie.from(TOKEN_COOKIE_NAME, "").httpOnly(true).secure(cookieSecure)
 				.sameSite("Strict").path("/").maxAge(0) // maxAge=0 讓瀏覽器立即刪除這個Cookie
 				.build();
 		response.addHeader(HttpHeaders.SET_COOKIE, expiredCookie.toString());

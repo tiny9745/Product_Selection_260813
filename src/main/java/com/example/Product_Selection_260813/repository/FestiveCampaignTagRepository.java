@@ -14,4 +14,9 @@ public interface FestiveCampaignTagRepository extends JpaRepository<FestiveCampa
 	// Festival Boost比對批次查詢：一次取回多個候選檔期(PREPARING/ACTIVE)底下的所有標籤分級，
 	// 避免ScoringService對每個候選檔期各自查一次（見ScoringService.buildMatchedCampaignSnapshot()）
 	List<FestiveCampaignTag> findByCampaignIdIn(List<Long> campaignIds);
+
+	// PUT /api/settings/festive-campaigns/{id} 整份覆蓋標籤清單：
+	// 先刪除該檔期底下所有既有標籤，再依Request重新寫入，語意與
+	// ProductUpdateRequest「整份覆蓋」一致，不做差異比對式的部分更新。
+	void deleteByCampaignId(Long campaignId);
 }

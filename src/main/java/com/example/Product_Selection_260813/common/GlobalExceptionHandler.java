@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.example.Product_Selection_260813.common.exception.AccountDisabledException;
 import com.example.Product_Selection_260813.common.exception.InvalidCredentialsException;
+import com.example.Product_Selection_260813.common.exception.SystemConfigurationException;
 
 /**
  * 全域例外處理。
@@ -70,6 +71,17 @@ public class GlobalExceptionHandler {
 		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.failure("伺服器發生錯誤，請稍後再試"));
 	}
 
+
+	// ========== 系統設定資料異常（伺服器端設定不完整/不一致）==========
+	// 500而非409：使用者端不管怎麼重試都不會成功，必須由維運人員修正DB設定，
+	// 語意上屬於伺服器錯誤而非業務狀態衝突（詳見SystemConfigurationException類別說明）。
+	// 訊息含具體設定內容（例如「目前生效模式指向不存在的評估模式：99」），
+	// 屬於程式自行寫死、可控的文字，不含SQL或內部結構細節，可安全回傳協助排查。
+	@ExceptionHandler(SystemConfigurationException.class)
+	public ResponseEntity<ApiResponse<Void>> handleSystemConfiguration(SystemConfigurationException ex) {
+		log.error("系統設定資料異常", ex);
+		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.failure(ex.getMessage()));
+	}
 
 	// ========== 不合法的請求(資料目前狀態不允許) ==========
 	@ExceptionHandler(IllegalStateException.class)

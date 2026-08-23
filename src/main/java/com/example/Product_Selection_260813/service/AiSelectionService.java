@@ -6,18 +6,28 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.dto.response.AiAnalysisResponse;
 import com.example.Product_Selection_260813.entity.AiAnalysis;
+import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
+import com.example.Product_Selection_260813.repository.ProductRepository;
 
 /**
- * 對應企劃書十二-13分層決議：本類別目前僅實作ReviewService所需的AI摘要讀取
- * 與快照組裝，<b>不包含</b>LLM API串接／AI主動選品批次生成邏輯（GET/POST
- * /api/products/{id}/ai-analysis系列、POST /api/products/ai-suggested/batch-generate），
- * 那部分屬於另一項獨立任務（見企劃書十四-2 LLM廠商與預算決議），本類別對
- * ai_analyses表僅做唯讀。
+ * 對應企劃書十二-13分層決議：本類別實作ReviewService所需的AI摘要讀取／快照組裝，
+ * 以及AiSelectionController掛的兩支端點（GET /api/products/{id}/ai-analysis、
+ * POST /api/products/{id}/ai-analysis/generate）。
  *
- * 之後若要補上AiSelectionController／LLM串接邏輯，直接在本類別擴充方法即可，
- * ReviewService已經是透過本類別取得資料、不直接注入Repository，符合分層決議。
+ * <b>不包含</b>「AI主動選品」批次生成邏輯（POST /api/products/ai-suggested/batch-generate，
+ * 屬於三、品項管理範圍，僅供Daily Cron排程觸發，非本Controller/Service職責）。
+ *
+ * <b>LLM串接現況（TODO）：</b>generateAndReturnResponse()透過{@link LlmAnalysisService}
+ * 介面取得分析結果，目前唯一實作是{@link MockLlmAnalysisService}——回傳模擬資料，
+ * 不呼叫任何外部API、不產生費用。企劃書已定案真實廠商為GPT-5.6 Luna，但實際串接
+ * （API Key管理、HTTP呼叫、prompt設計、失敗重試）與月用量保護機制（依賴
+ * system_settings表，屬於SettingsService尚未建立的範圍）都還沒有實作，
+ * 待這兩項獨立任務完成後，才需要在本類別／新增的真實LLM實作類別上補上對應邏輯，
+ * 呼叫端（本類別）與Controller都不需要因此更動。
  */
 @Service
 public class AiSelectionService {
@@ -25,10 +35,67 @@ public class AiSelectionService {
 	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
 
+	@Autowired
+	private ProductRepository productRepository;
+
+	@Autowired
+	private ScoringService scoringService;
+
+	@Autowired
+	private LlmAnalysisService llmAnalysisService;
+
 	/** 「目前有效版本」規則：該商品generated_at最新一筆（見AiAnalysisRepository註解），唯讀。 */
 	@Transactional(readOnly = true)
 	public Optional<AiAnalysis> getLatestAnalysis(Long productId) {
-		return aiAnalysisRepository.findFirstByProductIdOrderByGeneratedAtDesc(productId);
+		return aiAnalysisRepository.findFirstByProductIdOrderByGeneratedAtDescIdDesc(productId);
+	}
+
+	/**
+	 * GET /api/products/{id}/ai-analysis：純讀取，取得已快取的AI摘要／推薦原因／
+	 * 風險提示；無快取則回傳空值（全部欄位為null的空物件，不拋錯、不回404——
+	 * 「還沒有AI分析」是正常狀態）。本方法刻意不呼叫LlmAnalysisService，
+	 * 避免違反REST冪等性、避免重複呼叫產生額外API成本（見企劃書備註）。
+	 */
+	@Transactional(readOnly = true)
+	public AiAnalysisResponse getAiAnalysisResponse(Long productId) {
+		if (!productRepository.existsById(productId)) {
+			throw new IllegalArgumentException("商品不存在");
+		}
+		return getLatestAnalysis(productId).map(this::toResponse).orElseGet(AiAnalysisResponse::new);
+	}
+
+	/**
+	 * POST /api/products/{id}/ai-analysis/generate：觸發生成AI分析並寫入快取。
+	 * 目前透過{@link LlmAnalysisService}的模擬實作產生資料，見類別註解TODO。
+	 */
+	@Transactional
+	public AiAnalysisResponse generateAndReturnResponse(Long productId) {
+		Product product = productRepository.findById(productId)
+				.orElseThrow(() -> new IllegalArgumentException("商品不存在"));
+		Optional<ProductEvaluation> evaluationOpt = scoringService.getCurrentEvaluation(productId);
+
+		LlmAnalysisResult result = llmAnalysisService.generate(product, evaluationOpt.orElse(null));
+
+		AiAnalysis analysis = new AiAnalysis();
+		analysis.setProductId(productId);
+		analysis.setEvaluationId(evaluationOpt.map(ProductEvaluation::getId).orElse(null));
+		analysis.setSummary(result.getSummary());
+		analysis.setRecommendation(result.getRecommendation());
+		analysis.setReasons(result.getReasons());
+		analysis.setModelName(result.getModelName());
+
+		AiAnalysis saved = aiAnalysisRepository.save(analysis);
+		return toResponse(saved);
+	}
+
+	private AiAnalysisResponse toResponse(AiAnalysis analysis) {
+		AiAnalysisResponse response = new AiAnalysisResponse();
+		response.setSummary(analysis.getSummary());
+		response.setRecommendation(analysis.getRecommendation());
+		response.setReasons(analysis.getReasons());
+		response.setModelName(analysis.getModelName());
+		response.setGeneratedAt(analysis.getGeneratedAt());
+		return response;
 	}
 
 	/**

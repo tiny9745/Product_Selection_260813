@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 
 import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -46,6 +48,14 @@ public class TrendSignal {
     private LocalDateTime collectedAt;
     
     @Column(name = "created_at", nullable = false, updatable = false)
+    // 補上@CreationTimestamp：這個專案裡其餘9個Entity（AiAnalysis／AppUser／
+    // AudienceProfile／EvaluationMode／FestiveCampaign／FestiveCampaignTag／
+    // Product／ProductType／ReviewRecord）的created_at欄位都用這個註解自動填值，
+    // 唯獨這裡原本漏掉。DB雖有DEFAULT CURRENT_TIMESTAMP，但那只在略過該欄位、
+    // 不明確帶值時才會生效；Hibernate存檔時若Java欄位是null，會明確帶入NULL，
+    // 直接違反NOT NULL約束（見TrendService.syncTrend()是本專案第一個透過JPA
+    // 建立TrendSignal的呼叫路徑，因此才讓這個既有缺口第一次被觸發）。
+    @CreationTimestamp
     private LocalDateTime createdAt;
 
 	public Long getId() {

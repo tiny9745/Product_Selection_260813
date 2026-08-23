@@ -8,6 +8,9 @@ package com.example.Product_Selection_260813.common.exception;
  * 因此無論何種原因，一律回傳同一句「帳號或密碼錯誤」。
  */
 public class InvalidCredentialsException extends RuntimeException {
+
+    private static final long serialVersionUID = 1L;
+
     public InvalidCredentialsException() {
         super("帳號或密碼錯誤");
     }

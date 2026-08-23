@@ -8,6 +8,9 @@ package com.example.Product_Selection_260813.common.exception;
  * 不構成User Enumeration風險，因此可以給出比「帳號或密碼錯誤」更明確的提示。
  */
 public class AccountDisabledException extends RuntimeException {
+
+    private static final long serialVersionUID = 1L;
+
     public AccountDisabledException() {
         super("帳號已被停用，請聯繫管理員");
     }

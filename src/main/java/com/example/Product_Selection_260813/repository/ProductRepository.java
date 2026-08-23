@@ -1,5 +1,7 @@
 package com.example.Product_Selection_260813.repository;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -57,6 +59,33 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 選品轉換率分子：目前review_status=APPROVED的不重複商品數。
      */
     long countByReviewStatus(ProductReviewStatus reviewStatus);
+
+    /**
+     * AI推薦Top10（GET /api/dashboard/recommendations）：
+     * 依企劃書QA4「只有CANDIDATE狀態商品才會出現在...推薦清單裡」，
+     * 只在review_status=PENDING（不代表系統自動核准，仍待審核）、
+     * candidate_status=CANDIDATE、item_status=ACTIVE範圍內，
+     * 依product_evaluations.final_score排序取前N筆。
+     *
+     * 用implicit join（FROM Product p, ProductEvaluation pe）而非在Product entity
+     * 上額外建立JPA關聯：這個專案的既定慣例是所有跨表關聯都用plain Long id欄位
+     * 手動比對，不引入JPA關聯物件圖（見FestiveCampaignTag.java等處的相同慣例）。
+     * JPQL的FROM子句可直接以entity名稱參照ProductEvaluation，不需要在本檔案
+     * import該類別（JPQL依persistence unit註冊的entity名稱解析，非Java型別引用）。
+     */
+    @Query("""
+            SELECT p FROM Product p, ProductEvaluation pe
+             WHERE p.id = pe.productId
+               AND p.reviewStatus = :reviewStatus
+               AND p.candidateStatus = :candidateStatus
+               AND p.itemStatus = :itemStatus
+             ORDER BY pe.finalScore DESC
+            """)
+    List<Product> findTopRecommendations(
+            @Param("reviewStatus") ProductReviewStatus reviewStatus,
+            @Param("candidateStatus") ProductCandidateStatus candidateStatus,
+            @Param("itemStatus") ProductItemStatus itemStatus,
+            Pageable pageable);
 
     /**
      * 商品類型「條件式刪除」檢查（見團隊決議：已封存(ARCHIVED)商品若仍有引用，

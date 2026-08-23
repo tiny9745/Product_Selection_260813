@@ -18,14 +18,19 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.example.Product_Selection_260813.dto.response.EvaluationResponse;
+import com.example.Product_Selection_260813.dto.response.FestivalBoostResponse;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
+import com.example.Product_Selection_260813.entity.ReviewRecord;
+import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
+import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
@@ -35,12 +40,16 @@ import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
+import com.example.Product_Selection_260813.repository.ProductRepository;
+import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 
 /**
  * 對應企劃書十二-13分層決議：本類別目前僅實作「快照組裝所需的讀取」與
  * 「Festival Boost可解釋性明細計算」，範圍對應GET /api/reviews/{productId}與
- * POST /api/reviews當下所需的資料，<b>不包含</b>六大分項Base Score的完整評分重算引擎
+ * POST /api/reviews當下所需的資料，以及POST /api/products/{id}/trend/sync
+ * 觸發後對product_evaluations.trend_score的局部更新（見updateTrendScoreFromLatestSignal()）。
+ * <b>不包含</b>六大分項Base Score的完整評分重算引擎
  * （六大分項如何依商品商業條件／核心客群／歷史銷售等原始資料算出business_score等分數，
  * 屬於另一項獨立任務，商品評估結果目前假設由其他流程寫入product_evaluations表，
  * 本類別對該表僅做唯讀）。
@@ -80,6 +89,12 @@ public class ScoringService {
 
 	@Autowired
 	private TrendSignalRepository trendSignalRepository;
+
+	@Autowired
+	private ProductRepository productRepository;
+
+	@Autowired
+	private ReviewRecordRepository reviewRecordRepository;
 
 	/** 商品目前的即時評估結果（product_evaluations，唯讀）。可能為空——見類別註解。 */
 	@Transactional(readOnly = true)
@@ -136,9 +151,45 @@ public class ScoringService {
 			snapshot.setTrendScore(signal.getTrendScore());
 			snapshot.setPopularityScore(signal.getPopularityScore());
 			snapshot.setTrendDirection(signal.getTrendDirection() != null ? signal.getTrendDirection().name() : null);
-			snapshot.setCollectedAt(signal.getCollectedAt());
+			snapshot.setCollectedAt(signal.getCollectedAt() != null ? signal.getCollectedAt().toString() : null);
 			return snapshot;
 		}).orElse(null);
+	}
+
+	/**
+	 * 供TrendService.syncTrend()呼叫（十二-13：TrendService → ScoringService單向依賴，
+	 * 觸發「同步趨勢資料後」的重算）。
+	 *
+	 * <b>TODO（評分重算引擎尚未實作）：</b>這裡只更新product_evaluations.trend_score
+	 * 這一個欄位，計算方式是trend_signals最新一筆的trend_score／popularity_score取
+	 * 平均值——這是暫定的簡化算法，不是團隊定案的六大分項「趨勢」類別公式（該公式
+	 * 從未在企劃書中定義過，屬於另一項獨立任務）。<b>刻意不觸碰total_score／
+	 * final_score</b>：這兩個欄位是六大分項加權後的結果，只更新其中一項分數卻
+	 * 沒有能力重新加權其餘五項，若順便更新total_score/final_score，等於用不完整
+	 * 的資料產出一個「看起來是正式重算結果」的分數，比維持舊值不變更容易誤導使用者。
+	 * 待完整評分重算引擎完成後，這個方法應該被該引擎的正式重算流程取代或呼叫。
+	 *
+	 * 商品尚未有product_evaluations紀錄時（evaluation_mode_id要選哪個模式，屬於
+	 * 評分重算引擎的職責，此處不臆測預設值），本次同步僅完成trend_signals寫入，
+	 * 不建立不完整的評估紀錄，直接略過。
+	 */
+	@Transactional
+	public void updateTrendScoreFromLatestSignal(Long productId) {
+		Optional<TrendSignal> latestSignal = trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(productId);
+		if (latestSignal.isEmpty()) {
+			return;
+		}
+
+		productEvaluationRepository.findByProductId(productId).ifPresent(evaluation -> {
+			evaluation.setTrendScore(calculatePlaceholderTrendScore(latestSignal.get()));
+			productEvaluationRepository.save(evaluation);
+		});
+	}
+
+	private BigDecimal calculatePlaceholderTrendScore(TrendSignal signal) {
+		BigDecimal trendScore = signal.getTrendScore() != null ? signal.getTrendScore() : BigDecimal.ZERO;
+		BigDecimal popularityScore = signal.getPopularityScore() != null ? signal.getPopularityScore() : BigDecimal.ZERO;
+		return trendScore.add(popularityScore).divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
 	}
 
 	/**
@@ -260,6 +311,117 @@ public class ScoringService {
 			factor = BigDecimal.ONE;
 		}
 		return factor.setScale(2, RoundingMode.HALF_UP);
+	}
+
+	/**
+	 * GET /api/products/{id}/evaluation：商品目前評估模式、固定權重、各項分數、
+	 * Base/Final Score。
+	 *
+	 * <b>雙軌讀取邏輯</b>（product_evaluations.final_score欄位DB註解明訂的全域規則，
+	 * 非本端點自訂）：review_status=APPROVED時讀取review_records最新一筆的
+	 * Snapshot凍結值；其餘狀態讀取product_evaluations即時值。
+	 */
+	@Transactional(readOnly = true)
+	public EvaluationResponse getEvaluation(Long productId) {
+		Product product = findProductOrThrow(productId);
+
+		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
+			Optional<ReviewRecord> latestRecord = reviewRecordRepository
+					.findFirstByProductIdOrderByReviewedAtDesc(productId);
+			if (latestRecord.isPresent()) {
+				return buildEvaluationResponseFromSnapshot(latestRecord.get());
+			}
+			// 防禦性：理論上APPROVED商品必然有審核紀錄（審核當下才會轉為APPROVED），
+			// 若資料異常導致真的找不到，退回即時值而非讓畫面直接掛掉。
+		}
+		return buildEvaluationResponseFromLive(productId);
+	}
+
+	private EvaluationResponse buildEvaluationResponseFromSnapshot(ReviewRecord record) {
+		EvaluationResponse response = new EvaluationResponse();
+		response.setDataSource("SNAPSHOT");
+		response.setEvaluationModeId(record.getEvaluationModeId());
+		response.setEvaluationModeName(record.getEvaluationModeName());
+		response.setEvaluationModeVersion(record.getEvaluationModeVersion());
+		response.setWeights(record.getWeightSnapshot());
+		response.setBusinessScore(record.getBusinessScore());
+		response.setAudienceScore(record.getAudienceScore());
+		response.setHistoricalScore(record.getHistoricalScore());
+		response.setPurchaseScore(record.getPurchaseScore());
+		response.setTrendScore(record.getTrendScore());
+		response.setForecastScore(record.getForecastScore());
+		response.setTotalScore(record.getTotalScore());
+		response.setDataCompleteness(record.getDataCompleteness());
+		response.setFestivalBoost(record.getFestivalBoostSnapshot());
+		response.setFinalScore(record.getFinalScoreSnapshot());
+		return response;
+	}
+
+	private EvaluationResponse buildEvaluationResponseFromLive(Long productId) {
+		EvaluationResponse response = new EvaluationResponse();
+		response.setDataSource("LIVE");
+
+		Optional<ProductEvaluation> evaluationOpt = getCurrentEvaluation(productId);
+		Long evaluationModeId = evaluationOpt.map(ProductEvaluation::getEvaluationModeId).orElse(null);
+
+		getEvaluationMode(evaluationModeId).ifPresent(mode -> {
+			response.setEvaluationModeId(mode.getId());
+			response.setEvaluationModeName(mode.getModeName());
+			response.setEvaluationModeVersion(mode.getVersion());
+		});
+		response.setWeights(buildWeightSnapshot(evaluationModeId));
+
+		evaluationOpt.ifPresent(evaluation -> {
+			response.setBusinessScore(evaluation.getBusinessScore());
+			response.setAudienceScore(evaluation.getAudienceScore());
+			response.setHistoricalScore(evaluation.getHistoricalScore());
+			response.setPurchaseScore(evaluation.getPurchaseScore());
+			response.setTrendScore(evaluation.getTrendScore());
+			response.setForecastScore(evaluation.getForecastScore());
+			response.setTotalScore(evaluation.getTotalScore());
+			response.setDataCompleteness(evaluation.getDataCompleteness());
+			response.setFestivalBoost(evaluation.getFestivalBoost());
+			response.setFinalScore(evaluation.getFinalScore());
+		});
+		return response;
+	}
+
+	/**
+	 * GET /api/products/{id}/festival-boost：該商品目前命中的檔期、Match Weight、
+	 * Urgency Factor、Festival Boost、Final Score等可解釋性明細。
+	 *
+	 * 雙軌讀取邏輯與getEvaluation()相同（同一條DB欄位註解規則涵蓋的範圍）。
+	 */
+	@Transactional(readOnly = true)
+	public FestivalBoostResponse getFestivalBoostDetail(Long productId) {
+		Product product = findProductOrThrow(productId);
+
+		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
+			Optional<ReviewRecord> latestRecord = reviewRecordRepository
+					.findFirstByProductIdOrderByReviewedAtDesc(productId);
+			if (latestRecord.isPresent()) {
+				ReviewRecord record = latestRecord.get();
+				FestivalBoostResponse response = new FestivalBoostResponse();
+				response.setDataSource("SNAPSHOT");
+				response.setMatchedCampaign(record.getMatchedCampaignSnapshot());
+				response.setFestivalBoost(record.getFestivalBoostSnapshot());
+				response.setFinalScore(record.getFinalScoreSnapshot());
+				return response;
+			}
+		}
+
+		FestivalBoostResponse response = new FestivalBoostResponse();
+		response.setDataSource("LIVE");
+		response.setMatchedCampaign(buildMatchedCampaignSnapshot(product));
+		getCurrentEvaluation(productId).ifPresent(evaluation -> {
+			response.setFestivalBoost(evaluation.getFestivalBoost());
+			response.setFinalScore(evaluation.getFinalScore());
+		});
+		return response;
+	}
+
+	private Product findProductOrThrow(Long productId) {
+		return productRepository.findById(productId).orElseThrow(() -> new IllegalArgumentException("商品不存在"));
 	}
 
 	private Set<String> splitTags(String tags) {

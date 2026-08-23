@@ -35,6 +35,11 @@ import jakarta.validation.Valid;
  * Controller只負責：解析Request、轉呼叫ProductService、決定HTTP狀態碼／回應格式，
  * 不含任何業務規則判斷——所有規則（欄位鎖定、狀態機、資料完整度門檻等）都在
  * ProductService，這裡維持跟AuthController一致的薄Controller風格。
+ *
+ * @PathVariable／@RequestParam一律明確指定名稱字串，不省略成@PathVariable Long id
+ * 這種寫法（原因見ReviewController類別註解：省略寫法依賴javac的-parameters旗標，
+ * 該旗標是否生效受IDE/建置工具編譯器設定同步影響，實務上曾發生設定看似已套用、
+ * 執行期仍未生效的情況；明確指定名稱後完全不受此影響）。
  */
 @RestController
 @RequestMapping("/api/products")
@@ -50,11 +55,13 @@ public class ProductController {
 	 * （見ProductService類別註解），Controller這裡刻意保留null傳遞的可能性， 不在這層就寫死預設值，業務預設值只該有一個地方定義。
 	 */
 	@GetMapping
-	public ResponseEntity<ApiResponse<Page<ProductResponse>>> search(@RequestParam(required = false) String keyword,
-			@RequestParam(required = false) ProductReviewStatus reviewStatus,
-			@RequestParam(required = false) ProductItemStatus itemStatus,
-			@RequestParam(required = false) ProductCandidateStatus candidateStatus,
-			@RequestParam(required = false) Long productTypeId, @PageableDefault(size = 20) Pageable pageable) {
+	public ResponseEntity<ApiResponse<Page<ProductResponse>>> search(
+			@RequestParam(value = "keyword", required = false) String keyword,
+			@RequestParam(value = "reviewStatus", required = false) ProductReviewStatus reviewStatus,
+			@RequestParam(value = "itemStatus", required = false) ProductItemStatus itemStatus,
+			@RequestParam(value = "candidateStatus", required = false) ProductCandidateStatus candidateStatus,
+			@RequestParam(value = "productTypeId", required = false) Long productTypeId,
+			@PageableDefault(size = 20) Pageable pageable) {
 		Page<ProductResponse> result = productService.searchProducts(reviewStatus, itemStatus, candidateStatus,
 				productTypeId, keyword, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
@@ -77,7 +84,7 @@ public class ProductController {
 	 * 避免ProductController反過來依賴其他領域的Service造成耦合。
 	 */
 	@GetMapping("/{id}")
-	public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<ProductResponse>> getProduct(@PathVariable("id") Long id) {
 		ProductResponse result = productService.getProduct(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
@@ -96,7 +103,7 @@ public class ProductController {
 	 * PUT /api/products/{id}：整份覆蓋更新，欄位鎖定規則見ProductService。
 	 */
 	@PutMapping("/{id}")
-	public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(@PathVariable Long id,
+	public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(@PathVariable("id") Long id,
 			@Valid @RequestBody ProductUpdateRequest request, @AuthenticationPrincipal String username) {
 		ProductResponse result = productService.updateProduct(id, request, username);
 		return ResponseEntity.ok(ApiResponse.success("修改成功", result));
@@ -106,7 +113,7 @@ public class ProductController {
 	 * DELETE /api/products/{id}：僅限未審核且尚未送審過的商品。
 	 */
 	@DeleteMapping("/{id}")
-	public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable("id") Long id) {
 		productService.deleteProduct(id);
 		return ResponseEntity.ok(ApiResponse.success("刪除成功"));
 	}
@@ -115,7 +122,7 @@ public class ProductController {
 	 * POST /api/products/{id}/resubmit：REJECTED -&gt; PENDING，submission_count+1。
 	 */
 	@PostMapping("/{id}/resubmit")
-	public ResponseEntity<ApiResponse<ProductResponse>> resubmit(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<ProductResponse>> resubmit(@PathVariable("id") Long id) {
 		ProductResponse result = productService.resubmit(id);
 		return ResponseEntity.ok(ApiResponse.success("已重新送審", result));
 	}
@@ -124,7 +131,7 @@ public class ProductController {
 	 * POST /api/products/{id}/archive：(APPROVED或REJECTED) 且 ACTIVE -&gt; ARCHIVED。
 	 */
 	@PostMapping("/{id}/archive")
-	public ResponseEntity<ApiResponse<ProductResponse>> archive(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<ProductResponse>> archive(@PathVariable("id") Long id) {
 		ProductResponse result = productService.archive(id);
 		return ResponseEntity.ok(ApiResponse.success("已封存", result));
 	}
@@ -133,7 +140,7 @@ public class ProductController {
 	 * POST /api/products/{id}/restore：APPROVED 且 ARCHIVED -&gt; ACTIVE。
 	 */
 	@PostMapping("/{id}/restore")
-	public ResponseEntity<ApiResponse<ProductResponse>> restore(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<ProductResponse>> restore(@PathVariable("id") Long id) {
 		ProductResponse result = productService.restore(id);
 		return ResponseEntity.ok(ApiResponse.success("已復用", result));
 	}
@@ -142,7 +149,7 @@ public class ProductController {
 	 * POST /api/products/{id}/promote-to-candidate：AI_SUGGESTED -&gt; CANDIDATE。
 	 */
 	@PostMapping("/{id}/promote-to-candidate")
-	public ResponseEntity<ApiResponse<ProductResponse>> promoteToCandidate(@PathVariable Long id) {
+	public ResponseEntity<ApiResponse<ProductResponse>> promoteToCandidate(@PathVariable("id") Long id) {
 		ProductResponse result = productService.promoteToCandidate(id);
 		return ResponseEntity.ok(ApiResponse.success("已加入候選", result));
 	}
