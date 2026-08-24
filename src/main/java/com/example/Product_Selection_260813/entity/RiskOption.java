@@ -2,6 +2,8 @@ package com.example.Product_Selection_260813.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -37,6 +39,11 @@ public class RiskOption {
     private Long createdBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
+    // 補上@CreationTimestamp：DB雖有DEFAULT CURRENT_TIMESTAMP，但那只在「略過該欄位、
+    // 不明確帶值」時才生效；Hibernate存檔時若Java欄位是null會明確帶入NULL，
+    // 直接違反NOT NULL約束。POST /api/settings/risk-options是本專案第一個透過JPA
+    // 建立RiskOption的路徑，因此才讓這個既有缺口被觸發（與TrendSignal.createdAt同類問題）。
+    @CreationTimestamp
     private LocalDateTime createdAt;
 
     public Long getId() {

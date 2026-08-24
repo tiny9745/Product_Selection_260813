@@ -1,6 +1,5 @@
 package com.example.Product_Selection_260813.service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -159,7 +158,9 @@ public class SettingsService {
 				.orElseThrow(() -> new SystemConfigurationException("尚未設定目前生效模式，請先透過資料庫初始化此設定"));
 		setting.setSettingValue(String.valueOf(targetMode.getId()));
 		setting.setUpdatedBy(userId);
-		setting.setUpdatedAt(LocalDateTime.now());
+		// updatedAt不在此手動賦值：SystemSetting已標註@UpdateTimestamp，由Hibernate
+		// 自動填入，與其餘Entity的處理方式一致。兩套機制並存反而容易讓後續維護者
+		// 誤以為必須手動維護這個欄位。
 		systemSettingRepository.save(setting);
 
 		return EvaluationModeResponse.from(targetMode);
