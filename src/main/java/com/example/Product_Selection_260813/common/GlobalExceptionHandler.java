@@ -9,6 +9,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import com.example.Product_Selection_260813.common.exception.AccountDisabledException;
 import com.example.Product_Selection_260813.common.exception.InvalidCredentialsException;
@@ -55,6 +56,14 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(AccountDisabledException.class)
 	public ResponseEntity<ApiResponse<Void>> handleAccountDisabled(AccountDisabledException ex) {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.failure(ex.getMessage()));
+	}
+
+	// ========== 上傳檔案超過大小上限（spring.servlet.multipart.max-file-size）==========
+	// Spring在進到我們自己的Controller/Service之前就先擋下，屬於請求格式問題，回400
+	// 而非500——這是使用者端可以自行修正的錯誤（換一個較小的檔案），不是伺服器異常。
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.failure("檔案大小超過上限，請上傳較小的圖片"));
 	}
 
 	// ========== 業務邏輯驗證失敗 ==========

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
@@ -152,5 +153,20 @@ public class ProductController {
 	public ResponseEntity<ApiResponse<ProductResponse>> promoteToCandidate(@PathVariable("id") Long id) {
 		ProductResponse result = productService.promoteToCandidate(id);
 		return ResponseEntity.ok(ApiResponse.success("已加入候選", result));
+	}
+
+	/**
+	 * POST /api/products/{id}/image：上傳／替換商品圖片。[操作+管理]，
+	 * 與其他「一般基本資料」欄位（name／description／supplierName）的修改權限一致，
+	 * 不限定僅管理。
+	 *
+	 * imageUrl為選填欄位（見ProductCreateRequest/ProductUpdateRequest），
+	 * 不上傳圖片不影響商品的建立、送審、通過審核等任何流程。
+	 */
+	@PostMapping("/{id}/image")
+	public ResponseEntity<ApiResponse<ProductResponse>> uploadImage(@PathVariable("id") Long id,
+			@RequestParam("file") MultipartFile file) {
+		ProductResponse result = productService.uploadImage(id, file);
+		return ResponseEntity.ok(ApiResponse.success("圖片上傳成功", result));
 	}
 }

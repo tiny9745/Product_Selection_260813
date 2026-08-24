@@ -1,13 +1,27 @@
 package com.example.Product_Selection_260813.service;
 
+import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
+import javax.imageio.ImageIO;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
@@ -47,6 +61,11 @@ import com.example.Product_Selection_260813.repository.ProductTypeRepository;
  */
 @Service
 public class ProductService {
+
+	private static final Logger log = LoggerFactory.getLogger(ProductService.class);
+
+	@Value("${app.upload.dir}")
+	private String uploadDir;
 
 	@Autowired
 	private ProductRepository productRepository;
@@ -324,6 +343,99 @@ public class ProductService {
 		}
 
 		productRepository.delete(product);
+	}
+
+	/**
+	 * POST /api/products/{id}/image：上傳／替換商品圖片。
+	 *
+	 * <b>驗證順序</b>：副檔名白名單（快速擋掉明顯不合法的情況）→ 用ImageIO實際解碼
+	 * 內容確認真的是合法圖片（客戶端宣告的Content-Type可以造假，不能只信任它，
+	 * 見安全性與實作複雜度討論）。檔案大小上限由Spring Boot內建的
+	 * spring.servlet.multipart.max-file-size設定擋在更早的階段，不在此處重複檢查。
+	 *
+	 * <b>檔名一律由伺服器端產生</b>（UUID+驗證過的副檔名），不採用使用者上傳時附帶的
+	 * 原始檔名——避免路徑穿越或覆蓋掉其他檔案的風險。
+	 *
+	 * <b>寫入順序</b>：先把新檔案存到硬碟 → 更新Product.imageUrl指向新檔 → 最後才
+	 * 嘗試刪除舊檔案。任何一步中途失敗，最差情況只是多一個沒被清掉的孤兒檔案
+	 * （無害，可事後清理），不會出現「資料庫指到一個已經不存在的檔案」這種
+	 * 更糟的狀態——這是刻意的順序選擇，不是隨意寫的。
+	 *
+	 * 刪除舊檔案採best-effort：找不到檔案或刪除失敗都只記錄，不影響本次上傳的
+	 * 成功結果（新圖片已經生效才是使用者在意的事，舊檔案清理是次要的內務整理）。
+	 */
+	@Transactional
+	public ProductResponse uploadImage(Long id, MultipartFile file) {
+		if (file == null || file.isEmpty()) {
+			throw new IllegalArgumentException("請選擇要上傳的圖片檔案");
+		}
+
+		String extension = extractValidatedExtension(file);
+		validateActualImageContent(file);
+
+		Product product = findProductOrThrow(id);
+		String oldImageUrl = product.getImageUrl();
+
+		String newFilename = UUID.randomUUID() + "." + extension;
+		Path targetPath = resolveUploadDir().resolve(newFilename);
+		try {
+			Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+		} catch (IOException e) {
+			throw new IllegalStateException("圖片儲存失敗，請稍後再試");
+		}
+
+		product.setImageUrl("/images/products/" + newFilename);
+		Product saved = productRepository.save(product);
+
+		deleteOldImageBestEffort(oldImageUrl);
+
+		return ProductResponse.from(saved);
+	}
+
+	private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp");
+
+	private String extractValidatedExtension(MultipartFile file) {
+		String originalFilename = file.getOriginalFilename();
+		String extension = (originalFilename != null && originalFilename.contains("."))
+				? originalFilename.substring(originalFilename.lastIndexOf('.') + 1).toLowerCase()
+				: "";
+		if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
+			throw new IllegalArgumentException("僅支援 jpg／jpeg／png／webp 格式的圖片");
+		}
+		return extension;
+	}
+
+	private void validateActualImageContent(MultipartFile file) {
+		try {
+			BufferedImage image = ImageIO.read(file.getInputStream());
+			if (image == null) {
+				throw new IllegalArgumentException("檔案內容不是合法的圖片格式");
+			}
+		} catch (IOException e) {
+			throw new IllegalArgumentException("檔案內容不是合法的圖片格式");
+		}
+	}
+
+	private Path resolveUploadDir() {
+		Path dir = Paths.get(uploadDir);
+		try {
+			Files.createDirectories(dir);
+		} catch (IOException e) {
+			throw new IllegalStateException("圖片儲存目錄無法建立，請確認伺服器設定");
+		}
+		return dir;
+	}
+
+	private void deleteOldImageBestEffort(String oldImageUrl) {
+		if (oldImageUrl == null || oldImageUrl.isBlank()) {
+			return;
+		}
+		String oldFilename = oldImageUrl.substring(oldImageUrl.lastIndexOf('/') + 1);
+		try {
+			Files.deleteIfExists(resolveUploadDir().resolve(oldFilename));
+		} catch (IOException e) {
+			log.warn("舊圖片檔案刪除失敗，將形成孤兒檔案，不影響本次上傳結果：{}", oldFilename);
+		}
 	}
 
 	// ========================= 內部輔助方法 =========================
