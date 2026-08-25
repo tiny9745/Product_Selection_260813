@@ -35,7 +35,7 @@ public class AiAnalysis {
 	@Column(name = "reasons", columnDefinition = "TEXT")
 	private String reasons;
 
-	@CreationTimestamp // 需再確認是否要添加
+	@CreationTimestamp
 	@Column(name = "generated_at", nullable = false, updatable = false)
 	private LocalDateTime generatedAt;
 

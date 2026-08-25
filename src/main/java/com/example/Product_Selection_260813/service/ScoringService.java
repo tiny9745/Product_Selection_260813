@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -182,6 +183,10 @@ public class ScoringService {
 
 		productEvaluationRepository.findByProductId(productId).ifPresent(evaluation -> {
 			evaluation.setTrendScore(calculatePlaceholderTrendScore(latestSignal.get()));
+			// 這裡確實改動了分數（即使只是trend_score這一項），語意上算一次「計算」，
+			// 故calculated_at也要跟著更新，維持「trend_score變了、calculated_at
+			// 就該反映最新一次計算」的一致性（見calculatedAt欄位註解的設計說明）。
+			evaluation.setCalculatedAt(LocalDateTime.now());
 			productEvaluationRepository.save(evaluation);
 		});
 	}

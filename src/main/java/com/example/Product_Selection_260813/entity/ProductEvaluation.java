@@ -66,6 +66,18 @@ public class ProductEvaluation {
 	@Column(name = "final_score", precision = 5, scale = 2)
 	private BigDecimal finalScore;
 
+	// 刻意不用@CreationTimestamp／@UpdateTimestamp：calculated_at語意是「評估結果
+	// 計算時間」，跟updated_at（單純的最後寫入時間）刻意分開——若未來有程式碼
+	// 不透過重算、只是改動其他欄位（例如人工修正單一分數），updated_at該變、
+	// calculated_at不該變。故比照reviewedAt（ReviewService手動設定）／collectedAt
+	// （TrendService手動設定）的既有慣例，由「真正執行計算」的程式碼手動賦值。
+	//
+	// ⚠️ TODO（評分重算引擎尚未實作，見ScoringService類別註解）：目前完全沒有任何
+	// 程式碼會建立全新的ProductEvaluation列（只有ScoringService.
+	// updateTrendScoreFromLatestSignal()這種UPDATE既有列的路徑），所以這個
+	// NOT NULL欄位尚未被違反過。但未來補上「幫全新商品建立第一筆評估結果」的
+	// INSERT路徑時，務必記得手動設定這個欄位，否則會出現與RiskOption.createdAt／
+	// TrendSignal.createdAt同一類的「Column cannot be null」錯誤。
 	@Column(name = "calculated_at", nullable = false)
 	private LocalDateTime calculatedAt;
 
