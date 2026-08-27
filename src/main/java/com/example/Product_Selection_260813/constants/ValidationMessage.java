@@ -22,5 +22,4 @@ public class ValidationMessage {
 	public static final String USER_ROLE_NULL = "使用者角色不可為空";
 	public static final String USER_PASSWORD_BLANK = "密碼不可為空";
 	public static final String USER_PASSWORD_TOO_SHORT = "密碼長度至少需8個字元";
-	
 }
