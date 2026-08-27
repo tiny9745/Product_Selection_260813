@@ -57,7 +57,6 @@ replay_pid*
 .env.production
 
 # 環境專用設定檔，通常含密碼／密鑰
-application.properties
 application-local.properties
 application-prod.properties
 application-secret.properties
