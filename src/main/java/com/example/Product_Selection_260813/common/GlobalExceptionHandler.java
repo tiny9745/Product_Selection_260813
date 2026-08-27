@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import com.example.Product_Selection_260813.common.exception.AccountDisabledException;
 import com.example.Product_Selection_260813.common.exception.InvalidCredentialsException;
+import com.example.Product_Selection_260813.common.exception.LlmAnalysisException;
 import com.example.Product_Selection_260813.common.exception.SystemConfigurationException;
 
 /**
@@ -90,6 +91,16 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleSystemConfiguration(SystemConfigurationException ex) {
 		log.error("系統設定資料異常", ex);
 		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.failure(ex.getMessage()));
+	}
+
+	// ========== LLM（Gemini）呼叫失敗 ==========
+	// 502而非500：代表我方伺服器呼叫上游服務失敗，通常是暫時性問題（逾時、
+	// 對方額度限制等），使用者重新點擊「生成AI分析」很可能就會成功，
+	// 語意上與「我方程式本身有bug」的500不同（詳見LlmAnalysisException類別說明）。
+	@ExceptionHandler(LlmAnalysisException.class)
+	public ResponseEntity<ApiResponse<Void>> handleLlmAnalysisException(LlmAnalysisException ex) {
+		log.error("LLM分析呼叫失敗", ex);
+		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.failure(ex.getMessage()));
 	}
 
 	// ========== 不合法的請求(資料目前狀態不允許) ==========
