@@ -48,7 +48,7 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	
 	// Spring Boot 讀專案根目錄的 .env
-	// implementation 'me.paulschwarz:spring-dotenv:4.0.0'
+	developmentOnly 'me.paulschwarz:springboot4-dotenv:5.1.0'
 }
 
 tasks.named('test') {
