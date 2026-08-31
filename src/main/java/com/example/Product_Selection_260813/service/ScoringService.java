@@ -19,8 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.example.Product_Selection_260813.dto.response.EvaluationResponse;
-import com.example.Product_Selection_260813.dto.response.FestivalBoostResponse;
+import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
@@ -28,14 +27,17 @@ import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
+import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
+import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
+import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
@@ -43,21 +45,27 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
+import com.example.Product_Selection_260813.repository.SystemSettingRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 
 /**
- * 對應企劃書十二-13分層決議：本類別目前僅實作「快照組裝所需的讀取」與
- * 「Festival Boost可解釋性明細計算」，範圍對應GET /api/reviews/{productId}與
- * POST /api/reviews當下所需的資料，以及POST /api/products/{id}/trend/sync
- * 觸發後對product_evaluations.trend_score的局部更新（見updateTrendScoreFromLatestSignal()）。
- * <b>不包含</b>六大分項Base Score的完整評分重算引擎
- * （六大分項如何依商品商業條件／核心客群／歷史銷售等原始資料算出business_score等分數，
- * 屬於另一項獨立任務，商品評估結果目前假設由其他流程寫入product_evaluations表，
- * 本類別對該表僅做唯讀）。
+ * 對應企劃書十二-13分層決議：本類別實作「快照組裝所需的讀取」「Festival Boost
+ * 可解釋性明細計算」，以及2026-08-31補上的<b>完整六大分項評分重算引擎</b>
+ * （見{@link #calculateEvaluation}）——取代原本「假設由其他流程寫入」的TODO。
  *
- * 之後若要補上ScoringController／完整評分重算邏輯，直接在本類別擴充方法即可，
- * ReviewService已經是透過本類別取得資料、不直接注入Repository，符合分層決議，
- * 屆時不需要更動ReviewService的呼叫方式。
+ * 評分公式依團隊MVP版本定案（demo週前緊急定案，非規格書逐字規定，規格書
+ * 僅定義FORECAST=、(purchase+trend)/2與節慶加成公式，其餘分項映射規則
+ * 由團隊在demo時程壓力下拍板，之後可依真實資料校準）：
+ * <ul>
+ *   <li>資料完整度<60%：僅寫入data_completeness，不計算六大分項，不進Top10</li>
+ *   <li>BUSINESS：毛利率(40%)+供應穩定性(30%)+價格競爭力(30%)</li>
+ *   <li>AUDIENCE：目標客群描述與audience_profiles.keywords關鍵字命中率</li>
+ *   <li>HISTORY：固定60分（企劃書承認尚無真實歷史資料，demo前不強做假資料）</li>
+ *   <li>PURCHASE：estimated_purchase_rate×100，無資料給中性值50</li>
+ *   <li>TREND：沿用最新trend_signals計算值，無資料給中性值50</li>
+ *   <li>FORECAST：(PURCHASE+TREND)/2（規格書明訂）</li>
+ *   <li>權重：從DB目前生效evaluation_mode的evaluation_factors讀取，不寫死在程式碼</li>
+ * </ul>
  */
 @Service
 public class ScoringService {
@@ -96,6 +104,19 @@ public class ScoringService {
 
 	@Autowired
 	private ReviewRecordRepository reviewRecordRepository;
+
+	@Autowired
+	private AudienceProfileRepository audienceProfileRepository;
+
+	@Autowired
+	private SystemSettingRepository systemSettingRepository;
+
+	// system_settings的key，對應「目前生效評估模式」的id（見SystemSettingRepository
+	// 類別註解裡的使用範例，本方法沿用同一把key，不重新發明）。
+	private static final String CURRENT_EVALUATION_MODE_KEY = "current_evaluation_mode_id";
+
+	// 資料完整度門檻（規格書QA3）：未達60%不進入固定評估模式計分。
+	private static final BigDecimal DATA_COMPLETENESS_THRESHOLD = new BigDecimal("60");
 
 	/** 商品目前的即時評估結果（product_evaluations，唯讀）。可能為空——見類別註解。 */
 	@Transactional(readOnly = true)
@@ -423,6 +444,256 @@ public class ScoringService {
 			response.setFinalScore(evaluation.getFinalScore());
 		});
 		return response;
+	}
+
+	// ============================================================
+	// 完整評分重算引擎（2026-08-31補上，取代原本「假設由其他流程寫入」的TODO）
+	// ============================================================
+
+	/**
+	 * 對商品重新計算完整評估結果並寫入product_evaluations。
+	 *
+	 * 觸發時機（見類別Java Doc）：ProductService新增/編輯成功後、
+	 * TrendService同步趨勢資料後。
+	 *
+	 * @param productId       要重算的商品ID
+	 * @param evaluationModeId 使用的評估模式ID；傳null時自動讀取system_settings裡
+	 *                          「目前生效模式」（CURRENT_EVALUATION_MODE_KEY）
+	 */
+	@Transactional
+	public void calculateEvaluation(Long productId, Long evaluationModeId) {
+		Product product = findProductOrThrow(productId);
+
+		Long modeId = evaluationModeId != null ? evaluationModeId : resolveCurrentEvaluationModeId();
+
+		BigDecimal dataCompleteness = calculateDataCompleteness(product);
+
+		ProductEvaluation evaluation = productEvaluationRepository.findByProductId(productId)
+				.orElseGet(() -> {
+					ProductEvaluation newEvaluation = new ProductEvaluation();
+					newEvaluation.setProductId(productId);
+					return newEvaluation;
+				});
+		evaluation.setEvaluationModeId(modeId);
+		evaluation.setDataCompleteness(dataCompleteness);
+
+		// 規格書QA3：未達60%門檻，只寫入資料完整度，不計算六大分項與total/final_score，
+		// 不清空既有分數（維持商品「資料待補」但仍保留上一次有效分數以供UI參考的彈性；
+		// 若團隊希望未達門檻時把舊分數一併清空，需另行決議，此處先採取「不覆蓋」較保守
+		// 的做法，避免demo時分數忽有忽無造成混淆）。
+		if (dataCompleteness.compareTo(DATA_COMPLETENESS_THRESHOLD) < 0) {
+			evaluation.setCalculatedAt(LocalDateTime.now());
+			productEvaluationRepository.save(evaluation);
+			return;
+		}
+
+		BigDecimal businessScore = calculateBusinessScore(product);
+		BigDecimal audienceScore = calculateAudienceScore(product);
+		BigDecimal historicalScore = calculateHistoricalScore();
+		BigDecimal purchaseScore = calculatePurchaseScore(product);
+		BigDecimal trendScore = calculateTrendScoreForProduct(productId);
+		BigDecimal forecastScore = purchaseScore.add(trendScore)
+				.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+
+		Map<String, BigDecimal> weights = resolveCategoryWeights(modeId);
+		BigDecimal totalScore = businessScore.multiply(weights.getOrDefault("BUSINESS", BigDecimal.ZERO))
+				.add(audienceScore.multiply(weights.getOrDefault("AUDIENCE", BigDecimal.ZERO)))
+				.add(historicalScore.multiply(weights.getOrDefault("HISTORY", BigDecimal.ZERO)))
+				.add(forecastScore.multiply(weights.getOrDefault("FORECAST", BigDecimal.ZERO)))
+				.setScale(2, RoundingMode.HALF_UP);
+
+		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
+		BigDecimal festivalBoost = campaignSnapshot != null
+				? campaignSnapshot.getMatchWeight().multiply(campaignSnapshot.getUrgencyFactor()).multiply(BOOST_CAP)
+						.setScale(2, RoundingMode.HALF_UP)
+				: BigDecimal.ZERO;
+
+		evaluation.setBusinessScore(businessScore);
+		evaluation.setAudienceScore(audienceScore);
+		evaluation.setHistoricalScore(historicalScore);
+		evaluation.setPurchaseScore(purchaseScore);
+		evaluation.setTrendScore(trendScore);
+		evaluation.setForecastScore(forecastScore);
+		evaluation.setTotalScore(totalScore);
+		evaluation.setFestivalBoost(festivalBoost);
+		evaluation.setMatchedCampaignId(campaignSnapshot != null ? campaignSnapshot.getCampaignId() : null);
+		evaluation.setFinalScore(totalScore.add(festivalBoost).setScale(2, RoundingMode.HALF_UP));
+		evaluation.setCalculatedAt(LocalDateTime.now());
+
+		productEvaluationRepository.save(evaluation);
+	}
+
+	/**
+	 * 資料完整度：依pricing_type動態調整分母（規格書QA3／QA1）。
+	 * RESALE分母10（含定價欄位），NEW分母8（不含成本價/售價/市場行情價，
+	 * 改為要求targetCustomerDescription，維持「有意義的必填清單」而非單純減項）。
+	 */
+	public BigDecimal calculateDataCompleteness(Product product) {
+		int filled = 0;
+		int total;
+
+		filled += isFilled(product.getName()) ? 1 : 0;
+		filled += product.getProductTypeId() != null ? 1 : 0;
+		filled += isFilled(product.getSupplierName()) ? 1 : 0;
+		filled += isFilled(product.getCampaignTags()) ? 1 : 0;
+		filled += product.getMoq() != null ? 1 : 0;
+		filled += product.getSupplyStability() != null ? 1 : 0;
+		filled += product.getPriceCompetitiveness() != null ? 1 : 0;
+
+		if (product.getPricingType() == ProductPricingType.NEW) {
+			total = 8;
+			filled += isFilled(product.getTargetCustomerDescription()) ? 1 : 0;
+		} else {
+			total = 10;
+			filled += product.getCostPrice() != null ? 1 : 0;
+			filled += product.getSalePrice() != null ? 1 : 0;
+			filled += product.getMarketPrice() != null ? 1 : 0;
+		}
+
+		return BigDecimal.valueOf(filled)
+				.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP)
+				.multiply(BigDecimal.valueOf(100))
+				.setScale(2, RoundingMode.HALF_UP);
+	}
+
+	private boolean isFilled(String value) {
+		return value != null && !value.trim().isEmpty();
+	}
+
+	/** BUSINESS：毛利率(40%) + 供應穩定性(30%) + 價格競爭力(30%)，皆正規化到0-100。 */
+	private BigDecimal calculateBusinessScore(Product product) {
+		BigDecimal marginScore;
+		boolean hasPricing = product.getPricingType() == ProductPricingType.RESALE
+				|| (product.getCostPrice() != null && product.getSalePrice() != null
+						&& product.getSalePrice().compareTo(BigDecimal.ZERO) > 0);
+
+		if (hasPricing && product.getCostPrice() != null && product.getSalePrice() != null
+				&& product.getSalePrice().compareTo(BigDecimal.ZERO) > 0) {
+			BigDecimal margin = product.getSalePrice().subtract(product.getCostPrice())
+					.divide(product.getSalePrice(), 4, RoundingMode.HALF_UP);
+			marginScore = clamp(margin.multiply(BigDecimal.valueOf(100)), BigDecimal.ZERO, BigDecimal.valueOf(100));
+		} else {
+			// NEW尚未訂價：給中性分，不因為QA1允許的「待訂價」狀態而被扣分
+			marginScore = BigDecimal.valueOf(50);
+		}
+
+		BigDecimal supplyScore = clamp(nullToZero(product.getSupplyStability()).multiply(BigDecimal.valueOf(20)),
+				BigDecimal.ZERO, BigDecimal.valueOf(100));
+		BigDecimal priceCompScore = clamp(
+				nullToZero(product.getPriceCompetitiveness()).multiply(BigDecimal.valueOf(20)),
+				BigDecimal.ZERO, BigDecimal.valueOf(100));
+
+		return marginScore.multiply(new BigDecimal("0.4"))
+				.add(supplyScore.multiply(new BigDecimal("0.3")))
+				.add(priceCompScore.multiply(new BigDecimal("0.3")))
+				.setScale(2, RoundingMode.HALF_UP);
+	}
+
+	/**
+	 * AUDIENCE：目標客群描述＋商品名稱，與audience_profiles.keywords關鍵字比對命中率。
+	 * 沒有生效客群設定或keywords為空時，給中性命中率50%，避免直接判0分不合理地拖低分數。
+	 */
+	private BigDecimal calculateAudienceScore(Product product) {
+		List<AudienceProfile> profiles = audienceProfileRepository.findByIsActiveTrue();
+		if (profiles.isEmpty()) {
+			return BigDecimal.valueOf(50);
+		}
+		// 可能有多筆is_active的客群設定，MVP先取第一筆，多客群比對策略留待Phase 2決議
+		AudienceProfile profile = profiles.get(0);
+		if (profile.getKeywords() == null || profile.getKeywords().trim().isEmpty()) {
+			return BigDecimal.valueOf(50);
+		}
+
+		List<String> keywords = Arrays.stream(profile.getKeywords().split("[,、\\s]+"))
+				.map(String::trim)
+				.map(String::toLowerCase)
+				.filter(k -> !k.isEmpty())
+				.toList();
+		if (keywords.isEmpty()) {
+			return BigDecimal.valueOf(50);
+		}
+
+		String productText = ((product.getTargetCustomerDescription() != null ? product.getTargetCustomerDescription() : "")
+				+ " " + (product.getName() != null ? product.getName() : "")).toLowerCase();
+
+		long matched = keywords.stream().filter(productText::contains).count();
+		BigDecimal matchRate = BigDecimal.valueOf(matched)
+				.divide(BigDecimal.valueOf(keywords.size()), 4, RoundingMode.HALF_UP);
+
+		return matchRate.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP);
+	}
+
+	/**
+	 * HISTORY：固定60分。企劃書承認尚無真實歷史銷售資料串接（見規格書QA2、十三
+	 * Phase 2待辦「真實市場資料串接」），demo前不臨時捏造假歷史資料，UI／AI摘要
+	 * 需標註「歷史資料尚未串接，僅供參考」，不要讓使用者誤以為是真實統計值。
+	 */
+	private BigDecimal calculateHistoricalScore() {
+		return BigDecimal.valueOf(60);
+	}
+
+	/** PURCHASE：estimated_purchase_rate×100，無資料給中性值50，不直接判0分。 */
+	private BigDecimal calculatePurchaseScore(Product product) {
+		if (product.getEstimatedPurchaseRate() == null) {
+			return BigDecimal.valueOf(50);
+		}
+		return clamp(product.getEstimatedPurchaseRate().multiply(BigDecimal.valueOf(100)), BigDecimal.ZERO,
+				BigDecimal.valueOf(100));
+	}
+
+	/**
+	 * TREND：沿用最新trend_signals計算值（複用calculatePlaceholderTrendScore，
+	 * 與trend/sync端點使用同一套簡化算法，避免同一件事在兩處各寫一份公式），
+	 * 無趨勢資料時給中性值50。
+	 */
+	private BigDecimal calculateTrendScoreForProduct(Long productId) {
+		return trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(productId)
+				.map(this::calculatePlaceholderTrendScore)
+				.orElse(BigDecimal.valueOf(50));
+	}
+
+	/**
+	 * 讀取指定評估模式底下，BUSINESS/AUDIENCE/HISTORY/FORECAST四大分類的權重，
+	 * 以Map回傳（key為category字串，value為權重，通常0-1之間的小數）。
+	 * 找不到對應模式或無factors設定時，回傳空Map（呼叫端用getOrDefault(0)防呆，
+	 * 等同於「這個分類這次不計分」，而非讓NullPointerException中斷整個計算）。
+	 */
+	private Map<String, BigDecimal> resolveCategoryWeights(Long evaluationModeId) {
+		if (evaluationModeId == null) {
+			return Map.of();
+		}
+		List<EvaluationFactor> factors = evaluationFactorRepository
+				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId);
+		return factors.stream()
+				.collect(Collectors.toMap(EvaluationFactor::getCategory, EvaluationFactor::getWeight,
+						(existing, duplicate) -> existing));
+	}
+
+	/**
+	 * 讀取system_settings裡「目前生效評估模式」的id。查無設定時拋出例外，
+	 * 而非靜默給一個猜測值——沒有生效模式代表系統設定尚未完成初始化，
+	 * 讓呼叫端明確知道問題所在，比算出一個不知道套用哪套權重的分數更安全。
+	 */
+	private Long resolveCurrentEvaluationModeId() {
+		return systemSettingRepository.findById(CURRENT_EVALUATION_MODE_KEY)
+				.map(SystemSetting::getSettingValue)
+				.map(Long::valueOf)
+				.orElseThrow(() -> new IllegalStateException(
+						"尚未設定目前生效評估模式（system_settings." + CURRENT_EVALUATION_MODE_KEY + "），請先於設定頁指定"));
+	}
+
+	private BigDecimal nullToZero(BigDecimal value) {
+		return value != null ? value : BigDecimal.ZERO;
+	}
+
+	private BigDecimal clamp(BigDecimal value, BigDecimal min, BigDecimal max) {
+		if (value.compareTo(min) < 0) {
+			return min;
+		}
+		if (value.compareTo(max) > 0) {
+			return max;
+		}
+		return value.setScale(2, RoundingMode.HALF_UP);
 	}
 
 	private Product findProductOrThrow(Long productId) {

@@ -36,7 +36,6 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
-
 /**
  * 對應 API總表 三、品項管理（不含四、評估／趨勢／AI，那些屬於ScoringService／
  * TrendService／AiSelectionService的職責，見企劃書十二-13分層決議）：
@@ -75,6 +74,9 @@ public class ProductService {
 
 	@Autowired
 	private AppUserRepository appUserRepository;
+
+	@Autowired
+	private ScoringService scoringService;
 
 	// ========================= 查詢 =========================
 
@@ -175,7 +177,13 @@ public class ProductService {
 		product.setCreatedBy(userId);
 		product.setUpdatedBy(userId);
 
-		return ProductResponse.from(productRepository.save(product));
+		Product saved = productRepository.save(product);
+
+		// Demo緊急補上的觸發點（見ScoringService類別Java Doc）：新增成功後立即
+		// 重算評估分數，讓品項詳情頁一建立就有分數可看，不用等使用者手動觸發其他動作。
+		scoringService.calculateEvaluation(saved.getId(), null);
+
+		return ProductResponse.from(saved);
 	}
 
 	// ========================= 修改 =========================
@@ -230,7 +238,13 @@ public class ProductService {
 
 		product.setUpdatedBy(resolveUserId(username));
 
-		return ProductResponse.from(productRepository.save(product));
+		Product saved = productRepository.save(product);
+
+		// Demo緊急補上的觸發點：編輯成功後重算，確保分數反映最新欄位內容
+		// （例如成本價/售價變動會影響BUSINESS分項）。
+		scoringService.calculateEvaluation(saved.getId(), null);
+
+		return ProductResponse.from(saved);
 	}
 
 	// ========================= 狀態轉換 =========================

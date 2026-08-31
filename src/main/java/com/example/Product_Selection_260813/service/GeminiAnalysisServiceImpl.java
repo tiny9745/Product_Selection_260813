@@ -76,7 +76,7 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 	private final ObjectMapper objectMapper = new ObjectMapper();
 
 	@Override
-	public LlmAnalysisResult generate(Product product, ProductEvaluation evaluation) {
+	public LlmAnalysisResult generate(Product product, java.util.Optional<ProductEvaluation> evaluation) {
 		if (apiKey == null || apiKey.isBlank()) {
 			// 我方設定缺漏（未設定GEMINI_API_KEY環境變數），不管怎麼重試都不會成功，
 			// 屬於SystemConfigurationException的語意（見該類別說明），不是
@@ -128,6 +128,16 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 	// ========================= 月額度保護 =========================
 
 	private void checkAndIncrementQuota() {
+		// 設計取捨（2026-08-28審視後維持現狀，非遺漏）：
+		// 此處在「呼叫Gemini API之前」就扣配額，若後續呼叫失敗（網路逾時、
+		// 序列化錯誤等我方或連線層面問題，並未真正用到Gemini運算資源），
+		// 這次失敗嘗試仍會佔用月配額，精確度不是100%。
+		// 考慮過改成「呼叫成功才扣」，但那樣會把讀取與寫入配額的時間窗，
+		// 從現在的「函式呼叫前一瞬間」拉長到「橫跨整支可能長達30秒的外部
+		// API呼叫」，讓原本就非原子操作的併發競態風險視窗變得更大。
+		// 這個機制的目的是「擋住失控的重複呼叫」，不是做精確會計，維持
+		// 現狀在此定位下已經足夠；與六-4放棄樂觀鎖版本欄位的理由一致
+		// ——追求精確會犧牲簡單可靠，對6週雛型屬於過度工程化。
 		int limit = systemSettingRepository.findById(QUOTA_LIMIT_KEY)
 				.map(SystemSetting::getSettingValue)
 				.map(value -> {
@@ -157,7 +167,16 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 
 	// ========================= Prompt 組裝 =========================
 
-	private String buildPrompt(Product product, ProductEvaluation evaluation) {
+	/**
+	 * 組裝送給Gemini的Prompt。
+	 *
+	 * @param evaluation 商品目前評估結果；此處在方法邊界就用orElse(null)明確解開
+	 *                   Optional，屬於「已經想過並處理過『可能沒有』這件事」的
+	 *                   刻意解開，而非忘記判斷null——與LlmAnalysisService介面
+	 *                   要求呼叫端顯式處理Optional的精神一致。
+	 */
+	private String buildPrompt(Product product, java.util.Optional<ProductEvaluation> evaluationOpt) {
+		ProductEvaluation evaluation = evaluationOpt.orElse(null);
 		StringBuilder sb = new StringBuilder();
 		sb.append("你是電商選品的AI分析助理，請根據以下商品資料與評估分數，產生繁體中文分析。\n\n");
 
@@ -173,8 +192,10 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 		appendIfPresent(sb, "預估購買率", product.getEstimatedPurchaseRate());
 
 		sb.append("\n【評估分數】（滿分未定，僅供參考相對高低）\n");
+		boolean lowCompleteness = false;
 		if (evaluation == null || evaluation.getTotalScore() == null) {
 			sb.append("此商品目前尚無完整評估分數。\n");
+			lowCompleteness = true;
 		} else {
 			sb.append("商業條件：").append(nullSafe(evaluation.getBusinessScore())).append('\n');
 			sb.append("核心客群：").append(nullSafe(evaluation.getAudienceScore())).append('\n');
@@ -184,6 +205,21 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 			sb.append("預測人氣：").append(nullSafe(evaluation.getForecastScore())).append('\n');
 			sb.append("綜合加權總分：").append(nullSafe(evaluation.getTotalScore())).append('\n');
 			sb.append("資料完整度：").append(nullSafe(evaluation.getDataCompleteness())).append("%\n");
+
+			// 對應企劃書QA3／十二-6：資料完整度未達60%門檻的商品，不進入固定評估
+			// 模式計分、不進入AI推薦Top10。同一道60%門檻在AI分析Prompt這裡也要
+			// 明確要求模型自報「資料不足」，而非只靠一句籠統的「不得虛構」提醒
+			// ——明確的數字判斷比模糊的文字要求更不容易被模型忽略。
+			if (evaluation.getDataCompleteness() != null
+					&& evaluation.getDataCompleteness().compareTo(new java.math.BigDecimal("60")) < 0) {
+				lowCompleteness = true;
+			}
+		}
+
+		if (lowCompleteness) {
+			sb.append("\n【重要規則】此商品資料完整度低於60%（或尚無評估分數），summary欄位開頭"
+					+ "必須明確寫出「目前資料不足，以下分析僅供初步參考」，不可以假裝資料充足，"
+					+ "不可以編造或推測任何未提供的具體數據、市場資訊。\n");
 		}
 
 		sb.append("\n請以JSON格式回傳，包含三個欄位：\n");

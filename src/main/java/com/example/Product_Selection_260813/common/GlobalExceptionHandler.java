@@ -59,6 +59,18 @@ public class GlobalExceptionHandler {
 		return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.failure(ex.getMessage()));
 	}
 
+	// ========== @PreAuthorize權限檢查未通過（例如PURCHASER呼叫MANAGER-only端點）==========
+	// 403而非401：使用者身份已透過JWT驗證成功（不是「未登入」），只是這個角色
+	// 沒有權限執行這個動作，語意上是Authorization failure，不是Authentication failure，
+	// 兩者要分開處理，不能混用401。原本此例外沒有專屬handler，會落到最下面的
+	// Exception保底handler被包裝成500，讓前端無法區分「權限不足」和「伺服器真的壞了」，
+	// 補上後才能讓前端依403正確導向「權限不足」提示，而非顯示「伺服器錯誤」誤導使用者。
+	@ExceptionHandler(org.springframework.security.authorization.AuthorizationDeniedException.class)
+	public ResponseEntity<ApiResponse<Void>> handleAuthorizationDenied(
+			org.springframework.security.authorization.AuthorizationDeniedException ex) {
+		return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.failure("權限不足，此操作僅限管理層執行"));
+	}
+
 	// ========== 上傳檔案超過大小上限（spring.servlet.multipart.max-file-size）==========
 	// Spring在進到我們自己的Controller/Service之前就先擋下，屬於請求格式問題，回400
 	// 而非500——這是使用者端可以自行修正的錯誤（換一個較小的檔案），不是伺服器異常。
