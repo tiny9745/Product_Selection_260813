@@ -19,9 +19,9 @@ import com.example.Product_Selection_260813.service.AiSelectionService;
  * 不需要額外@PreAuthorize：SecurityConfig預設規則「已登入即可」已涵蓋，
  * 與ProductController／TrendController／ScoringController的權限風格一致。
  *
- * POST目前透過AiSelectionService呼叫模擬LLM實作（見AiSelectionService類別註解
- * 的TODO說明），實際串接真實LLM API是另一項獨立任務，Controller層完全不受影響
- * ——未來替換成真實API，本Controller不需要更動任何一行。
+ * POST透過AiSelectionService呼叫{@link com.example.Product_Selection_260813.service.LlmAnalysisService}
+ * 介面（見該介面Java Doc），Controller層完全不受底層是Mock或真實Gemini API
+ * 影響——換模型或切回模擬資料，本Controller不需要更動任何一行。
  */
 @RestController
 public class AiSelectionController {

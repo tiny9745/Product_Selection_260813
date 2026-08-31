@@ -19,15 +19,15 @@ import com.example.Product_Selection_260813.repository.ProductRepository;
  * POST /api/products/{id}/ai-analysis/generate）。
  *
  * <b>不包含</b>「AI主動選品」批次生成邏輯（POST /api/products/ai-suggested/batch-generate，
- * 屬於三、品項管理範圍，僅供Daily Cron排程觸發，非本Controller/Service職責）。
+ * 由獨立的{@link AiSuggestionBatchService}負責，屬於三、品項管理範圍，
+ * 僅供Daily Cron排程觸發，非本Controller/Service職責）。
  *
- * <b>LLM串接現況（TODO）：</b>generateAndReturnResponse()透過{@link LlmAnalysisService}
- * 介面取得分析結果，目前唯一實作是{@link MockLlmAnalysisService}——回傳模擬資料，
- * 不呼叫任何外部API、不產生費用。企劃書已定案真實廠商為GPT-5.6 Luna，但實際串接
- * （API Key管理、HTTP呼叫、prompt設計、失敗重試）與月用量保護機制（依賴
- * system_settings表，屬於SettingsService尚未建立的範圍）都還沒有實作，
- * 待這兩項獨立任務完成後，才需要在本類別／新增的真實LLM實作類別上補上對應邏輯，
- * 呼叫端（本類別）與Controller都不需要因此更動。
+ * <b>LLM串接現況（2026-08-28更新，取代已過時的TODO註解）：</b>
+ * generateAndReturnResponse()透過{@link LlmAnalysisService}介面取得分析結果，
+ * 目前有{@link MockLlmAnalysisService}（模擬資料）與
+ * {@link GeminiAnalysisServiceImpl}（正式串接gemini-3.6-flash，標註
+ * {@code @Primary}）兩個實作並存，Spring預設注入Gemini版本。月用量保護
+ * 機制已於GeminiAnalysisServiceImpl內實作完成（依賴system_settings表）。
  */
 @Service
 public class AiSelectionService {
@@ -66,7 +66,17 @@ public class AiSelectionService {
 
 	/**
 	 * POST /api/products/{id}/ai-analysis/generate：觸發生成AI分析並寫入快取。
-	 * 目前透過{@link LlmAnalysisService}的模擬實作產生資料，見類別註解TODO。
+	 *
+	 * <b>關於評估分數的即時性（非雙軌Snapshot邏輯）：</b>此處呼叫
+	 * {@link ScoringService#getCurrentEvaluation}取得的是即時評估值，
+	 * 不同於{@link ScoringService#getEvaluation}／festival-boost端點採用的
+	 * 「APPROVED商品讀Snapshot凍結值、其餘讀即時值」雙軌規則。這是刻意的設計
+	 * 選擇：AI分析通常於審核「之前」被觸發、作為輔助判斷依據，語意上代表
+	 * 「當下」的市場評估，而非審核當時被凍結的歷史快照。若未來UI允許對已
+	 * APPROVED商品重新觸發本端點，分析文字引用的分數可能與該商品評估頁面
+	 * 顯示的Snapshot凍結值不同——屆時再評估是否需要改用雙軌邏輯；目前六週
+	 * 雛型階段前端不會對已核准商品開放「重新生成」入口，此不一致實務上
+	 * 不會被使用者看到。
 	 */
 	@Transactional
 	public AiAnalysisResponse generateAndReturnResponse(Long productId) {
@@ -74,7 +84,7 @@ public class AiSelectionService {
 				.orElseThrow(() -> new IllegalArgumentException("商品不存在"));
 		Optional<ProductEvaluation> evaluationOpt = scoringService.getCurrentEvaluation(productId);
 
-		LlmAnalysisResult result = llmAnalysisService.generate(product, evaluationOpt.orElse(null));
+		LlmAnalysisResult result = llmAnalysisService.generate(product, evaluationOpt);
 
 		AiAnalysis analysis = new AiAnalysis();
 		analysis.setProductId(productId);

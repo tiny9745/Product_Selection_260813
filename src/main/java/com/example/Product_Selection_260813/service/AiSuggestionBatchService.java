@@ -31,6 +31,9 @@ import com.example.Product_Selection_260813.repository.TrendSignalRepository;
  *
  * 目前種子資料每個商品僅有1-2筆記錄，尚無法覆蓋「連續3天」情境測試，
  * 該分支邏輯已依規格正確實作，待隊友之後補充多天期種子資料即可驗證。
+ *
+ * <b>保護範圍（2026-08-28修正）：</b>批次規則只會影響reviewStatus=PENDING
+ * 的商品，已核准／已拒絕商品不受影響，見markAsSuggested()方法註解。
  */
 @Service
 public class AiSuggestionBatchService {
@@ -113,14 +116,25 @@ public class AiSuggestionBatchService {
 
 	/**
 	 * 將商品標記為AI_SUGGESTED。
-	 * 只處理目前非AI_SUGGESTED的商品，避免每次批次執行都重複寫入同一筆、
-	 * 讓suggestedCount統計失真。已審核通過/拒絕/CANDIDATE的商品若符合條件，
-	 * 一樣會被改成AI_SUGGESTED——規格書未排除這個情境，暫依規格字面實作；
-	 * 若demo後發現這樣會誤動到已審核商品的狀態，屬於Phase 2可再收斂的範圍。
+	 *
+	 * <b>2026-08-28修正（原設計問題）：</b>僅處理reviewStatus=PENDING（尚未審核，
+	 * 涵蓋「從未送審」與「重新送審中」兩種情境）的商品。原本的設計沒有這道限制，
+	 * 會讓已經APPROVED（已核准使用中）或REJECTED（已審核拒絕）的商品，只因為
+	 * 熱度衝高就被批次規則改動candidateStatus。實際後果很嚴重：
+	 * ProductService.searchProducts()在未指定candidateStatus篩選時（一般瀏覽
+	 * 主清單的預設行為）只顯示CANDIDATE，商品一旦被改成AI_SUGGESTED就會從
+	 * 主清單、分數排行、推薦清單裡消失——即使它已經走完完整審核流程、正在
+	 * 使用中。這個風險是視覺可見、demo會直接被看到的問題，不適合歸類為
+	 * Phase 2再收斂，故立即修正，而非僅在Prompt/註解裡記錄待辦。
 	 */
 	private boolean markAsSuggested(Long productId) {
 		return productRepository.findById(productId)
 				.map(product -> {
+					if (product.getReviewStatus() != com.example.Product_Selection_260813.enums.ProductReviewStatus.PENDING) {
+						// 已核准／已拒絕的商品，不受AI主動選品批次規則影響，
+						// 保護其candidateStatus不被意外覆蓋。
+						return false;
+					}
 					if (product.getCandidateStatus() == ProductCandidateStatus.AI_SUGGESTED) {
 						return false;
 					}
