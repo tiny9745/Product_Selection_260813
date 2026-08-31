@@ -122,6 +122,20 @@ public class ProductService {
 	/**
 	 * POST /api/products：手動建立品項。
 	 *
+	 * <b>刻意不檢查商品名稱是否重複（已與團隊確認，非疏漏）：</b>商品名稱天生就可能
+	 * 合法重複——同名商品可能來自不同供應商、不同規格、不同批次進貨（例如
+	 * 「A供應商的雞腿禮盒」與「B供應商的雞腿禮盒」）。若在這裡加唯一約束擋下，
+	 * 會連帶擋掉這些合法情境，不是單純「防呆」而已。
+	 *
+	 * 真正該防的風險是「操作人員手滑重複送出同一筆」，這屬於**前端**該處理的問題
+	 * （送出後禁用按鈕、debounce、或偵測到同名時跳出確認提示讓使用者自行判斷），
+	 * 不該由後端用「一律禁止同名」這種對所有情境都生效的規則來處理——那等於用
+	 * 治療症狀的方式，犧牲掉本來合法的使用情境。
+	 *
+	 * 若未來要調整這個決策（例如確認商品名稱在實務上就是唯一識別品項、同名一定
+	 * 是誤操作），需要在這裡新增查詢檢查，並在資料表設計（五、products）補上
+	 * 對應的DB層UNIQUE約束——兩者要一起做，不能只加其中一層。
+	 *
 	 * 預設值（不開放Request傳入，見ProductCreateRequest類別註解）：
 	 * review_status=PENDING、item_status=ACTIVE、candidate_status=CANDIDATE
 	 * pricing_status：NEW -&gt; PENDING_PRICING；RESALE -&gt; 留空（null）
