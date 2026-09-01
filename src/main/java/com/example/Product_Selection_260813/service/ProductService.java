@@ -3,6 +3,9 @@ package com.example.Product_Selection_260813.service;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -81,6 +84,27 @@ public class ProductService {
 	// ========================= 查詢 =========================
 
 	/**
+	 * 批次把一頁清單裡出現的 createdBy id 轉成姓名，一次查詢而非逐筆查詢。
+	 *
+	 * app_users 由管理層代辦建立、數量不多（見 UserController 類別註解：無公開
+	 * 自我註冊），用 findAllById 一次撈回整批比每筆各查一次划算，不會產生 N+1。
+	 * 這裡查的是使用者帳號本身的資料，不屬於評分／趨勢／AI 網域，不算跨越
+	 * 十二-13分層決議劃定的邊界。
+	 */
+	private Map<Long, String> resolveCreatedByNames(List<Product> products) {
+		Set<Long> ids = products.stream()
+				.map(Product::getCreatedBy)
+				.filter(Objects::nonNull)
+				.collect(Collectors.toSet());
+		if (ids.isEmpty()) {
+			return Map.of();
+		}
+		return appUserRepository.findAllById(ids).stream()
+				.collect(Collectors.toMap(AppUser::getId, AppUser::getName));
+	}
+
+
+	/**
 	 * GET /api/products：品項管理主清單。
 	 *
 	 * candidateStatus刻意在這裡（Service層）而非Repository層預設為CANDIDATE：
@@ -95,9 +119,13 @@ public class ProductService {
 		ProductCandidateStatus effectiveCandidateStatus = candidateStatus != null ? candidateStatus
 				: ProductCandidateStatus.CANDIDATE;
 
-		return productRepository
-				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword, pageable)
-				.map(ProductResponse::from);
+		Page<Product> page = productRepository
+				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword, pageable);
+
+		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
+		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
+		return page.map(product -> ProductResponse.from(product)
+				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**
@@ -105,8 +133,10 @@ public class ProductService {
 	 */
 	@Transactional(readOnly = true)
 	public Page<ProductResponse> searchAiSuggested(Pageable pageable) {
-		return productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable)
-				.map(ProductResponse::from);
+		Page<Product> page = productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
+		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
+		return page.map(product -> ProductResponse.from(product)
+				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**
@@ -116,7 +146,10 @@ public class ProductService {
 	 */
 	@Transactional(readOnly = true)
 	public ProductResponse getProduct(Long id) {
-		return ProductResponse.from(findProductOrThrow(id));
+		Product product = findProductOrThrow(id);
+		String createdByName = product.getCreatedBy() == null ? null
+				: appUserRepository.findById(product.getCreatedBy()).map(AppUser::getName).orElse(null);
+		return ProductResponse.from(product).withCreatedByName(createdByName);
 	}
 
 	// ========================= 新增 =========================

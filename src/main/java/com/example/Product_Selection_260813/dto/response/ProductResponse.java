@@ -42,6 +42,17 @@ public class ProductResponse {
 	private ProductItemStatus itemStatus;
 	private Integer submissionCount;
 	private Long createdBy;
+	/**
+	 * 送審／建立者姓名。
+	 *
+	 * ⚠️ 這一欄刻意不是「跨界去查其他網域」——app_users 是使用者帳號本身的資料，
+	 * 不屬於評分／趨勢／AI 等其他 Service 的職責範圍（十二-13分層決議規範的是
+	 * ScoringService／TrendService／AiSelectionService 這幾個網域，不含帳號查詢）。
+	 * 由 ProductService／ReviewService 批次查詢後透過 withCreatedByName() 補上，
+	 * from(Product) 本身不查資料庫，維持這個類別原本「只讀 Product 欄位」的單純性。
+	 * 找不到對應帳號時為 null（例如帳號後續被刪除，理論上不會發生），前端顯示「—」。
+	 */
+	private String createdByName;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 	private Long updatedBy;
@@ -74,6 +85,19 @@ public class ProductResponse {
 		dto.updatedAt = product.getUpdatedAt();
 		dto.updatedBy = product.getUpdatedBy();
 		return dto;
+	}
+
+	/**
+	 * 補上批次查詢好的姓名，回傳 this 方便鏈式呼叫：
+	 * ProductResponse.from(product).withCreatedByName(nameById.get(product.getCreatedBy()))
+	 *
+	 * 刻意拆成兩步而不是把 AppUserRepository 查詢塞進 from()：
+	 * from() 一旦內部查資料庫，呼叫端在迴圈裡呼叫 from() 就會變成逐筆查詢（N+1）。
+	 * 批次查詢的職責留在 Service 層（一次 findAllById 查整頁），這裡只負責賦值。
+	 */
+	public ProductResponse withCreatedByName(String createdByName) {
+		this.createdByName = createdByName;
+		return this;
 	}
 
 	public Long getId() {
@@ -242,6 +266,14 @@ public class ProductResponse {
 
 	public void setSubmissionCount(Integer submissionCount) {
 		this.submissionCount = submissionCount;
+	}
+
+	public String getCreatedByName() {
+		return createdByName;
+	}
+
+	public void setCreatedByName(String createdByName) {
+		this.createdByName = createdByName;
 	}
 
 	public Long getCreatedBy() {

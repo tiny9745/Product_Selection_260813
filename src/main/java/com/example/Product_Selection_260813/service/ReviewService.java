@@ -2,7 +2,10 @@ package com.example.Product_Selection_260813.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -82,9 +85,22 @@ public class ReviewService {
 	 */
 	@Transactional(readOnly = true)
 	public Page<ProductResponse> getPendingReviews(Pageable pageable) {
-		return productRepository
-				.findByReviewStatusAndItemStatus(ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE, pageable)
-				.map(ProductResponse::from);
+		Page<Product> page = productRepository
+				.findByReviewStatusAndItemStatus(ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE, pageable);
+
+		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
+		// app_users 是使用者帳號本身的資料，不屬於評分／AI 網域，不算跨越
+		// 類別 Java Doc 講的十二-13分層邊界（該邊界只規範 Scoring／Trend／AiSelection）。
+		Set<Long> createdByIds = page.getContent().stream()
+				.map(Product::getCreatedBy)
+				.filter(id -> id != null)
+				.collect(Collectors.toSet());
+		Map<Long, String> createdByNameById = createdByIds.isEmpty() ? Map.of()
+				: appUserRepository.findAllById(createdByIds).stream()
+						.collect(Collectors.toMap(AppUser::getId, AppUser::getName));
+
+		return page.map(product -> ProductResponse.from(product)
+				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**
