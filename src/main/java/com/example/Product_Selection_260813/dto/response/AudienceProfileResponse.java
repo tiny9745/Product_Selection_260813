@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.dto.response;
 
 import com.example.Product_Selection_260813.entity.AudienceProfile;
+import com.example.Product_Selection_260813.enums.PriceSensitivityStatus;
 
 /**
  * GET／PUT /api/settings/audience-profile 共用。
@@ -15,7 +16,7 @@ public class AudienceProfileResponse {
 	private String name;
 	private Integer ageMin;
 	private Integer ageMax;
-	private String priceSensitivity;
+	private PriceSensitivityStatus priceSensitivity;
 	private String preferenceDescription;
 	private String keywords;
 
@@ -63,11 +64,11 @@ public class AudienceProfileResponse {
 		this.ageMax = ageMax;
 	}
 
-	public String getPriceSensitivity() {
+	public PriceSensitivityStatus getPriceSensitivity() {
 		return priceSensitivity;
 	}
 
-	public void setPriceSensitivity(String priceSensitivity) {
+	public void setPriceSensitivity(PriceSensitivityStatus priceSensitivity) {
 		this.priceSensitivity = priceSensitivity;
 	}
 

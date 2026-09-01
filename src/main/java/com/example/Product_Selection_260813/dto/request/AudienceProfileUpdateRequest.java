@@ -1,5 +1,7 @@
 package com.example.Product_Selection_260813.dto.request;
 
+import com.example.Product_Selection_260813.enums.PriceSensitivityStatus;
+
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -15,7 +17,7 @@ public class AudienceProfileUpdateRequest {
 
 	private Integer ageMin;
 	private Integer ageMax;
-	private String priceSensitivity;
+	private PriceSensitivityStatus priceSensitivity;
 	private String preferenceDescription;
 	private String keywords;
 
@@ -43,11 +45,11 @@ public class AudienceProfileUpdateRequest {
 		this.ageMax = ageMax;
 	}
 
-	public String getPriceSensitivity() {
+	public PriceSensitivityStatus getPriceSensitivity() {
 		return priceSensitivity;
 	}
 
-	public void setPriceSensitivity(String priceSensitivity) {
+	public void setPriceSensitivity(PriceSensitivityStatus priceSensitivity) {
 		this.priceSensitivity = priceSensitivity;
 	}
 

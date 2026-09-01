@@ -5,8 +5,12 @@ import java.time.LocalDateTime;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.example.Product_Selection_260813.enums.PriceSensitivityStatus;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -30,8 +34,9 @@ public class AudienceProfile {
     @Column(name = "age_max")
     private Integer ageMax;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "price_sensitivity", length = 30)
-    private String priceSensitivity;
+    private PriceSensitivityStatus priceSensitivity;
 
     @Column(name = "preference_description", columnDefinition = "TEXT")
     private String preferenceDescription;
@@ -85,11 +90,11 @@ public class AudienceProfile {
         this.ageMax = ageMax;
     }
 
-    public String getPriceSensitivity() {
+    public PriceSensitivityStatus getPriceSensitivity() {
         return priceSensitivity;
     }
 
-    public void setPriceSensitivity(String priceSensitivity) {
+    public void setPriceSensitivity(PriceSensitivityStatus priceSensitivity) {
         this.priceSensitivity = priceSensitivity;
     }
 
