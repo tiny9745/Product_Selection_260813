@@ -50,7 +50,7 @@ public class AuthController {
 	 * 而不是不小心以不安全的設定跑在正式環境。開發環境需在application.properties
 	 * 明確寫cookie.secure=false，或以環境變數COOKIE_SECURE覆蓋。
 	 */
-	@Value("${cookie.secure:true}")
+	@Value("${cookie.secure}")
 	private boolean cookieSecure;
 
 	@PostMapping("/login")
