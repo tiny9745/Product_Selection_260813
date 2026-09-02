@@ -17,6 +17,12 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
  * 的職責範圍（見十二-13分層決議：ScoringService／TrendService／AiSelectionService），
  * GET /api/products/{id} 這種聚合端點的組裝交由Controller呼叫多個Service後合併，
  * ProductResponse不越界去裝其他網域的資料。
+ *
+ * ⚠️ finalScore／dataCompleteness 是這條規則唯一的例外：GET /api/products 清單
+ * 頁需要顯示這兩個欄位，但逐筆呼叫 /evaluation 是前端 N+1、後端逐筆查也是
+ * 服務層 N+1。做法比照 createdByName——批次查詢（見 ProductService.
+ * resolveEvaluations()）後透過 withEvaluationSummary() 補上，from(Product)
+ * 本身仍然不碰 product_evaluations 表，只是多了兩個「查完才填」的欄位。
  */
 public class ProductResponse {
 
@@ -53,6 +59,14 @@ public class ProductResponse {
 	 * 找不到對應帳號時為 null（例如帳號後續被刪除，理論上不會發生），前端顯示「—」。
 	 */
 	private String createdByName;
+	/**
+	 * ⚠️ 這兩個欄位跟 createdByName 是同一種例外處理：批次查詢後才填入，
+	 * from(Product) 本身不查 product_evaluations 表。該商品若尚無評估紀錄
+	 * （從未計算過、或剛新增還沒觸發計算），維持 null，前端顯示「—」，
+	 * 不要顯示成 0（0 分跟「還沒有分數」意義完全不同）。
+	 */
+	private BigDecimal finalScore;
+	private BigDecimal dataCompleteness;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 	private Long updatedBy;
@@ -97,6 +111,21 @@ public class ProductResponse {
 	 */
 	public ProductResponse withCreatedByName(String createdByName) {
 		this.createdByName = createdByName;
+		return this;
+	}
+
+	/**
+	 * 補上批次查詢好的分數，回傳 this 方便鏈式呼叫，用法同 withCreatedByName()：
+	 * ProductResponse.from(product).withEvaluationSummary(
+	 *     evaluation != null ? evaluation.getFinalScore() : null,
+	 *     evaluation != null ? evaluation.getDataCompleteness() : null)
+	 *
+	 * 兩個參數一起傳、一起為 null，是因為兩者來自同一筆 ProductEvaluation，
+	 * 沒有「只有其中一個有值」的情況，分開傳容易在呼叫端漏帶其中一個。
+	 */
+	public ProductResponse withEvaluationSummary(BigDecimal finalScore, BigDecimal dataCompleteness) {
+		this.finalScore = finalScore;
+		this.dataCompleteness = dataCompleteness;
 		return this;
 	}
 
@@ -274,6 +303,22 @@ public class ProductResponse {
 
 	public void setCreatedByName(String createdByName) {
 		this.createdByName = createdByName;
+	}
+
+	public BigDecimal getFinalScore() {
+		return finalScore;
+	}
+
+	public void setFinalScore(BigDecimal finalScore) {
+		this.finalScore = finalScore;
+	}
+
+	public BigDecimal getDataCompleteness() {
+		return dataCompleteness;
+	}
+
+	public void setDataCompleteness(BigDecimal dataCompleteness) {
+		this.dataCompleteness = dataCompleteness;
 	}
 
 	public Long getCreatedBy() {

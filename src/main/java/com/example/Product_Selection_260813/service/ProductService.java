@@ -29,8 +29,10 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
+import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingStatus;
@@ -81,6 +83,9 @@ public class ProductService {
 	@Autowired
 	private ScoringService scoringService;
 
+	@Autowired
+	private ProductEvaluationRepository productEvaluationRepository;
+
 	// ========================= 查詢 =========================
 
 	/**
@@ -111,6 +116,27 @@ public class ProductService {
 						user -> Objects.requireNonNullElse(user.getName(), "")));
 	}
 
+	/**
+	 * 批次把一頁清單裡出現的商品 id 對應的評估結果查出來，避免在 .map() 裡
+	 * 逐筆呼叫 ProductEvaluationRepository.findByProductId（N+1）。
+	 *
+	 * ⚠️ 這是 ProductResponse 類別註解裡記錄的唯一例外：finalScore／
+	 * dataCompleteness 原則上屬於 ScoringService 的網域，但清單頁需要顯示，
+	 * 逐筆呼叫 /evaluation 是前端 N+1、這裡逐筆查也是後端 N+1，兩者都不好。
+	 * 用跟 resolveCreatedByNames() 一樣的批次查詢手法解決，不新增 JOIN、
+	 * 也不用改動 ProductRepository.search() 的查詢本身。
+	 */
+	private Map<Long, ProductEvaluation> resolveEvaluations(List<Product> products) {
+		Set<Long> ids = products.stream()
+				.map(Product::getId)
+				.collect(Collectors.toSet());
+		if (ids.isEmpty()) {
+			return Map.of();
+		}
+		return productEvaluationRepository.findByProductIdIn(ids).stream()
+				.collect(Collectors.toMap(ProductEvaluation::getProductId, e -> e));
+	}
+
 
 	/**
 	 * GET /api/products：品項管理主清單。
@@ -132,9 +158,18 @@ public class ProductService {
 
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
-		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(
-						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
+		// 同理批次查一次評估結果；該商品若尚無評估紀錄，evaluation 為 null，
+		// withEvaluationSummary 兩個參數一起傳 null，畫面顯示「—」而非 0。
+		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
+		return page.map(product -> {
+			ProductEvaluation evaluation = evaluationById.get(product.getId());
+			return ProductResponse.from(product)
+					.withCreatedByName(
+							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
+					.withEvaluationSummary(
+							evaluation != null ? evaluation.getFinalScore() : null,
+							evaluation != null ? evaluation.getDataCompleteness() : null);
+		});
 	}
 
 	/**
@@ -144,9 +179,16 @@ public class ProductService {
 	public Page<ProductResponse> searchAiSuggested(Pageable pageable) {
 		Page<Product> page = productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
-		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(
-						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
+		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
+		return page.map(product -> {
+			ProductEvaluation evaluation = evaluationById.get(product.getId());
+			return ProductResponse.from(product)
+					.withCreatedByName(
+							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
+					.withEvaluationSummary(
+							evaluation != null ? evaluation.getFinalScore() : null,
+							evaluation != null ? evaluation.getDataCompleteness() : null);
+		});
 	}
 
 	/**
