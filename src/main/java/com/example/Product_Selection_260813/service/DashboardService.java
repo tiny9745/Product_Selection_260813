@@ -5,7 +5,6 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,7 +21,6 @@ import com.example.Product_Selection_260813.dto.response.DashboardRiskAlertItem;
 import com.example.Product_Selection_260813.dto.response.DashboardStatisticsResponse;
 import com.example.Product_Selection_260813.entity.AiAnalysis;
 import com.example.Product_Selection_260813.entity.Product;
-import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.entity.RiskOption;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
@@ -99,9 +97,17 @@ public class DashboardService {
 		item.setProductId(product.getId());
 		item.setProductName(product.getName());
 		item.setSubmissionCount(product.getSubmissionCount());
+		// product 物件已在記憶體裡（findTopRecommendations 查出來的），
+		// 不需要為了 productTypeId 多查一次。
+		item.setProductTypeId(product.getProductTypeId());
 
 		productEvaluationRepository.findByProductId(product.getId())
-				.ifPresent(evaluation -> item.setFinalScore(evaluation.getFinalScore()));
+				.ifPresent(evaluation -> {
+					item.setFinalScore(evaluation.getFinalScore());
+					// dataCompleteness 跟 finalScore 來自同一個已查出的 evaluation 物件，
+					// 多讀一個既有欄位，不會多一次查詢。
+					item.setDataCompleteness(evaluation.getDataCompleteness());
+				});
 
 		// submissionCount>1代表曾經歷過「拒絕→重新送審」，才附加重新入榜標籤
 		if (product.getSubmissionCount() != null && product.getSubmissionCount() > 1) {

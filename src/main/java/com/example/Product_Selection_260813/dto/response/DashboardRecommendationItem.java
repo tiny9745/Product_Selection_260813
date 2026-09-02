@@ -18,7 +18,18 @@ public class DashboardRecommendationItem {
 
 	private Long productId;
 	private String productName;
+	/**
+	 * ⚠️ 這次補上：本方法對應的查詢（findTopRecommendations）已在記憶體裡
+	 * 持有 Product 物件，productTypeId 直接讀取即可，不需要額外查詢。
+	 * 前端拿這個 id 去對照 GET /api/settings/product-types 顯示分類名稱。
+	 */
+	private Long productTypeId;
 	private BigDecimal finalScore;
+	/**
+	 * ⚠️ 這次補上：ProductEvaluation 物件本來就會被查出來計算 finalScore，
+	 * 這裡只是多讀一個既有欄位，不會多一次查詢。
+	 */
+	private BigDecimal dataCompleteness;
 	private Integer submissionCount;
 	private String reentryLabel;
 	private String lastRejectionComment;
@@ -37,6 +48,22 @@ public class DashboardRecommendationItem {
 
 	public void setProductName(String productName) {
 		this.productName = productName;
+	}
+
+	public Long getProductTypeId() {
+		return productTypeId;
+	}
+
+	public void setProductTypeId(Long productTypeId) {
+		this.productTypeId = productTypeId;
+	}
+
+	public BigDecimal getDataCompleteness() {
+		return dataCompleteness;
+	}
+
+	public void setDataCompleteness(BigDecimal dataCompleteness) {
+		this.dataCompleteness = dataCompleteness;
 	}
 
 	public BigDecimal getFinalScore() {

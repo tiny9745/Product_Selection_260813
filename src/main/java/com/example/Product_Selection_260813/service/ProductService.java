@@ -99,8 +99,16 @@ public class ProductService {
 		if (ids.isEmpty()) {
 			return Map.of();
 		}
+		// ⚠️ Collectors.toMap 遇到 value 為 null 會直接拋 NullPointerException
+		// （Map.merge 的規範行為）。app_users.name 理論上不會是 null
+		//（UserCreateRequest.name 有 @NotBlank），但若資料是直接寫 SQL 建立、
+		// 繞過這層驗證，就可能出現 null，導致整支清單 API 500。
+		// 這裡用 Objects.requireNonNullElse 擋掉，讓姓名缺漏最多顯示空字串，
+		// 不會讓一筆髒資料拖垮整支 API。
 		return appUserRepository.findAllById(ids).stream()
-				.collect(Collectors.toMap(AppUser::getId, AppUser::getName));
+				.collect(Collectors.toMap(
+						AppUser::getId,
+						user -> Objects.requireNonNullElse(user.getName(), "")));
 	}
 
 
@@ -125,7 +133,8 @@ public class ProductService {
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
 		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
+				.withCreatedByName(
+						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**
@@ -136,7 +145,8 @@ public class ProductService {
 		Page<Product> page = productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
 		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
+				.withCreatedByName(
+						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**

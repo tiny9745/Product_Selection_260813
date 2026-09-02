@@ -497,11 +497,17 @@ public class ScoringService {
 				.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
 
 		Map<String, BigDecimal> weights = resolveCategoryWeights(modeId);
+		// ⚠️ 修正：EvaluationFactor.weight 存的是整數百分比（例如 25 代表 25%，
+		// 四個象限加總為 100），不是 0–1 的小數。子分數（0–100 分）直接乘上
+		// 權重卻沒有除以 100，會讓 totalScore 輕易衝到數千，超過
+		// product_evaluations.final_score / total_score 欄位（DECIMAL(5,2)，
+		// 上限 999.99）的容量，寫入時直接被 MySQL 拒絕
+		// （Data truncation: Out of range value for column 'final_score'）。
 		BigDecimal totalScore = businessScore.multiply(weights.getOrDefault("BUSINESS", BigDecimal.ZERO))
 				.add(audienceScore.multiply(weights.getOrDefault("AUDIENCE", BigDecimal.ZERO)))
 				.add(historicalScore.multiply(weights.getOrDefault("HISTORY", BigDecimal.ZERO)))
 				.add(forecastScore.multiply(weights.getOrDefault("FORECAST", BigDecimal.ZERO)))
-				.setScale(2, RoundingMode.HALF_UP);
+				.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
 
 		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
 		BigDecimal festivalBoost = campaignSnapshot != null

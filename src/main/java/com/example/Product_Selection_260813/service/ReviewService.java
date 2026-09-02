@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -95,12 +96,18 @@ public class ReviewService {
 				.map(Product::getCreatedBy)
 				.filter(id -> id != null)
 				.collect(Collectors.toSet());
+		// ⚠️ 同 ProductService.resolveCreatedByNames() 的說明：
+		// Collectors.toMap 遇到 value 為 null 會直接拋 NullPointerException，
+		// 用 requireNonNullElse 擋掉，避免一筆髒資料（姓名為 null）拖垮整支清單 API。
 		Map<Long, String> createdByNameById = createdByIds.isEmpty() ? Map.of()
 				: appUserRepository.findAllById(createdByIds).stream()
-						.collect(Collectors.toMap(AppUser::getId, AppUser::getName));
+						.collect(Collectors.toMap(
+								AppUser::getId,
+								user -> Objects.requireNonNullElse(user.getName(), "")));
 
 		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(createdByNameById.get(product.getCreatedBy())));
+				.withCreatedByName(
+						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
 	}
 
 	/**
