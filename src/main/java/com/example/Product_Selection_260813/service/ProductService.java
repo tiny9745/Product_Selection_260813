@@ -36,6 +36,7 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
+
 /**
  * 對應 API總表 三、品項管理（不含四、評估／趨勢／AI，那些屬於ScoringService／
  * TrendService／AiSelectionService的職責，見企劃書十二-13分層決議）：
@@ -124,20 +125,6 @@ public class ProductService {
 	/**
 	 * POST /api/products：手動建立品項。
 	 *
-	 * <b>刻意不檢查商品名稱是否重複（已與團隊確認，非疏漏）：</b>商品名稱天生就可能
-	 * 合法重複——同名商品可能來自不同供應商、不同規格、不同批次進貨（例如
-	 * 「A供應商的雞腿禮盒」與「B供應商的雞腿禮盒」）。若在這裡加唯一約束擋下，
-	 * 會連帶擋掉這些合法情境，不是單純「防呆」而已。
-	 *
-	 * 真正該防的風險是「操作人員手滑重複送出同一筆」，這屬於**前端**該處理的問題
-	 * （送出後禁用按鈕、debounce、或偵測到同名時跳出確認提示讓使用者自行判斷），
-	 * 不該由後端用「一律禁止同名」這種對所有情境都生效的規則來處理——那等於用
-	 * 治療症狀的方式，犧牲掉本來合法的使用情境。
-	 *
-	 * 若未來要調整這個決策（例如確認商品名稱在實務上就是唯一識別品項、同名一定
-	 * 是誤操作），需要在這裡新增查詢檢查，並在資料表設計（五、products）補上
-	 * 對應的DB層UNIQUE約束——兩者要一起做，不能只加其中一層。
-	 *
 	 * 預設值（不開放Request傳入，見ProductCreateRequest類別註解）：
 	 * review_status=PENDING、item_status=ACTIVE、candidate_status=CANDIDATE
 	 * pricing_status：NEW -&gt; PENDING_PRICING；RESALE -&gt; 留空（null）
@@ -179,9 +166,12 @@ public class ProductService {
 
 		Product saved = productRepository.save(product);
 
-		// Demo緊急補上的觸發點（見ScoringService類別Java Doc）：新增成功後立即
-		// 重算評估分數，讓品項詳情頁一建立就有分數可看，不用等使用者手動觸發其他動作。
-		scoringService.calculateEvaluation(saved.getId(), null);
+		// 2026-08-31：新增商品後立即觸發評分重算，讓品項詳情頁／Top10從商品一建立
+		// 就有分數可看，不用額外再手動觸發trend/sync。若尚未設定current_evaluation_mode_id
+		// （demo前的seed資料還沒準備好），這裡會直接丟IllegalStateException並整筆
+		// 交易一起rollback——刻意讓「建立商品」在配置不完整時明確失敗，而不是靜默地
+		// 建立一筆永遠算不出分數的商品，見ScoringService.resolveCurrentEvaluationModeId()。
+		scoringService.calculateEvaluation(saved.getId());
 
 		return ProductResponse.from(saved);
 	}
@@ -240,9 +230,11 @@ public class ProductService {
 
 		Product saved = productRepository.save(product);
 
-		// Demo緊急補上的觸發點：編輯成功後重算，確保分數反映最新欄位內容
-		// （例如成本價/售價變動會影響BUSINESS分項）。
-		scoringService.calculateEvaluation(saved.getId(), null);
+		// 2026-08-31：編輯後同樣觸發完整重算（原因同createProduct()）。APPROVED商品
+		// 因為上面assertCoreDataUnchanged()已保證評分相關欄位沒有實質變動，這裡重算
+		// 出來的LIVE分數理論上會跟原本一致；畫面顯示仍以getEvaluation()的雙軌讀取邏輯
+		// 為準（APPROVED讀SNAPSHOT），不會因為這次重算而讓使用者看到分數跳動。
+		scoringService.calculateEvaluation(saved.getId());
 
 		return ProductResponse.from(saved);
 	}

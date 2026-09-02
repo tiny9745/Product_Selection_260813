@@ -24,10 +24,8 @@ import java.math.RoundingMode;
  *
  * 依十二-13分層決議，本類別只負責「同步趨勢資料」本身（寫入trend_signals），
  * 觸發重算的部分透過呼叫ScoringService完成（單向依賴：TrendService → ScoringService，
- * 不可逆向依賴造成循環）。2026-08-31更新：改為呼叫完整的
- * ScoringService.calculateEvaluation()（取代原本只更新trend_score的
- * updateTrendScoreFromLatestSignal()），確保趨勢資料同步後，六大分項與
- * total_score／final_score都跟著重新計算，而不只是單一欄位更新。
+ * 不可逆向依賴造成循環）——重算目前只更新trend_score，詳見
+ * ScoringService.updateTrendScoreFromLatestSignal()的TODO說明。
  *
  * 「取得最新市場趨勢／熱門度資料」在六週雛型階段採模擬市場資料集、非即時爬蟲
  * （企劃書十二-2備註已明確界定此範圍，非本類別自行簡化），故本類別不串接任何
@@ -74,7 +72,13 @@ public class TrendService {
 		TrendSignal newSignal = generateSimulatedTrendSignal(product);
 		trendSignalRepository.save(newSignal);
 
-		scoringService.calculateEvaluation(productId, null);
+		// 2026-08-31：評分重算引擎補上後，改呼叫完整重算，不再只更新trend_score
+		// 單一欄位（原本的updateTrendScoreFromLatestSignal()做法）。理由見
+		// ScoringService.calculateEvaluation()類別內註解——半套更新（只改trend_score
+		// 卻不重新加權其餘分項）比完整重算更容易讓total_score/final_score失真。
+		// updateTrendScoreFromLatestSignal()本身先保留在ScoringService，不刪除，
+		// 避免有其他未預期的呼叫端還沒改到就直接編譯失敗。
+		scoringService.calculateEvaluation(productId);
 
 		return scoringService.buildTrendSnapshot(productId);
 	}

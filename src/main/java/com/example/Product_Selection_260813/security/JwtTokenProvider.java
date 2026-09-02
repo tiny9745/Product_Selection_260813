@@ -40,7 +40,7 @@ public class JwtTokenProvider {
 
 	public JwtTokenProvider(
 			@Value("${jwt.secret}") String secret,
-			@Value("${jwt.expiration-ms}") long expirationMs
+			@Value("${jwt.expiration-ms:28800000}") long expirationMs // 預設8小時 = 28800000ms
 	) {
 		// HS256要求金鑰長度至少256bit（32 bytes）；secret太短時jjwt會直接在這裡拋例外，
 		// 在啟動階段就會發現設定錯誤，而不是等到第一次登入才炸掉，這裡刻意不吃掉這個例外。

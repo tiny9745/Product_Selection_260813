@@ -66,6 +66,7 @@ import com.example.Product_Selection_260813.repository.SystemSettingRepository;
  * festive_campaign_tags表承接（一檔期對多標籤、每個標籤各自帶match_tier），
  * 見FestiveCampaignTag.java與ScoringService類別註解。本類別的create／update
  * 因此改用「標籤＋分級」清單（FestiveCampaignTagInput），不是單一字串，
+ * 這是配合先前已確認的資料表異動所做的必要調整，不是本輪自行簡化。
  */
 @Service
 public class SettingsService {
@@ -263,10 +264,6 @@ public class SettingsService {
 
 	/**
 	 * POST /api/settings/product-types：新增自訂商品分類（isSystemDefault固定為false）。
-	 *
-	 * <b>刻意不檢查name是否重複（已與團隊確認，非疏漏，與ProductService.createProduct()
-	 * 同一個決策範圍）：</b>同名分類可能分屬不同管理脈絡下建立，且屬於管理層低頻、
-	 * 少量的操作，人眼就看得出是否重複，由管理層自行判斷，系統不代為阻擋。
 	 */
 	@Transactional
 	public ProductTypeResponse createProductType(ProductTypeCreateRequest request, String username) {

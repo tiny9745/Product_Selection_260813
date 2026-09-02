@@ -30,7 +30,11 @@ public class ProductEvaluation {
 	@Column(name = "product_id", nullable = false)
 	private Long productId;
 
-	@Column(name = "evaluation_mode_id", nullable = false)
+	// 資料完整度未達60%門檻時（QA3），calculateEvaluation()會提早return，
+	// 不會呼叫resolveCurrentEvaluationModeId()賦值，此時該筆評估紀錄尚未
+	// 真正被任何評估模式計算過，null正確反映「還沒評分」的語意，
+	// 不應該用一個尚未套用的模式id去填充這個欄位。
+	@Column(name = "evaluation_mode_id")
 	private Long evaluationModeId;
 
 	@Column(name = "business_score", precision = 5, scale = 2)
