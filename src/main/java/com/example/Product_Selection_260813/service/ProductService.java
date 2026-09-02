@@ -30,6 +30,8 @@ import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
+import com.example.Product_Selection_260813.repository.TrendSignalRepository;
+import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
@@ -85,6 +87,12 @@ public class ProductService {
 
 	@Autowired
 	private ProductEvaluationRepository productEvaluationRepository;
+
+	@Autowired
+	private TrendSignalRepository trendSignalRepository;
+
+	@Autowired
+	private AiAnalysisRepository aiAnalysisRepository;
 
 	// ========================= 查詢 =========================
 
@@ -454,6 +462,29 @@ public class ProductService {
 		if (!deletable) {
 			throw new IllegalStateException("僅未審核且尚未送審過的商品可刪除");
 		}
+
+		// ⚠️ 修正：products 被三張表參照，且沒有任何一個外鍵設 ON DELETE CASCADE：
+		//   - product_evaluations.product_id → products.id
+		//   - trend_signals.product_id       → products.id
+		//   - ai_analyses.product_id         → products.id
+		// PENDING 且從未送審過只保證沒有 review_records，跟這三張表無關——
+		// 新增或編輯商品就會觸發 calculateEvaluation() 寫入評估紀錄，
+		// 手動同步趨勢／產生 AI 分析也都不需要商品先送審，直接刪 products
+		// 會撞到其中任一個外鍵，以 500 失敗收場（product_evaluations 那個
+		// 已實際發生過，另外兩個依 schema sql260902.sql 核對後判斷同樣會撞）。
+		//
+		// ⚠️ 刪除順序不能只看「誰參照 products」，還要看這幾張表彼此的關聯：
+		// ai_analyses.evaluation_id 另外還外鍵指向 product_evaluations.id
+		// （fk_ai_analyses_evaluation），所以 ai_analyses 必須先刪，
+		// 否則先刪 product_evaluations 只是把 500 換成撞另一個外鍵。
+		// trend_signals 跟這兩張表沒有關聯，順序無關緊要。
+		//
+		// 四個步驟都在同一個 @Transactional 內，任一步失敗整筆都會回滾，
+		// 不會留下刪了一半的狀態。
+		aiAnalysisRepository.deleteByProductId(id);
+		productEvaluationRepository.findByProductId(id)
+				.ifPresent(productEvaluationRepository::delete);
+		trendSignalRepository.deleteByProductId(id);
 
 		productRepository.delete(product);
 	}
