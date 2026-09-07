@@ -46,10 +46,16 @@ import com.example.Product_Selection_260813.repository.SystemSettingRepository;
  * risk_options／festive_campaigns／system_settings），避免這些端點被隨手塞進
  * 其他Controller導致邊界模糊」。
  *
- * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定（4支）／
- * 節慶檔期管理（4支）。加上第一批已完成的評估模式（4支）與人工風險選項的GET
- * （1支），七、系統設定除了POST /api/settings/risk-options（見下方說明），
- * 其餘皆已完成。
+ * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定（5支，
+ * 含enable）／人工風險選項的停用與復用（2支）。加上第一批已完成的評估模式
+ * （4支）、人工風險選項的GET／POST（2支）、商品類型的GET／POST／disable（3支）
+ * 與節慶檔期管理（4支），七、系統設定端點皆已完成。
+ *
+ * <b>「停用只單向、不提供啟用」的決策已推翻：</b>商品類型與人工風險選項原本都
+ * 只有disable、沒有enable，理由是「企劃書只定義停用這個單向動作」；但實務上
+ * 一旦誤停用就沒有復原手段（重新新增一筆同名資料的id不同，無法接回既有
+ * 品項／審核紀錄的外鍵關聯），故補上對稱的enable端點，兩者維持與user一致的
+ * 「停用不刪除＋可復用」模式。
  *
  *
  * PUT /api/settings/evaluation-mode/current則不受這個文件矛盾影響：它修改的
@@ -218,6 +224,37 @@ public class SettingsService {
 		return RiskOptionResponse.from(saved);
 	}
 
+	/**
+	 * PUT /api/settings/risk-options/{id}/disable：停用人工風險選項。
+	 *
+	 * 停用後不再出現於審核頁的可勾選清單（該清單讀is_active=true者，見
+	 * ReviewService/RiskOptionRepository.findByIsActiveTrue()），但既有
+	 * review_risks歷史紀錄的關聯不受影響——與商品類型停用是同一套設計
+	 * （只停用不刪除、歷史資料仍保留關聯），故此處直接複用相同模式。
+	 * 冪等：重複停用已停用的選項不視為錯誤。
+	 */
+	@Transactional
+	public RiskOptionResponse disableRiskOption(Long id) {
+		RiskOption option = riskOptionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
+		option.setIsActive(false);
+		RiskOption saved = riskOptionRepository.save(option);
+		return RiskOptionResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/risk-options/{id}/enable：復用（重新啟用）已停用的風險選項。
+	 * 與disableRiskOption()對稱，冪等處理。
+	 */
+	@Transactional
+	public RiskOptionResponse enableRiskOption(Long id) {
+		RiskOption option = riskOptionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
+		option.setIsActive(true);
+		RiskOption saved = riskOptionRepository.save(option);
+		return RiskOptionResponse.from(saved);
+	}
+
 	// ========================= 核心客群設定 =========================
 
 	/**
@@ -284,14 +321,33 @@ public class SettingsService {
 
 	/**
 	 * PUT /api/settings/product-types/{id}/disable：停用分類（該分類已被品項使用
-	 * 時的建議做法）。企劃書只定義「停用」這個單向動作，沒有對應的「啟用」端點，
-	 * 這裡不額外發明未定義的功能。
+	 * 時的建議做法）。
+	 *
+	 * 重複停用已停用的分類不視為錯誤（冪等），與UserService.disableUser()同一套
+	 * 判斷原則：結果狀態與呼叫端的意圖一致，沒有理由回報失敗。
 	 */
 	@Transactional
 	public ProductTypeResponse disableProductType(Long id) {
 		ProductType type = productTypeRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("商品類型不存在"));
 		type.setIsActive(false);
+		ProductType saved = productTypeRepository.save(type);
+		return ProductTypeResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/product-types/{id}/enable：復用（重新啟用）已停用的分類。
+	 *
+	 * 補上此端點以取代原本「企劃書只定義停用、不提供啟用」的決策：被停用的
+	 * 分類若無法復用，管理層誤停用後只能重新新增一筆同名分類，但新分類的id
+	 * 與既有品項的product_type_id並不相同，等於沒有真正解決問題，故改為
+	 * 提供對稱的enable端點。與disableProductType()同樣採冪等處理。
+	 */
+	@Transactional
+	public ProductTypeResponse enableProductType(Long id) {
+		ProductType type = productTypeRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("商品類型不存在"));
+		type.setIsActive(true);
 		ProductType saved = productTypeRepository.save(type);
 		return ProductTypeResponse.from(saved);
 	}

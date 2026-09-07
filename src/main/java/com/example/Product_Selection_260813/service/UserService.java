@@ -13,16 +13,18 @@ import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 
 /**
- * 對應 四、API總表「1-2. 帳號管理」三支端點（皆為[僅管理]）：
- * GET /api/users、POST /api/users、PUT /api/users/{id}/disable。
+ * 對應 四、API總表「1-2. 帳號管理」四支端點（皆為[僅管理]）：
+ * GET /api/users、POST /api/users、PUT /api/users/{id}/disable、
+ * PUT /api/users/{id}/enable。
  *
  * <b>與AuthService的職責分界</b>（七-5決議）：AuthService負責「驗證我是誰」
- * （登入、取得自身資料、登出），本類別負責「管理別人的帳號」（列出、新增、停用）。
+ * （登入、取得自身資料、登出），本類別負責「管理別人的帳號」（列出、新增、停用、復用）。
  * 兩者僅共用AppUser實體與app_users資料表，不共用商業邏輯。
  *
  * <b>帳號只停用不刪除</b>：app_users被review_records.reviewer_id、
  * products.created_by等欄位參照，實體刪除會使歷史稽核紀錄失去對應人員資料，
- * 故不提供DELETE端點（七-5決議）。
+ * 故不提供DELETE端點（七-5決議）。因此被停用的帳號需要能重新啟用（見
+ * enableUser()），否則管理層一旦誤停用帳號就沒有回復手段，只能改資料庫。
  */
 @Service
 public class UserService {
@@ -96,6 +98,25 @@ public class UserService {
 		}
 
 		user.setEnabled(false);
+		AppUser saved = appUserRepository.save(user);
+		return UserAccountResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/users/{id}/enable：復用（重新啟用）已停用的帳號。
+	 *
+	 * 與disableUser()對稱，但不需要「不可操作自己」的保護：啟用帳號不會讓
+	 * 系統失去可登入的管理員，不存在disableUser()那種自我鎖死的風險。
+	 *
+	 * 重複啟用已啟用的帳號不視為錯誤（冪等），理由與disableUser()相同：
+	 * 結果狀態與呼叫端的意圖一致，沒有理由回報失敗。
+	 */
+	@Transactional
+	public UserAccountResponse enableUser(Long id) {
+		AppUser user = appUserRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+
+		user.setEnabled(true);
 		AppUser saved = appUserRepository.save(user);
 		return UserAccountResponse.from(saved);
 	}

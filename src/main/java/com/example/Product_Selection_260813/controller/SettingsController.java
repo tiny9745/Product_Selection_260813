@@ -36,10 +36,11 @@ import jakarta.validation.Valid;
 /**
  * 對應 API總表 七、系統設定（十二-13分層決議：SettingsController → SettingsService）。
  *
- * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定（4支）／
- * 節慶檔期管理（4支）。加上第一批已完成的評估模式（4支）與人工風險選項的GET
- * （1支），除了POST /api/settings/risk-options（詳見SettingsService類別註解
- * 的文件矛盾說明，本輪刻意不提供），七、系統設定其餘端點皆已完成。
+ * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定的enable
+ * （1支）／人工風險選項的停用與復用（2支）。加上先前已完成的評估模式（4支）、
+ * 人工風險選項的GET／POST（2支）、商品類型的GET／POST／disable（3支）與
+ * 節慶檔期管理（4支），七、系統設定端點皆已完成（詳見SettingsService類別
+ * 註解關於「停用只單向」決策推翻的說明）。
  *
  * 各端點權限逐支對應企劃書標註的角色範圍（[操作+管理]／[僅管理]），
  * 不是整個Controller套同一組權限。
@@ -99,6 +100,20 @@ public class SettingsController {
 		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
 	}
 
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/risk-options/{id}/disable")
+	public ResponseEntity<ApiResponse<RiskOptionResponse>> disableRiskOption(@PathVariable("id") Long id) {
+		RiskOptionResponse result = settingsService.disableRiskOption(id);
+		return ResponseEntity.ok(ApiResponse.success("已停用", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/risk-options/{id}/enable")
+	public ResponseEntity<ApiResponse<RiskOptionResponse>> enableRiskOption(@PathVariable("id") Long id) {
+		RiskOptionResponse result = settingsService.enableRiskOption(id);
+		return ResponseEntity.ok(ApiResponse.success("已復用", result));
+	}
+
 	// ========================= 核心客群設定 =========================
 
 	@PreAuthorize("hasRole('MANAGER')")
@@ -138,6 +153,13 @@ public class SettingsController {
 	public ResponseEntity<ApiResponse<ProductTypeResponse>> disableProductType(@PathVariable("id") Long id) {
 		ProductTypeResponse result = settingsService.disableProductType(id);
 		return ResponseEntity.ok(ApiResponse.success("已停用", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/product-types/{id}/enable")
+	public ResponseEntity<ApiResponse<ProductTypeResponse>> enableProductType(@PathVariable("id") Long id) {
+		ProductTypeResponse result = settingsService.enableProductType(id);
+		return ResponseEntity.ok(ApiResponse.success("已復用", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")

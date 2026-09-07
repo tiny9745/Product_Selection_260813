@@ -22,14 +22,15 @@ import com.example.Product_Selection_260813.service.UserService;
 import jakarta.validation.Valid;
 
 /**
- * 對應 四、API總表「1-2. 帳號管理」，三支端點皆為[僅管理]。
+ * 對應 四、API總表「1-2. 帳號管理」，四支端點皆為[僅管理]。
  *
  * 與AuthController分開的原因見七-5與UserService類別註解：AuthController
  * 處理「自身身分」（登入／me／登出，[操作+管理]），本Controller處理
  * 「管理別人的帳號」（[僅管理]），權限範圍與職責性質都不同。
  *
  * 不提供DELETE端點：帳號只停用不刪除（七-5決議），實體刪除會使
- * review_records等歷史稽核紀錄失去對應人員資料。
+ * review_records等歷史稽核紀錄失去對應人員資料；被停用的帳號改用
+ * PUT /api/users/{id}/enable復用。
  */
 @RestController
 @RequestMapping("/api/users")
@@ -71,5 +72,18 @@ public class UserController {
 			@AuthenticationPrincipal String username) {
 		UserAccountResponse result = userService.disableUser(id, username);
 		return ResponseEntity.ok(ApiResponse.success("帳號已停用", result));
+	}
+
+	/**
+	 * PUT /api/users/{id}/enable：復用（重新啟用）帳號，啟用後該帳號恢復可登入。
+	 *
+	 * 不需要像disableUser()一樣帶入目前登入者username：啟用不存在「操作自己」
+	 * 需要擋下的風險（理由見UserService.enableUser()）。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/{id}/enable")
+	public ResponseEntity<ApiResponse<UserAccountResponse>> enableUser(@PathVariable("id") Long id) {
+		UserAccountResponse result = userService.enableUser(id);
+		return ResponseEntity.ok(ApiResponse.success("帳號已復用", result));
 	}
 }
