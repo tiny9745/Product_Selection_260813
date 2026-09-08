@@ -4,8 +4,12 @@ import java.time.LocalDate;
 import java.util.List;
 
 import jakarta.validation.Valid;
+import com.example.Product_Selection_260813.constants.ValidationMessage;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 
@@ -21,6 +25,7 @@ import com.example.Product_Selection_260813.enums.FestiveCategory;
 public class FestiveCampaignUpdateRequest {
 
 	@NotBlank(message = "檔期名稱不可為空")
+	@Size(max = 100, message = ValidationMessage.CAMPAIGN_NAME_TOO_LONG)
 	private String campaignName;
 
 	@NotNull(message = "檔期類別不可為空")
@@ -32,6 +37,9 @@ public class FestiveCampaignUpdateRequest {
 	@NotNull(message = "檔期結束日期不可為空")
 	private LocalDate endDate;
 
+	// 準備期天數為負數會讓ScoringService.calculateUrgencyFactor()的分母失真，
+	// 使節慶加成算出不合理的值，必須在進Service前擋下。
+	@PositiveOrZero(message = ValidationMessage.CAMPAIGN_LEAD_DAYS_NEGATIVE)
 	private Integer preparationLeadDays;
 
 	@Valid

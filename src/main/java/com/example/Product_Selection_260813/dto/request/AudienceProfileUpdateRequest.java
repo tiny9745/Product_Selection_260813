@@ -1,8 +1,12 @@
 package com.example.Product_Selection_260813.dto.request;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.PriceSensitivityStatus;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * PUT /api/settings/audience-profile 的 Request Body。
@@ -13,12 +17,25 @@ import jakarta.validation.constraints.NotBlank;
 public class AudienceProfileUpdateRequest {
 
 	@NotBlank(message = "核心客群名稱不可為空")
+	@Size(max = 100, message = ValidationMessage.AUDIENCE_NAME_TOO_LONG)
 	private String name;
 
+	// 年齡上下界只做單欄位的合理值域驗證；「ageMin不可大於ageMax」是跨欄位的
+	// 商業邏輯，放在SettingsService.updateAudienceProfile()攔截。
+	@Min(value = 0, message = ValidationMessage.AUDIENCE_AGE_MIN_RANGE)
+	@Max(value = 150, message = ValidationMessage.AUDIENCE_AGE_MIN_RANGE)
 	private Integer ageMin;
+
+	@Min(value = 0, message = ValidationMessage.AUDIENCE_AGE_MAX_RANGE)
+	@Max(value = 150, message = ValidationMessage.AUDIENCE_AGE_MAX_RANGE)
 	private Integer ageMax;
+
 	private PriceSensitivityStatus priceSensitivity;
+
+	// preferenceDescription對應TEXT欄位，不設長度上限
 	private String preferenceDescription;
+
+	@Size(max = 500, message = ValidationMessage.AUDIENCE_KEYWORDS_TOO_LONG)
 	private String keywords;
 
 	public String getName() {

@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
@@ -35,6 +36,7 @@ import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
+import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingStatus;
@@ -237,10 +239,16 @@ public class ProductService {
 	 */
 	@Transactional
 	public ProductResponse createProduct(ProductCreateRequest request, String username) {
-		if (!productTypeRepository.existsById(request.getProductTypeId())) {
-			throw new IllegalArgumentException("商品類型不存在");
+		ProductType productType = productTypeRepository.findById(request.getProductTypeId())
+				.orElseThrow(() -> new IllegalArgumentException("商品類型不存在"));
+		// 新增商品時，已停用的類型不可再被選用——否則設定頁的「停用」端點形同虛設。
+		// 注意：編輯既有商品時不套用這個檢查（見updateProduct()），避免類型一停用，
+		// 底下所有既有商品連基本資料都改不了。
+		if (!Boolean.TRUE.equals(productType.getIsActive())) {
+			throw new IllegalArgumentException(ValidationMessage.PRODUCT_TYPE_INACTIVE);
 		}
 		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
+		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
 
 		Long userId = resolveUserId(username);
 
@@ -294,7 +302,11 @@ public class ProductService {
 		if (!productTypeRepository.existsById(request.getProductTypeId())) {
 			throw new IllegalArgumentException("商品類型不存在");
 		}
+		// 這裡刻意不檢查商品類型是否停用：既有商品若原本就掛在某個類型下，
+		// 該類型後來被停用時，仍應允許編輯商品的基本資料。只有「新增」才需要
+		// 阻擋選用停用中的類型（見createProduct()）。
 		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
+		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
 
 		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
 			assertCoreDataUnchanged(product, request);
@@ -602,6 +614,31 @@ public class ProductService {
 	private void validateMarketPriceOnlyForResale(ProductPricingType pricingType, BigDecimal marketPrice) {
 		if (pricingType == ProductPricingType.NEW && marketPrice != null) {
 			throw new IllegalArgumentException("市售價格僅適用於再販售(RESALE)商品");
+		}
+	}
+
+	/**
+	 * 價格欄位之間的關係驗證。單欄位的值域（非負、精度）已由DTO層的
+	 * {@code @PositiveOrZero}／{@code @Digits}攔截，這裡只處理跨欄位的商業邏輯。
+	 *
+	 * 1. costPrice &gt; salePrice：毛利率會算出負數。ScoringService的clamp()雖然會把
+	 *    分數壓在0，畫面上看起來正常，但這是明確的資料錯誤，應該在存檔前擋下，
+	 *    而不是讓錯誤資料一路寫進不可覆蓋的審核快照。
+	 *
+	 * 2. RESALE商品salePrice=0：calculateBusinessScore()判斷有無訂價的條件是
+	 *    {@code salePrice.compareTo(ZERO) > 0}，填0會讓RESALE商品落入「NEW尚未訂價」
+	 *    的中性分50分支，語意完全錯誤。NEW商品允許為空或0（本來就還沒議價）。
+	 *
+	 * 刻意不驗證 salePrice &gt; marketPrice（團購價高於市價）：限量品、獨家品確實
+	 * 可能發生，屬於需要主管判斷的提示，不是應該擋下的錯誤。
+	 */
+	private void validatePriceRelations(ProductPricingType pricingType, BigDecimal costPrice, BigDecimal salePrice) {
+		if (costPrice != null && salePrice != null && costPrice.compareTo(salePrice) > 0) {
+			throw new IllegalArgumentException(ValidationMessage.PRODUCT_COST_OVER_SALE);
+		}
+		if (pricingType == ProductPricingType.RESALE && salePrice != null
+				&& salePrice.compareTo(BigDecimal.ZERO) == 0) {
+			throw new IllegalArgumentException(ValidationMessage.PRODUCT_RESALE_SALE_PRICE_ZERO);
 		}
 	}
 

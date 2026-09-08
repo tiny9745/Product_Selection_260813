@@ -1,6 +1,9 @@
 package com.example.Product_Selection_260813.dto.request;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
+
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * POST /api/settings/product-types 的 Request Body：新增自訂商品分類。
@@ -12,8 +15,10 @@ import jakarta.validation.constraints.NotBlank;
 public class ProductTypeCreateRequest {
 
 	@NotBlank(message = "商品類型名稱不可為空")
+	@Size(max = 50, message = ValidationMessage.PRODUCT_TYPE_NAME_TOO_LONG)
 	private String name;
 
+	@Size(max = 255, message = ValidationMessage.PRODUCT_TYPE_DESCRIPTION_TOO_LONG)
 	private String description;
 
 	public String getName() {

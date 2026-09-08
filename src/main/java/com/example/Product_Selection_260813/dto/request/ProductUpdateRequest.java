@@ -5,8 +5,13 @@ import java.math.BigDecimal;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 /**
  * PUT /api/products/{id} 的 Request Body。
@@ -37,30 +42,51 @@ public class ProductUpdateRequest {
 	private ProductPricingType pricingType;
 
 	@NotBlank(message = ValidationMessage.PRODUCT_NAME_NULL)
+	@Size(max = 100, message = ValidationMessage.PRODUCT_NAME_TOO_LONG)
 	private String name;
 
+	// description對應TEXT欄位，不設長度上限
 	private String description;
 
+	@Size(max = 500, message = ValidationMessage.PRODUCT_IMAGE_URL_TOO_LONG)
 	private String imageUrl;
 
+	@Size(max = 100, message = ValidationMessage.PRODUCT_SUPPLIER_NAME_TOO_LONG)
 	private String supplierName;
 
+	// 驗證規則與ProductCreateRequest完全一致：整份覆蓋語意下，PUT能送進來的
+	// 值域必須跟POST一樣受限，否則會出現「新增擋得住、改一次就繞過去」的漏洞。
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_COST_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_COST_PRICE_OVER_DIGITS)
 	private BigDecimal costPrice;
 
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_SALE_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_SALE_PRICE_OVER_DIGITS)
 	private BigDecimal salePrice;
 
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_MARKET_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_MARKET_PRICE_OVER_DIGITS)
 	private BigDecimal marketPrice;
 
+	@Size(max = 255, message = ValidationMessage.PRODUCT_CAMPAIGN_TAGS_TOO_LONG)
 	private String campaignTags;
 
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_MOQ_NEGATIVE)
 	private Integer moq;
 
+	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
 	private BigDecimal supplyStability;
 
+	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
 	private BigDecimal priceCompetitiveness;
 
+	// targetCustomerDescription對應TEXT欄位，不設長度上限
 	private String targetCustomerDescription;
 
+	@DecimalMin(value = "0.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
+	@DecimalMax(value = "1.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	private BigDecimal estimatedPurchaseRate;
 
 	public Long getProductTypeId() {

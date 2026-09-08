@@ -18,6 +18,7 @@ import com.example.Product_Selection_260813.dto.request.ReviewSubmitRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.dto.response.ReviewDetailResponse;
 import com.example.Product_Selection_260813.dto.response.ReviewRecordResponse;
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.response.RiskOptionResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
@@ -34,6 +35,7 @@ import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
 import com.example.Product_Selection_260813.repository.ReviewRiskRepository;
+import com.example.Product_Selection_260813.entity.RiskOption;
 import com.example.Product_Selection_260813.repository.RiskOptionRepository;
 
 /**
@@ -177,6 +179,8 @@ public class ReviewService {
 			throw new IllegalStateException("僅未審核商品可提交審核結果");
 		}
 
+		validateRejectionReason(request);
+
 		Long reviewerId = resolveUserId(username);
 
 		Optional<ProductEvaluation> evaluationOpt = scoringService.getCurrentEvaluation(product.getId());
@@ -273,6 +277,25 @@ public class ReviewService {
 	 * 這裡仍先distinct()一次是為了避免對同一組合鍵save()兩次觸發不必要的重複UPDATE語句
 	 * （JPA對已存在的複合主鍵save()會走UPDATE而非INSERT，雖然結果正確但多一次往返）。
 	 */
+	/**
+	 * 退件時至少要留下一項可追溯的理由：勾選風險項目或填寫審核備註，兩者至少一項。
+	 *
+	 * riskOptionIds／reviewComment在DTO層刻意不加@NotEmpty／@NotBlank
+	 * （見ReviewSubmitRequest類別註解）——核准時本來就可能兩者皆空，那是合法的。
+	 * 但「退件卻不說明任何理由」對送審人沒有任何幫助，也讓審核紀錄失去稽核價值，
+	 * 因此這是依審核結果而定的商業邏輯，只能放在Service層判斷，不能用DTO註解表達。
+	 */
+	private void validateRejectionReason(ReviewSubmitRequest request) {
+		if (request.getReviewStatus() != ReviewRecordReviewStatus.REJECTED) {
+			return;
+		}
+		boolean hasRisk = request.getRiskOptionIds() != null && !request.getRiskOptionIds().isEmpty();
+		boolean hasComment = request.getReviewComment() != null && !request.getReviewComment().isBlank();
+		if (!hasRisk && !hasComment) {
+			throw new IllegalArgumentException(ValidationMessage.REVIEW_REJECT_REASON_REQUIRED);
+		}
+	}
+
 	private List<Long> saveReviewRisks(Long reviewId, List<Long> riskOptionIds) {
 		if (riskOptionIds == null || riskOptionIds.isEmpty()) {
 			return List.of();
@@ -280,8 +303,14 @@ public class ReviewService {
 
 		List<Long> distinctIds = riskOptionIds.stream().distinct().toList();
 		for (Long riskOptionId : distinctIds) {
-			if (!riskOptionRepository.existsById(riskOptionId)) {
-				throw new IllegalArgumentException("人工風險選項不存在：" + riskOptionId);
+			RiskOption riskOption = riskOptionRepository.findById(riskOptionId)
+					.orElseThrow(() -> new IllegalArgumentException("人工風險選項不存在：" + riskOptionId));
+			// 已停用的風險選項不可被「新的」審核勾選——否則設定頁的disable端點形同虛設。
+			// 注意這個檢查只在寫入路徑，不在查詢路徑：歷史審核紀錄引用當時還啟用、
+			// 現在已停用的選項是正常的，getReviewRecords()查詢時不可因此報錯。
+			if (!Boolean.TRUE.equals(riskOption.getIsActive())) {
+				throw new IllegalArgumentException(
+						ValidationMessage.REVIEW_RISK_OPTION_INACTIVE + riskOption.getName());
 			}
 			ReviewRisk reviewRisk = new ReviewRisk();
 			reviewRisk.setId(new ReviewRiskId(reviewId, riskOptionId));

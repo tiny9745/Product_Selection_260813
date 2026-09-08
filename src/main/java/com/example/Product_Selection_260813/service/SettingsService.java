@@ -33,6 +33,9 @@ import com.example.Product_Selection_260813.entity.RiskOption;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
+import java.time.LocalDate;
+
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
@@ -297,6 +300,13 @@ public class SettingsService {
 	 */
 	@Transactional
 	public AudienceProfileResponse updateActiveAudienceProfile(AudienceProfileUpdateRequest request) {
+		// 單欄位值域（0~150）已由DTO的@Min／@Max攔截，這裡只驗證跨欄位的大小關係。
+		// ageMin > ageMax會讓客群設定變成空區間，任何商品都比對不到。
+		if (request.getAgeMin() != null && request.getAgeMax() != null
+				&& request.getAgeMin() > request.getAgeMax()) {
+			throw new IllegalArgumentException(ValidationMessage.AUDIENCE_AGE_RANGE_INVALID);
+		}
+
 		AudienceProfile profile = findActiveAudienceProfileOrThrow();
 		profile.setName(request.getName());
 		profile.setAgeMin(request.getAgeMin());
@@ -306,6 +316,21 @@ public class SettingsService {
 		profile.setKeywords(request.getKeywords());
 		AudienceProfile saved = audienceProfileRepository.save(profile);
 		return AudienceProfileResponse.from(saved);
+	}
+
+	/**
+	 * 檔期起訖日期關係驗證。
+	 *
+	 * startDate晚於endDate時，ScoringService.calculateUrgencyFactor()算出的
+	 * 剩餘天數會是負數，讓節慶加成的急迫係數完全失真——而節慶加成是直接加在
+	 * finalScore上的，錯誤會一路傳到商品排序與審核快照。
+	 *
+	 * 單一日期的必填由DTO的@NotNull攔截，這裡只處理兩個欄位之間的關係。
+	 */
+	private void validateCampaignDateRange(LocalDate startDate, LocalDate endDate) {
+		if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_DATE_RANGE_INVALID);
+		}
 	}
 
 	private AudienceProfile findActiveAudienceProfileOrThrow() {
@@ -435,6 +460,7 @@ public class SettingsService {
 		if (festiveCampaignRepository.findByCampaignCode(request.getCampaignCode()).isPresent()) {
 			throw new IllegalArgumentException("檔期代碼已存在：" + request.getCampaignCode());
 		}
+		validateCampaignDateRange(request.getStartDate(), request.getEndDate());
 
 		FestiveCampaign campaign = new FestiveCampaign();
 		campaign.setCampaignCode(request.getCampaignCode());
@@ -459,6 +485,7 @@ public class SettingsService {
 	public FestiveCampaignResponse updateFestiveCampaign(Long id, FestiveCampaignUpdateRequest request) {
 		FestiveCampaign campaign = festiveCampaignRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("檔期不存在"));
+		validateCampaignDateRange(request.getStartDate(), request.getEndDate());
 
 		campaign.setCampaignName(request.getCampaignName());
 		campaign.setCategory(request.getCategory());

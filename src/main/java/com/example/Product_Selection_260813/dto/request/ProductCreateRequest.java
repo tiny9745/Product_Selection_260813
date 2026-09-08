@@ -5,8 +5,13 @@ import java.math.BigDecimal;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 
 /**
  * POST /api/products 的 Request Body。
@@ -28,32 +33,58 @@ public class ProductCreateRequest {
 	private ProductPricingType pricingType;
 
 	@NotBlank(message = ValidationMessage.PRODUCT_NAME_NULL)
+	@Size(max = 100, message = ValidationMessage.PRODUCT_NAME_TOO_LONG)
 	private String name;
 
+	// description對應TEXT欄位，不設長度上限
 	private String description;
 
+	@Size(max = 500, message = ValidationMessage.PRODUCT_IMAGE_URL_TOO_LONG)
 	private String imageUrl;
 
+	@Size(max = 100, message = ValidationMessage.PRODUCT_SUPPLIER_NAME_TOO_LONG)
 	private String supplierName;
 
-	// 新品(NEW)可為空，待議價完成後回填【QA1】；Service層不對NEW商品的costPrice/salePrice做必填驗證
+	// 新品(NEW)可為空，待議價完成後回填【QA1】；Service層不對NEW商品的costPrice/salePrice做必填驗證。
+	// 但「可為空」不等於「可為任意值」：一旦有值就必須是非負數，且符合decimal(10,2)精度，
+	// 否則錯誤值會被寫進不可覆蓋的review_records.product_snapshot審核快照。
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_COST_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_COST_PRICE_OVER_DIGITS)
 	private BigDecimal costPrice;
 
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_SALE_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_SALE_PRICE_OVER_DIGITS)
 	private BigDecimal salePrice;
 
 	// 僅RESALE商品填寫，NEW商品不適用；若pricingType=NEW卻帶了值，Service層會拒絕【十四-1】
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_MARKET_PRICE_NEGATIVE)
+	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_MARKET_PRICE_OVER_DIGITS)
 	private BigDecimal marketPrice;
 
+	@Size(max = 255, message = ValidationMessage.PRODUCT_CAMPAIGN_TAGS_TOO_LONG)
 	private String campaignTags;
 
+	@PositiveOrZero(message = ValidationMessage.PRODUCT_MOQ_NEGATIVE)
 	private Integer moq;
 
+	// 1~5分制人工評估。ScoringService.calculateBusinessScore()雖有clamp()保護分數不超出
+	// 0~100，但那只保護「分數」，不保護「存進資料庫的原始值」——沒有這層驗證，
+	// supply_stability=999會原封不動存入並寫進審核快照。
+	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
 	private BigDecimal supplyStability;
 
+	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
 	private BigDecimal priceCompetitiveness;
 
+	// targetCustomerDescription對應TEXT欄位，不設長度上限
 	private String targetCustomerDescription;
 
+	// 後端以0~1的比率儲存（前端表單為0~100%，送出前換算）。超過1會讓
+	// ScoringService算出的購買分數失真，必須在進Service前擋下。
+	@DecimalMin(value = "0.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
+	@DecimalMax(value = "1.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	private BigDecimal estimatedPurchaseRate;
 
 	public Long getProductTypeId() {

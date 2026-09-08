@@ -1,6 +1,9 @@
 package com.example.Product_Selection_260813.dto.request;
 
+import com.example.Product_Selection_260813.constants.ValidationMessage;
+
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * POST /api/settings/risk-options 的 Request Body：新增自訂人工風險類型。
@@ -16,10 +19,13 @@ import jakarta.validation.constraints.NotBlank;
 public class RiskOptionCreateRequest {
 
 	@NotBlank(message = "風險選項名稱不可為空")
+	@Size(max = 100, message = ValidationMessage.RISK_OPTION_NAME_TOO_LONG)
 	private String name;
 
+	@Size(max = 255, message = ValidationMessage.RISK_OPTION_DESCRIPTION_TOO_LONG)
 	private String description;
 
+	@Size(max = 500, message = ValidationMessage.RISK_OPTION_ALERT_KEYWORDS_TOO_LONG)
 	private String alertKeywords;
 
 	public String getName() {
