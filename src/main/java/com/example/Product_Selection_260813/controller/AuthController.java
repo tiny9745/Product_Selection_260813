@@ -7,13 +7,16 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.dto.request.ChangePasswordRequest;
 import com.example.Product_Selection_260813.dto.request.LoginRequest;
+import com.example.Product_Selection_260813.dto.request.UpdateProfileRequest;
 import com.example.Product_Selection_260813.dto.response.LoginResult;
 import com.example.Product_Selection_260813.dto.response.UserResponse;
 import com.example.Product_Selection_260813.service.AuthService;
@@ -88,5 +91,29 @@ public class AuthController {
 		response.addHeader(HttpHeaders.SET_COOKIE, expiredCookie.toString());
 
 		return ResponseEntity.ok(ApiResponse.success("登出成功"));
+	}
+	
+	@PatchMapping("/me")
+	public ResponseEntity<ApiResponse<UserResponse>> updateProfile(
+			@AuthenticationPrincipal String username,
+			@Valid @RequestBody UpdateProfileRequest request) {
+		UserResponse result = authService.updateProfile(username, request.getName());
+		return ResponseEntity.ok(ApiResponse.success("個人資料修改成功", result));
+	}
+
+	@PatchMapping("/me/password")
+	public ResponseEntity<ApiResponse<UserResponse>> changePassword(
+			@AuthenticationPrincipal String username,
+			@Valid @RequestBody ChangePasswordRequest request,
+			HttpServletResponse response) {
+		LoginResult result = authService.changePassword(username, request.getCurrentPassword(), request.getNewPassword());
+
+		// 密碼修改成功後重發Cookie，屬性須與login()完全一致，理由同logout()註解：
+		// 任何一個屬性（secure／sameSite／path）不一致，瀏覽器會視為不同Cookie。
+		ResponseCookie cookie = ResponseCookie.from(TOKEN_COOKIE_NAME, result.getToken()).httpOnly(true)
+				.secure(cookieSecure).sameSite("Strict").path("/").maxAge(result.getExpiresInSeconds()).build();
+		response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+
+		return ResponseEntity.ok(ApiResponse.success("密碼修改成功", result.getUser()));
 	}
 }

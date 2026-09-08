@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.Product_Selection_260813.common.exception.AccountDisabledException;
 import com.example.Product_Selection_260813.common.exception.InvalidCredentialsException;
+import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.response.LoginResult;
 import com.example.Product_Selection_260813.dto.response.UserResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
@@ -109,5 +110,69 @@ public class AuthService {
 	 */
 	public void logout(String username) {
 		log.info("使用者登出 username={}", username);
+	}
+	
+	/**
+	 * PATCH /api/auth/me 業務邏輯：修改自己的顯示名稱。
+	 *
+	 * 與getCurrentUser()相同，重新查一次資料庫而非信任JWT聲明的資訊：
+	 * 這裡本來就需要拿到受管理的AppUser實體才能save，不是額外成本。
+	 */
+	@Transactional
+	public UserResponse updateProfile(String username, String newName) {
+		AppUser user = appUserRepository.findByUsername(username)
+				.orElseThrow(() -> new InvalidCredentialsException("登入狀態已失效，請重新登入"));
+
+		if (!Boolean.TRUE.equals(user.getEnabled())) {
+			throw new AccountDisabledException();
+		}
+
+		user.setName(newName);
+		AppUser saved = appUserRepository.save(user);
+		log.info("使用者修改自身顯示名稱 username={}", username);
+
+		return UserResponse.from(saved);
+	}
+
+	/**
+	 * PATCH /api/auth/me/password 業務邏輯：修改自己的密碼。
+	 *
+	 * 檢查順序：帳號存在 → 帳號啟用 → 目前密碼正確 → 新舊密碼不可相同。
+	 * 目前密碼錯誤與新舊密碼相同皆丟IllegalArgumentException（400）：
+	 * 呼叫端此時已持有效JWT（身分已確認），這是輸入驗證層級的業務規則，
+	 * 語意上與InvalidCredentialsException代表的「身分無法確認」不同，
+	 * 不應混用401。
+	 *
+	 * 密碼修改成功後重新簽發JWT：使用者剛用「目前密碼」完成一次身分
+	 * 重新確認，沒有理由要求他重新登入；回傳LoginResult讓Controller
+	 * 沿用login()那套Cookie設定邏輯即可。
+	 *
+	 * 限制（沿用六-4決議：無token黑名單機制）：這支API只讓「目前這個
+	 * session」拿到新token，其餘裝置上尚未過期的舊JWT仍可繼續使用到
+	 * 自然過期（最長8小時）才會失效，不會因密碼變更而立即作廢。
+	 */
+	@Transactional
+	public LoginResult changePassword(String username, String currentPassword, String newPassword) {
+		AppUser user = appUserRepository.findByUsername(username)
+				.orElseThrow(() -> new InvalidCredentialsException("登入狀態已失效，請重新登入"));
+
+		if (!Boolean.TRUE.equals(user.getEnabled())) {
+			throw new AccountDisabledException();
+		}
+
+		if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+			throw new IllegalArgumentException("目前密碼輸入錯誤");
+		}
+
+		if (passwordEncoder.matches(newPassword, user.getPassword())) {
+			throw new IllegalArgumentException(ValidationMessage.USER_NEW_PASSWORD_SAME_AS_OLD);
+		}
+
+		user.setPassword(passwordEncoder.encode(newPassword));
+		AppUser saved = appUserRepository.save(user);
+		log.info("使用者修改自身密碼 username={}", username);
+
+		String token = jwtTokenProvider.generateToken(saved);
+		return new LoginResult(token, jwtTokenProvider.getExpirationSeconds(), UserResponse.from(saved));
 	}
 }
