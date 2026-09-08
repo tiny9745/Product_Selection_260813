@@ -21,13 +21,16 @@ import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateReq
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeCreateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
+//import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
 import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
-import com.example.Product_Selection_260813.dto.response.RiskOptionResponse;
+import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.service.SettingsService;
 
@@ -36,11 +39,11 @@ import jakarta.validation.Valid;
 /**
  * 對應 API總表 七、系統設定（十二-13分層決議：SettingsController → SettingsService）。
  *
- * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定的enable
- * （1支）／人工風險選項的停用與復用（2支）。加上先前已完成的評估模式（4支）、
- * 人工風險選項的GET／POST（2支）、商品類型的GET／POST／disable（3支）與
- * 節慶檔期管理（4支），七、系統設定端點皆已完成（詳見SettingsService類別
- * 註解關於「停用只單向」決策推翻的說明）。
+ * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定的
+ * update與enable（2支）／人工風險選項的停用與復用（2支）。加上先前已完成的
+ * 評估模式（4支）、人工風險選項的GET／POST（2支）、商品類型的GET／POST／
+ * disable（3支）與節慶檔期管理（4支），七、系統設定端點皆已完成（詳見
+ * SettingsService類別註解關於「停用只單向」決策推翻的說明）。
  *
  * 各端點權限逐支對應企劃書標註的角色範圍（[操作+管理]／[僅管理]），
  * 不是整個Controller套同一組權限。
@@ -87,30 +90,38 @@ public class SettingsController {
 
 	@PreAuthorize("hasRole('MANAGER')")
 	@GetMapping("/risk-options")
-	public ResponseEntity<ApiResponse<List<RiskOptionResponse>>> getRiskOptions() {
-		List<RiskOptionResponse> result = settingsService.getAllRiskOptions();
+	public ResponseEntity<ApiResponse<List<RiskOptionSettingResponse>>> getRiskOptions() {
+		List<RiskOptionSettingResponse> result = settingsService.getAllRiskOptions();
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
 	@PostMapping("/risk-options")
-	public ResponseEntity<ApiResponse<RiskOptionResponse>> createRiskOption(
+	public ResponseEntity<ApiResponse<RiskOptionSettingResponse>> createRiskOption(
 			@Valid @RequestBody RiskOptionCreateRequest request, @AuthenticationPrincipal String username) {
-		RiskOptionResponse result = settingsService.createRiskOption(request, username);
+		RiskOptionSettingResponse result = settingsService.createRiskOption(request, username);
 		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/risk-options/{id}")
+	public ResponseEntity<ApiResponse<RiskOptionSettingResponse>> updateRiskOption(@PathVariable("id") Long id,
+			@Valid @RequestBody RiskOptionUpdateRequest request) {
+		RiskOptionSettingResponse result = settingsService.updateRiskOption(id, request);
+		return ResponseEntity.ok(ApiResponse.success("修改成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
 	@PutMapping("/risk-options/{id}/disable")
-	public ResponseEntity<ApiResponse<RiskOptionResponse>> disableRiskOption(@PathVariable("id") Long id) {
-		RiskOptionResponse result = settingsService.disableRiskOption(id);
+	public ResponseEntity<ApiResponse<RiskOptionSettingResponse>> disableRiskOption(@PathVariable("id") Long id) {
+		RiskOptionSettingResponse result = settingsService.disableRiskOption(id);
 		return ResponseEntity.ok(ApiResponse.success("已停用", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
 	@PutMapping("/risk-options/{id}/enable")
-	public ResponseEntity<ApiResponse<RiskOptionResponse>> enableRiskOption(@PathVariable("id") Long id) {
-		RiskOptionResponse result = settingsService.enableRiskOption(id);
+	public ResponseEntity<ApiResponse<RiskOptionSettingResponse>> enableRiskOption(@PathVariable("id") Long id) {
+		RiskOptionSettingResponse result = settingsService.enableRiskOption(id);
 		return ResponseEntity.ok(ApiResponse.success("已復用", result));
 	}
 
@@ -146,6 +157,14 @@ public class SettingsController {
 			@Valid @RequestBody ProductTypeCreateRequest request, @AuthenticationPrincipal String username) {
 		ProductTypeResponse result = settingsService.createProductType(request, username);
 		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/product-types/{id}")
+	public ResponseEntity<ApiResponse<ProductTypeResponse>> updateProductType(@PathVariable("id") Long id,
+			@Valid @RequestBody ProductTypeUpdateRequest request) {
+		ProductTypeResponse result = settingsService.updateProductType(id, request);
+		return ResponseEntity.ok(ApiResponse.success("修改成功", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")

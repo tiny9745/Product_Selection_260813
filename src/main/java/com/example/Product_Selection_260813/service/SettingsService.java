@@ -13,14 +13,16 @@ import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualSta
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignTagInput;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeCreateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
 import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignTagView;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
-import com.example.Product_Selection_260813.dto.response.RiskOptionResponse;
+import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
@@ -47,9 +49,9 @@ import com.example.Product_Selection_260813.repository.SystemSettingRepository;
  * 其他Controller導致邊界模糊」。
  *
  * <b>本輪範圍（分批實作，第二批）：</b>核心客群設定（2支）／商品類型設定（5支，
- * 含enable）／人工風險選項的停用與復用（2支）。加上第一批已完成的評估模式
- * （4支）、人工風險選項的GET／POST（2支）、商品類型的GET／POST／disable（3支）
- * 與節慶檔期管理（4支），七、系統設定端點皆已完成。
+ * 含update與enable）／人工風險選項的停用與復用（2支）。加上第一批已完成的
+ * 評估模式（4支）、人工風險選項的GET／POST（2支）、商品類型的GET／POST／
+ * disable（3支）與節慶檔期管理（4支），七、系統設定端點皆已完成。
  *
  * <b>「停用只單向、不提供啟用」的決策已推翻：</b>商品類型與人工風險選項原本都
  * 只有disable、沒有enable，理由是「企劃書只定義停用這個單向動作」；但實務上
@@ -193,10 +195,13 @@ public class SettingsService {
 	 * 刻意用findAll()而非review流程用的findByIsActiveTrue()：這是管理視角的
 	 * 設定清單，管理層應該能看到包含已停用的完整清單，不像審核頁只需要顯示
 	 * 「目前可勾選」的選項——兩個端點的用途不同，篩選規則本來就不該一樣。
+	 *
+	 * 回應改用RiskOptionSettingResponse（非審核頁用的RiskOptionResponse）：
+	 * 設定頁需要顯示alertKeywords／isActive，理由見該DTO類別註解。
 	 */
 	@Transactional(readOnly = true)
-	public List<RiskOptionResponse> getAllRiskOptions() {
-		return riskOptionRepository.findAll().stream().map(RiskOptionResponse::from).toList();
+	public List<RiskOptionSettingResponse> getAllRiskOptions() {
+		return riskOptionRepository.findAll().stream().map(RiskOptionSettingResponse::from).toList();
 	}
 
 	/**
@@ -210,7 +215,7 @@ public class SettingsService {
 	 * 由管理層自行判斷是否重複，系統不代為阻擋。
 	 */
 	@Transactional
-	public RiskOptionResponse createRiskOption(RiskOptionCreateRequest request, String username) {
+	public RiskOptionSettingResponse createRiskOption(RiskOptionCreateRequest request, String username) {
 		Long userId = resolveUserId(username);
 
 		RiskOption option = new RiskOption();
@@ -221,7 +226,27 @@ public class SettingsService {
 		option.setCreatedBy(userId);
 
 		RiskOption saved = riskOptionRepository.save(option);
-		return RiskOptionResponse.from(saved);
+		return RiskOptionSettingResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/risk-options/{id}：重新命名／調整風險選項（name／
+	 * description／alertKeywords）。
+	 *
+	 * 與updateProductType()同一套設計：不檢查name重複（理由同createRiskOption()）；
+	 * isSystemDefault／isActive不受此方法影響，isActive維持由disable/enable
+	 * 專責管理。alertKeywords允許改成空字串或null，代表退出Dashboard的自動
+	 * 示警比對（見RiskOptionUpdateRequest類別註解），不特別擋。
+	 */
+	@Transactional
+	public RiskOptionSettingResponse updateRiskOption(Long id, RiskOptionUpdateRequest request) {
+		RiskOption option = riskOptionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
+		option.setName(request.getName());
+		option.setDescription(request.getDescription());
+		option.setAlertKeywords(request.getAlertKeywords());
+		RiskOption saved = riskOptionRepository.save(option);
+		return RiskOptionSettingResponse.from(saved);
 	}
 
 	/**
@@ -234,12 +259,12 @@ public class SettingsService {
 	 * 冪等：重複停用已停用的選項不視為錯誤。
 	 */
 	@Transactional
-	public RiskOptionResponse disableRiskOption(Long id) {
+	public RiskOptionSettingResponse disableRiskOption(Long id) {
 		RiskOption option = riskOptionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
 		option.setIsActive(false);
 		RiskOption saved = riskOptionRepository.save(option);
-		return RiskOptionResponse.from(saved);
+		return RiskOptionSettingResponse.from(saved);
 	}
 
 	/**
@@ -247,12 +272,12 @@ public class SettingsService {
 	 * 與disableRiskOption()對稱，冪等處理。
 	 */
 	@Transactional
-	public RiskOptionResponse enableRiskOption(Long id) {
+	public RiskOptionSettingResponse enableRiskOption(Long id) {
 		RiskOption option = riskOptionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
 		option.setIsActive(true);
 		RiskOption saved = riskOptionRepository.save(option);
-		return RiskOptionResponse.from(saved);
+		return RiskOptionSettingResponse.from(saved);
 	}
 
 	// ========================= 核心客群設定 =========================
@@ -315,6 +340,26 @@ public class SettingsService {
 		type.setIsSystemDefault(false);
 		type.setCreatedBy(userId);
 
+		ProductType saved = productTypeRepository.save(type);
+		return ProductTypeResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/product-types/{id}：重新命名既有分類（更新name／description）。
+	 *
+	 * 不檢查name是否重複：與createProductType()同一個決策範圍，理由相同
+	 * （管理層低頻、少量操作，人眼就看得出是否重複，系統不代為阻擋）。
+	 *
+	 * isSystemDefault／isActive不受此方法影響：前者是分類建立時就固定的身分，
+	 * 改名不改變身分本身；後者由disableProductType()/enableProductType()
+	 * 專責管理，這裡不重複賦值，避免PUT request若忘記帶正確狀態時意外覆蓋。
+	 */
+	@Transactional
+	public ProductTypeResponse updateProductType(Long id, ProductTypeUpdateRequest request) {
+		ProductType type = productTypeRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("商品類型不存在"));
+		type.setName(request.getName());
+		type.setDescription(request.getDescription());
 		ProductType saved = productTypeRepository.save(type);
 		return ProductTypeResponse.from(saved);
 	}
