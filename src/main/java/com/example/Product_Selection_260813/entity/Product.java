@@ -58,6 +58,43 @@ public class Product {
 	@Column(name = "market_price", precision = 10, scale = 2)
 	private BigDecimal marketPrice;
 
+	// ---- Gate 屬性欄位（設計文件 4.2）----
+	// 全部 nullable，null 代表繼承品類預設而非「未設定」。
+	// 採級距化勾選而非精確數值：Gate 是二元判斷，只需要知道「是不是 30 天以內」，
+	// 要求填「23 天」是白白拉高資料成本。系統只有採購與主管兩個角色，沒有物流
+	// 角色，這些欄位的填寫責任會落在採購身上——他未必拿得到精確材積，
+	// 但一定分得出冷凍還是常溫。
+
+	@Column(name = "temperature_zone", length = 20)
+	private String temperatureZone;
+
+	@Column(name = "shelf_life_tier", length = 20)
+	private String shelfLifeTier;
+
+	@Column(name = "supplier_lead_time_tier", length = 20)
+	private String supplierLeadTimeTier;
+
+	/** 材積級距；運費估算依此查 system_settings 的 freight_cost_*。 */
+	@Column(name = "package_size_tier", length = 20)
+	private String packageSizeTier;
+
+	@Column(name = "packing_type", length = 20)
+	private String packingType;
+
+	/** 處理注意事項（逗號分隔），如 FRAGILE。沿用 campaign_tags 的多值字串風格。 */
+	@Column(name = "handling_flags", length = 200)
+	private String handlingFlags;
+
+	@Column(name = "certification_flags", length = 200)
+	private String certificationFlags;
+
+	@Column(name = "supplier_max_capacity")
+	private Integer supplierMaxCapacity;
+
+	/** 再販售參考商品；供歷史分數的商品層查詢使用。限同小類，由 Service 驗證。 */
+	@Column(name = "resale_reference_product_id")
+	private Long resaleReferenceProductId;
+
 	@Column(name = "campaign_tags", length = 255)
 	private String campaignTags;
 
@@ -187,6 +224,79 @@ public class Product {
 
 	public void setMarketPrice(BigDecimal marketPrice) {
 		this.marketPrice = marketPrice;
+	}
+
+
+	public String getTemperatureZone() {
+		return temperatureZone;
+	}
+
+	public void setTemperatureZone(String temperatureZone) {
+		this.temperatureZone = temperatureZone;
+	}
+
+	public String getShelfLifeTier() {
+		return shelfLifeTier;
+	}
+
+	public void setShelfLifeTier(String shelfLifeTier) {
+		this.shelfLifeTier = shelfLifeTier;
+	}
+
+	public String getSupplierLeadTimeTier() {
+		return supplierLeadTimeTier;
+	}
+
+	public void setSupplierLeadTimeTier(String supplierLeadTimeTier) {
+		this.supplierLeadTimeTier = supplierLeadTimeTier;
+	}
+
+	public String getPackageSizeTier() {
+		return packageSizeTier;
+	}
+
+	public void setPackageSizeTier(String packageSizeTier) {
+		this.packageSizeTier = packageSizeTier;
+	}
+
+	public String getPackingType() {
+		return packingType;
+	}
+
+	public void setPackingType(String packingType) {
+		this.packingType = packingType;
+	}
+
+	public String getHandlingFlags() {
+		return handlingFlags;
+	}
+
+	public void setHandlingFlags(String handlingFlags) {
+		this.handlingFlags = handlingFlags;
+	}
+
+	public String getCertificationFlags() {
+		return certificationFlags;
+	}
+
+	public void setCertificationFlags(String certificationFlags) {
+		this.certificationFlags = certificationFlags;
+	}
+
+	public Integer getSupplierMaxCapacity() {
+		return supplierMaxCapacity;
+	}
+
+	public void setSupplierMaxCapacity(Integer supplierMaxCapacity) {
+		this.supplierMaxCapacity = supplierMaxCapacity;
+	}
+
+	public Long getResaleReferenceProductId() {
+		return resaleReferenceProductId;
+	}
+
+	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
+		this.resaleReferenceProductId = resaleReferenceProductId;
 	}
 
 	public String getCampaignTags() {

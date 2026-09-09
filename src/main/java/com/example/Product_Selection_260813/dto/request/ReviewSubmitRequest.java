@@ -31,6 +31,20 @@ public class ReviewSubmitRequest {
 
 	private List<Long> riskOptionIds;
 
+	/**
+	 * 系統原本建議勾選的風險項目（Gate 判定不通過而預先勾選的）。
+	 *
+	 * <b>主管取消勾選的項目也要留在這份清單裡一起送出。</b>
+	 * 如果只送最終勾選的 riskOptionIds，後端就無法區分「系統沒建議」和
+	 * 「系統建議了但被主管推翻」——而後者是稽核價值最高的一筆紀錄：
+	 * 它記錄了「系統說有問題，但主管認為可以」。
+	 *
+	 * 未送出時視為空清單（沒有任何系統建議），全部項目都會被記為主管手動勾選。
+	 * 這讓不支援 Gate 的舊版前端仍能正常送審，行為與改版前一致。
+	 */
+	private List<Long> systemSuggestedRiskOptionIds;
+
+
 	private String reviewComment;
 
 	public Long getProductId() {
@@ -63,5 +77,13 @@ public class ReviewSubmitRequest {
 
 	public void setReviewComment(String reviewComment) {
 		this.reviewComment = reviewComment;
+	}
+
+	public List<Long> getSystemSuggestedRiskOptionIds() {
+		return systemSuggestedRiskOptionIds;
+	}
+
+	public void setSystemSuggestedRiskOptionIds(List<Long> systemSuggestedRiskOptionIds) {
+		this.systemSuggestedRiskOptionIds = systemSuggestedRiskOptionIds;
 	}
 }

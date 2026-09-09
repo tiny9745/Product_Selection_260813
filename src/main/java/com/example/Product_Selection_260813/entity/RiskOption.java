@@ -29,6 +29,17 @@ public class RiskOption {
     @Column(name = "alert_keywords", length = 500)
     private String alertKeywords;
 
+    /**
+     * 對應的 Gate 代碼，如 GATE_TEMPERATURE_ZONE；null 代表純人工選項。
+     * Gate 判定不通過時，審核畫面會依此欄位找出要預先勾選的風險選項。
+     */
+    @Column(name = "auto_trigger_code", length = 50)
+    private String autoTriggerCode;
+
+    /** 五大風險面向 BUSINESS/SUPPLY/QUALITY/MARKET/DATA。 */
+    @Column(name = "category", length = 20)
+    private String category;
+
     @Column(name = "is_system_default", nullable = false)
     private Boolean isSystemDefault = false;
 
@@ -108,5 +119,21 @@ public class RiskOption {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getAutoTriggerCode() {
+        return autoTriggerCode;
+    }
+
+    public void setAutoTriggerCode(String autoTriggerCode) {
+        this.autoTriggerCode = autoTriggerCode;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 }

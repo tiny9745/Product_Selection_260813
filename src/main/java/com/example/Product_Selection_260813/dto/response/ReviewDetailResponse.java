@@ -6,6 +6,7 @@ import java.util.List;
 import com.example.Product_Selection_260813.entity.AiAnalysis;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
+import com.example.Product_Selection_260813.service.gate.GateResult;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 
@@ -50,10 +51,29 @@ public class ReviewDetailResponse {
 
 	private List<RiskOptionResponse> availableRiskOptions;
 
+	/**
+	 * Gate 判定結果。放在回應裡而非另開端點，是因為審核畫面一定要一起顯示——
+	 * 分開拉會多一次請求，而且兩次請求之間商品資料可能被改，兩邊會對不起來。
+	 *
+	 * 前端應把它顯示在分數區塊「之前」：可不可行比分數高低更優先看。
+	 */
+	private GateResult.Summary gateResults;
+
+	/**
+	 * Gate 判定的一句話摘要，例如「通過 3 項，不通過 1 項，資料不足 1 項」。
+	 *
+	 * 前端顯示在備註輸入框「上方」，不可自動填入 review_comment——
+	 * review_comment 是主管的話，系統文字混進去之後，事後查核會讀到一段
+	 * 主管其實沒寫過的內容。要提供「引用到備註」按鈕讓主管主動採用。
+	 */
+	private String systemGateSummary;
+
+
 	public static ReviewDetailResponse build(ProductResponse product, Integer submissionCount,
 			ProductEvaluation evaluation, EvaluationMode evaluationMode, WeightSnapshot weights,
 			MatchedCampaignSnapshot matchedCampaign, AiAnalysis aiAnalysis,
-			List<RiskOptionResponse> availableRiskOptions) {
+			List<RiskOptionResponse> availableRiskOptions,
+			GateResult.Summary gateResults) {
 
 		ReviewDetailResponse dto = new ReviewDetailResponse();
 		dto.product = product;
@@ -61,6 +81,8 @@ public class ReviewDetailResponse {
 		dto.weights = weights;
 		dto.matchedCampaign = matchedCampaign;
 		dto.availableRiskOptions = availableRiskOptions;
+		dto.gateResults = gateResults;
+		dto.systemGateSummary = gateResults == null ? null : gateResults.toDisplaySummary();
 
 		if (evaluation != null) {
 			dto.dataCompleteness = evaluation.getDataCompleteness();
@@ -256,5 +278,13 @@ public class ReviewDetailResponse {
 
 	public void setAvailableRiskOptions(List<RiskOptionResponse> availableRiskOptions) {
 		this.availableRiskOptions = availableRiskOptions;
+	}
+
+	public GateResult.Summary getGateResults() {
+		return gateResults;
+	}
+
+	public String getSystemGateSummary() {
+		return systemGateSummary;
 	}
 }

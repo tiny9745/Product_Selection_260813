@@ -1,7 +1,10 @@
 package com.example.Product_Selection_260813.service;
 
+import java.util.Map;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,10 +36,16 @@ import com.example.Product_Selection_260813.entity.RiskOption;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.time.LocalDate;
 
+import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
+import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
+import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
+import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
@@ -81,11 +90,18 @@ import com.example.Product_Selection_260813.repository.SystemSettingRepository;
 @Service
 public class SettingsService {
 
+	private static final Logger log = LoggerFactory.getLogger(SettingsService.class);
+
 	// 對應SystemSettingRepository註解裡的既定用法與四-14設計取捨
 	private static final String CURRENT_EVALUATION_MODE_KEY = "current_evaluation_mode_id";
 
 	@Autowired
 	private EvaluationModeRepository evaluationModeRepository;
+
+	// 自訂模式的權重編輯需要直接寫入 evaluation_factors；
+	// 既有的查詢路徑是透過 scoringService.buildWeightSnapshot()，那是唯讀的。
+	@Autowired
+	private EvaluationFactorRepository evaluationFactorRepository;
 
 	@Autowired
 	private SystemSettingRepository systemSettingRepository;
@@ -137,6 +153,92 @@ public class SettingsService {
 			throw new IllegalArgumentException("評估模式不存在");
 		}
 		return scoringService.buildWeightSnapshot(evaluationModeId);
+	}
+
+
+	/**
+	 * PUT /api/settings/evaluation-modes/{id}/factors：更新自訂模式的權重。
+	 *
+	 * <b>只有 is_editable = true 的模式可以改</b>。三套固定模式（均衡／衝量／
+	 * 高利潤）是系統設計好、已驗證過的標準組合，開放編輯之後就很難分辨
+	 * 「現在這個分數是照哪一套邏輯算的」，對照歷史審核紀錄會很混亂。
+	 * 只開放自訂模式，主管想客製化時有地方調，但不動搖前三套的公信力。
+	 *
+	 * 採整份覆蓋語意：必須送齊全部七個因子。權重之間有「加總為 100」的約束，
+	 * 只送部分欄位的話，後端得把送來的值與資料庫既有值混合才能驗證，
+	 * 而使用者在畫面上算出的加總與後端實際驗的可能不同。
+	 *
+	 * 這裡不觸發既有商品重算——重算範圍可能很大，應由呼叫端決定時機。
+	 * 而且已完成審核的商品有 weight_snapshot 保護，本來就不受影響。
+	 */
+	@Transactional
+	public WeightSnapshot updateEvaluationModeFactors(Long evaluationModeId,
+			EvaluationFactorUpdateRequest request, String username) {
+		EvaluationMode mode = evaluationModeRepository.findById(evaluationModeId)
+				.orElseThrow(() -> new IllegalArgumentException("評估模式不存在"));
+
+		// 檢查一：這套模式允許改嗎。
+		// 這是最重要的一道防線——沒有它，任何人只要知道均衡型的 id，
+		// 就能透過這支 API 改掉三套固定模式，「固定」的設計形同虛設。
+		if (!Boolean.TRUE.equals(mode.getIsEditable())) {
+			throw new IllegalStateException(ValidationMessage.FACTOR_MODE_NOT_EDITABLE);
+		}
+
+		// 檢查二：因子代碼必須正確且齊全
+		Map<String, BigDecimal> incoming = validateAndCollectFactors(request);
+
+		// 檢查三：加總必須恰為 100。
+		// 用 compareTo 而非 equals——BigDecimal 的 equals 會比較 scale，
+		// 100 與 100.00 用 equals 判定為不相等，會誤擋正確的輸入。
+		BigDecimal sum = incoming.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+		if (sum.compareTo(BigDecimal.valueOf(100)) != 0) {
+			throw new IllegalArgumentException(
+					ValidationMessage.FACTOR_SUM_NOT_100 + sum.stripTrailingZeros().toPlainString());
+		}
+
+		// 全部通過才寫入
+		List<EvaluationFactor> factors = evaluationFactorRepository
+				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId);
+		for (EvaluationFactor factor : factors) {
+			BigDecimal newWeight = incoming.get(factor.getFactorCode());
+			if (newWeight != null) {
+				factor.setWeight(newWeight);
+			}
+		}
+		evaluationFactorRepository.saveAll(factors);
+		log.info("自訂模式權重已更新：模式 {}，操作者 {}", evaluationModeId, username);
+
+		return scoringService.buildWeightSnapshot(evaluationModeId);
+	}
+
+	/**
+	 * 驗證送來的因子代碼並轉成 Map。
+	 *
+	 * 三件事一起檢查：代碼是否認得、是否重複、七項是否齊全。
+	 * 缺一不可——少檢查「齊全」的話，使用者只送三項且加總 100 也會通過，
+	 * 但另外四項會維持舊值，實際加總就不是 100 了。
+	 */
+	private Map<String, BigDecimal> validateAndCollectFactors(EvaluationFactorUpdateRequest request) {
+		Map<String, BigDecimal> collected = new LinkedHashMap<>();
+		for (EvaluationFactorUpdateRequest.FactorWeight fw : request.getFactors()) {
+			String code = fw.getFactorCode().trim().toUpperCase();
+			if (!FactorCode.ALL.contains(code)) {
+				throw new IllegalArgumentException(ValidationMessage.FACTOR_CODE_UNKNOWN + code);
+			}
+			if (collected.containsKey(code)) {
+				throw new IllegalArgumentException(ValidationMessage.FACTOR_CODE_DUPLICATE + code);
+			}
+			collected.put(code, fw.getWeight());
+		}
+
+		List<String> missing = FactorCode.ALL.stream()
+				.filter(code -> !collected.containsKey(code))
+				.toList();
+		if (!missing.isEmpty()) {
+			throw new IllegalArgumentException(
+					ValidationMessage.FACTOR_CODE_MISSING + String.join("、", missing));
+		}
+		return collected;
 	}
 
 	/**

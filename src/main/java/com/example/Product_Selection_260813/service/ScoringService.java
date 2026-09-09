@@ -8,16 +8,23 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
+import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.constants.FactorCode;
+import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.dto.response.EvaluationResponse;
 import com.example.Product_Selection_260813.dto.response.FestivalBoostResponse;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
@@ -28,6 +35,7 @@ import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
+import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
@@ -46,6 +54,8 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
+import com.example.Product_Selection_260813.service.scoring.ProductFactorScorer;
+import com.example.Product_Selection_260813.service.resolver.ProductTypeAttributeResolver;
 import com.example.Product_Selection_260813.repository.SystemSettingRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 
@@ -71,6 +81,8 @@ import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 @Service
 public class ScoringService {
 
+	private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
+
 	// Boost Cap：企劃書「節慶加成計分規則」明訂為「暫訂+5，絕對分數」，
 	// 之後的歷史資料回測校準屬於Phase 2待辦（見十三），此處先照文件明訂值寫死。
 	private static final BigDecimal BOOST_CAP = new BigDecimal("5");
@@ -90,6 +102,20 @@ public class ScoringService {
 
 	@Autowired
 	private EvaluationFactorRepository evaluationFactorRepository;
+
+	// 七因子計分。獨立成元件而非留在本類別，是因為那一層有最多商業規則，
+	// 拆出來才能單獨測試而不需要啟動整個 ScoringService。
+	@Autowired
+	private ProductFactorScorer productFactorScorer;
+
+	@Autowired
+	private AlgorithmSettings algorithmSettings;
+
+	@Autowired
+	private ProductTypeAttributeResolver productTypeAttributeResolver;
+
+	@Autowired
+	private ProductTypeRepository productTypeRepository;
 
 	@Autowired
 	private FestiveCampaignRepository festiveCampaignRepository;
@@ -149,6 +175,13 @@ public class ScoringService {
 			snapshot.setModeName(mode.getModeName());
 			snapshot.setVersion(mode.getVersion());
 			snapshot.setFactors(factors.stream().map(this::toWeightFactorSnapshot).toList());
+
+			// 演算法參數一併存進快照。只存權重不存參數，事後仍然無法重現當時的
+			// 計算——這些數字都放在 system_settings 且刻意設計成可調，而可調就
+			// 代表會被調。用今天的參數重算半年前的分數必然對不上。
+			snapshot.setShrinkageKCategory(algorithmSettings.getShrinkageKCategory());
+			snapshot.setShrinkageKProduct(algorithmSettings.getShrinkageKProduct());
+			snapshot.setTrendHalfLifeDays(algorithmSettings.getTrendHalfLifeDays());
 			return snapshot;
 		}).orElse(null);
 	}
@@ -465,7 +498,7 @@ public class ScoringService {
 	public void calculateEvaluation(Long productId, Long evaluationModeId) {
 		Product product = findProductOrThrow(productId);
 
-		Long modeId = evaluationModeId != null ? evaluationModeId : resolveCurrentEvaluationModeId();
+		Long modeId = evaluationModeId != null ? evaluationModeId : resolveEvaluationModeId(product);
 
 		BigDecimal dataCompleteness = calculateDataCompleteness(product);
 
@@ -488,26 +521,38 @@ public class ScoringService {
 			return;
 		}
 
-		BigDecimal businessScore = calculateBusinessScore(product);
-		BigDecimal audienceScore = calculateAudienceScore(product);
-		BigDecimal historicalScore = calculateHistoricalScore();
-		BigDecimal purchaseScore = calculatePurchaseScore(product);
-		BigDecimal trendScore = calculateTrendScoreForProduct(productId);
-		BigDecimal forecastScore = purchaseScore.add(trendScore)
-				.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+		// 七個扁平因子各自計分。缺漏因子回傳 null，由 weightedAverage() 從分母排除
+		// 並重新正規化——不給中性值 50，那會讓「資料填齊但條件普通」和「什麼都
+		// 沒填」拿到一樣的分數。
+		Map<String, BigDecimal> factorScores = productFactorScorer.scoreAll(product);
+		Map<String, BigDecimal> weights = resolveFactorWeights(modeId);
 
-		Map<String, BigDecimal> weights = resolveCategoryWeights(modeId);
-		// ⚠️ 修正：EvaluationFactor.weight 存的是整數百分比（例如 25 代表 25%，
-		// 四個象限加總為 100），不是 0–1 的小數。子分數（0–100 分）直接乘上
-		// 權重卻沒有除以 100，會讓 totalScore 輕易衝到數千，超過
-		// product_evaluations.final_score / total_score 欄位（DECIMAL(5,2)，
-		// 上限 999.99）的容量，寫入時直接被 MySQL 拒絕
-		// （Data truncation: Out of range value for column 'final_score'）。
-		BigDecimal totalScore = businessScore.multiply(weights.getOrDefault("BUSINESS", BigDecimal.ZERO))
-				.add(audienceScore.multiply(weights.getOrDefault("AUDIENCE", BigDecimal.ZERO)))
-				.add(historicalScore.multiply(weights.getOrDefault("HISTORY", BigDecimal.ZERO)))
-				.add(forecastScore.multiply(weights.getOrDefault("FORECAST", BigDecimal.ZERO)))
-				.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+		// 加權總和。weightedAverage() 內部已除以「有值因子的權重總和」，
+		// 因此不需要再除以 100——舊版的 divide(100) 是因為當時把權重當成
+		// 固定加總 100 的除數，改用有效權重當分母後這個假設不再成立。
+		BigDecimal totalScore = ScoringAlgorithms.weightedAverage(
+				FactorCode.ALL.stream()
+						.map(code -> new ScoringAlgorithms.WeightedScore(
+								code, factorScores.get(code), weights.get(code)))
+						.toList());
+		if (totalScore == null) {
+			// 七個因子全部無資料。理論上已被 60% 完整度門檻擋下，
+			// 這裡是防禦性處理：維持既有分數不覆蓋，與門檻未達時的行為一致。
+			evaluation.setCalculatedAt(LocalDateTime.now());
+			productEvaluationRepository.save(evaluation);
+			return;
+		}
+		totalScore = totalScore.setScale(2, RoundingMode.HALF_UP);
+
+		// 以下四個象限分數改為「展示用彙總」，不參與 totalScore 計算。
+		// 保留它們是為了讓 product_evaluations 既有欄位與前端畫面繼續可用，
+		// 讓主管能看到「商業條件這一組拿幾分」。組內比例沿用各因子自己的權重。
+		BigDecimal businessScore = groupScore(FactorCode.BUSINESS_GROUP, factorScores, weights);
+		BigDecimal audienceScore = factorScores.get(FactorCode.AUDIENCE_MATCH);
+		BigDecimal historicalScore = factorScores.get(FactorCode.HISTORY_FULFILLMENT);
+		BigDecimal purchaseScore = factorScores.get(FactorCode.PURCHASE_RATE);
+		BigDecimal trendScore = factorScores.get(FactorCode.TREND_HEAT);
+		BigDecimal forecastScore = groupScore(FactorCode.FORECAST_GROUP, factorScores, weights);
 
 		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
 		BigDecimal festivalBoost = campaignSnapshot != null
@@ -567,97 +612,10 @@ public class ScoringService {
 		return value != null && !value.trim().isEmpty();
 	}
 
-	/** BUSINESS：毛利率(40%) + 供應穩定性(30%) + 價格競爭力(30%)，皆正規化到0-100。 */
-	private BigDecimal calculateBusinessScore(Product product) {
-		BigDecimal marginScore;
-		boolean hasPricing = product.getPricingType() == ProductPricingType.RESALE
-				|| (product.getCostPrice() != null && product.getSalePrice() != null
-						&& product.getSalePrice().compareTo(BigDecimal.ZERO) > 0);
 
-		if (hasPricing && product.getCostPrice() != null && product.getSalePrice() != null
-				&& product.getSalePrice().compareTo(BigDecimal.ZERO) > 0) {
-			BigDecimal margin = product.getSalePrice().subtract(product.getCostPrice())
-					.divide(product.getSalePrice(), 4, RoundingMode.HALF_UP);
-			marginScore = clamp(margin.multiply(BigDecimal.valueOf(100)), BigDecimal.ZERO, BigDecimal.valueOf(100));
-		} else {
-			// NEW尚未訂價：給中性分，不因為QA1允許的「待訂價」狀態而被扣分
-			marginScore = BigDecimal.valueOf(50);
-		}
 
-		BigDecimal supplyScore = clamp(nullToZero(product.getSupplyStability()).multiply(BigDecimal.valueOf(20)),
-				BigDecimal.ZERO, BigDecimal.valueOf(100));
-		BigDecimal priceCompScore = clamp(
-				nullToZero(product.getPriceCompetitiveness()).multiply(BigDecimal.valueOf(20)),
-				BigDecimal.ZERO, BigDecimal.valueOf(100));
 
-		return marginScore.multiply(new BigDecimal("0.4"))
-				.add(supplyScore.multiply(new BigDecimal("0.3")))
-				.add(priceCompScore.multiply(new BigDecimal("0.3")))
-				.setScale(2, RoundingMode.HALF_UP);
-	}
 
-	/**
-	 * AUDIENCE：目標客群描述＋商品名稱，與audience_profiles.keywords關鍵字比對命中率。
-	 * 沒有生效客群設定或keywords為空時，給中性命中率50%，避免直接判0分不合理地拖低分數。
-	 */
-	private BigDecimal calculateAudienceScore(Product product) {
-		List<AudienceProfile> profiles = audienceProfileRepository.findByIsActiveTrue();
-		if (profiles.isEmpty()) {
-			return BigDecimal.valueOf(50);
-		}
-		// 可能有多筆is_active的客群設定，MVP先取第一筆，多客群比對策略留待Phase 2決議
-		AudienceProfile profile = profiles.get(0);
-		if (profile.getKeywords() == null || profile.getKeywords().trim().isEmpty()) {
-			return BigDecimal.valueOf(50);
-		}
-
-		List<String> keywords = Arrays.stream(profile.getKeywords().split("[,、\\s]+"))
-				.map(String::trim)
-				.map(String::toLowerCase)
-				.filter(k -> !k.isEmpty())
-				.toList();
-		if (keywords.isEmpty()) {
-			return BigDecimal.valueOf(50);
-		}
-
-		String productText = ((product.getTargetCustomerDescription() != null ? product.getTargetCustomerDescription() : "")
-				+ " " + (product.getName() != null ? product.getName() : "")).toLowerCase();
-
-		long matched = keywords.stream().filter(productText::contains).count();
-		BigDecimal matchRate = BigDecimal.valueOf(matched)
-				.divide(BigDecimal.valueOf(keywords.size()), 4, RoundingMode.HALF_UP);
-
-		return matchRate.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP);
-	}
-
-	/**
-	 * HISTORY：固定60分。企劃書承認尚無真實歷史銷售資料串接（見規格書QA2、十三
-	 * Phase 2待辦「真實市場資料串接」），demo前不臨時捏造假歷史資料，UI／AI摘要
-	 * 需標註「歷史資料尚未串接，僅供參考」，不要讓使用者誤以為是真實統計值。
-	 */
-	private BigDecimal calculateHistoricalScore() {
-		return BigDecimal.valueOf(60);
-	}
-
-	/** PURCHASE：estimated_purchase_rate×100，無資料給中性值50，不直接判0分。 */
-	private BigDecimal calculatePurchaseScore(Product product) {
-		if (product.getEstimatedPurchaseRate() == null) {
-			return BigDecimal.valueOf(50);
-		}
-		return clamp(product.getEstimatedPurchaseRate().multiply(BigDecimal.valueOf(100)), BigDecimal.ZERO,
-				BigDecimal.valueOf(100));
-	}
-
-	/**
-	 * TREND：沿用最新trend_signals計算值（複用calculatePlaceholderTrendScore，
-	 * 與trend/sync端點使用同一套簡化算法，避免同一件事在兩處各寫一份公式），
-	 * 無趨勢資料時給中性值50。
-	 */
-	private BigDecimal calculateTrendScoreForProduct(Long productId) {
-		return trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(productId)
-				.map(this::calculatePlaceholderTrendScore)
-				.orElse(BigDecimal.valueOf(50));
-	}
 
 	/**
 	 * 讀取指定評估模式底下，BUSINESS/AUDIENCE/HISTORY/FORECAST四大分類的權重，
@@ -665,15 +623,47 @@ public class ScoringService {
 	 * 找不到對應模式或無factors設定時，回傳空Map（呼叫端用getOrDefault(0)防呆，
 	 * 等同於「這個分類這次不計分」，而非讓NullPointerException中斷整個計算）。
 	 */
-	private Map<String, BigDecimal> resolveCategoryWeights(Long evaluationModeId) {
+	/**
+	 * 讀取指定模式的因子權重，以 factor_code 為 key。
+	 *
+	 * <b>改用 factor_code 而非 category 的原因</b>：改版後同一個 category 底下
+	 * 有多個因子（BUSINESS 有毛利率、折扣深度、供應穩定性三個）。舊版用 category
+	 * 當 key 並在衝突時「取第一筆」，會靜默丟棄後面的權重——BUSINESS 只會拿到
+	 * 10 而不是 25，總權重從 100 掉到 72.5，所有商品分數少約 27%，而且完全不會
+	 * 報錯。factor_code 在同一個模式內是唯一的，不會發生這個問題。
+	 *
+	 * category 欄位仍保留，但語意已改為「畫面上的分組標題」，不參與計算。
+	 */
+	private Map<String, BigDecimal> resolveFactorWeights(Long evaluationModeId) {
 		if (evaluationModeId == null) {
 			return Map.of();
 		}
 		List<EvaluationFactor> factors = evaluationFactorRepository
 				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId);
-		return factors.stream()
-				.collect(Collectors.toMap(EvaluationFactor::getCategory, EvaluationFactor::getWeight,
-						(existing, duplicate) -> existing));
+		Map<String, BigDecimal> weights = new LinkedHashMap<>();
+		for (EvaluationFactor factor : factors) {
+			// 同一個模式內 factor_code 應該唯一。萬一資料有重複，取後蓋前並不安全，
+			// 因此明確以第一筆為準並記 warn，讓設定錯誤能被發現而不是靜默生效。
+			if (weights.putIfAbsent(factor.getFactorCode(), factor.getWeight()) != null) {
+				log.warn("評估模式 {} 的因子代碼重複：{}，已忽略後續筆數", evaluationModeId, factor.getFactorCode());
+			}
+		}
+		return weights;
+	}
+
+	/**
+	 * 計算展示用的分組彙總分數（例如商業條件三個因子合起來幾分）。
+	 *
+	 * 這個值只給畫面看，不參與 totalScore——totalScore 是七個因子直接扁平加權。
+	 * 分開算的話兩者不會完全一致（分組彙總是組內正規化後的結果），這是預期的：
+	 * 分組分數回答「這一組表現如何」，總分回答「整體幾分」。
+	 */
+	private BigDecimal groupScore(List<String> factorCodes, Map<String, BigDecimal> scores,
+			Map<String, BigDecimal> weights) {
+		BigDecimal result = ScoringAlgorithms.weightedAverage(factorCodes.stream()
+				.map(code -> new ScoringAlgorithms.WeightedScore(code, scores.get(code), weights.get(code)))
+				.toList());
+		return result == null ? null : result.setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
@@ -681,7 +671,24 @@ public class ScoringService {
 	 * 而非靜默給一個猜測值——沒有生效模式代表系統設定尚未完成初始化，
 	 * 讓呼叫端明確知道問題所在，比算出一個不知道套用哪套權重的分數更安全。
 	 */
-	private Long resolveCurrentEvaluationModeId() {
+	private Long resolveEvaluationModeId(Product product) {
+		// 品類（大類）指定的模式優先。這讓生鮮與常溫耐儲存品可以套用不同權重——
+		// 兩者的風險結構相反，用同一組權重排序，文具類會系統性地贏過生鮮，
+		// 而那不代表文具比較值得開團。
+		if (product != null && product.getProductTypeId() != null) {
+			Long rootTypeId = productTypeAttributeResolver.resolveRootTypeId(product.getProductTypeId());
+			if (rootTypeId != null) {
+				Long modeId = productTypeRepository.findById(rootTypeId)
+						.map(ProductType::getDefaultEvaluationModeId).orElse(null);
+				if (modeId != null) {
+					return modeId;
+				}
+			}
+		}
+		// 品類未指定時退回全域設定，維持改版前的行為。
+		// 由於所有品類的 default_evaluation_mode_id 預設為 null，剛上線時
+		// 全部商品都會走這條路徑，分數與改版前一致——這是刻意的，
+		// 讓「換算法」與「換權重」兩件事分開發生，出問題時才分得出是哪一個造成的。
 		return systemSettingRepository.findById(CURRENT_EVALUATION_MODE_KEY)
 				.map(SystemSetting::getSettingValue)
 				.map(Long::valueOf)

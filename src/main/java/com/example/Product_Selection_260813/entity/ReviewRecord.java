@@ -109,6 +109,19 @@ public class ReviewRecord {
     @Column(name = "review_comment", columnDefinition = "TEXT")
     private String reviewComment;
 
+    /**
+     * Gate 判定的系統建議文字。
+     *
+     * 與 reviewComment 分開存：reviewComment 是主管的話。系統把文字塞進備註
+     * 輸入框、主管按送出，那段話就變成他寫的了——三個月後回查「當初為什麼退
+     * 這件」，會讀到一段主管其實沒寫過的話。分開存，快照裡才能明確分出
+     * 「系統說了什麼」與「主管說了什麼」。
+     *
+     * 前端把這段顯示在備註框上方，主管按「引用到備註」才會寫進 reviewComment。
+     */
+    @Column(name = "system_gate_summary", columnDefinition = "TEXT")
+    private String systemGateSummary;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -333,5 +346,13 @@ public class ReviewRecord {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getSystemGateSummary() {
+        return systemGateSummary;
+    }
+
+    public void setSystemGateSummary(String systemGateSummary) {
+        this.systemGateSummary = systemGateSummary;
     }
 }

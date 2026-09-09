@@ -38,6 +38,14 @@ public class EvaluationMode {
 	@Column(name = "description", columnDefinition = "TEXT")
 	private String description;
 	
+	/**
+	 * 是否允許調整權重。既有三套固定模式（均衡／衝量／高利潤）維持 false，
+	 * 僅自訂模式為 true。用欄位判斷而非寫死 id：id 是流水號，環境不同時
+	 * 不保證固定，用明確欄位才不會判斷錯。
+	 */
+	@Column(name = "is_editable", nullable = false)
+	private Boolean isEditable = false;
+
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = true;
 	
@@ -112,4 +120,13 @@ public class EvaluationMode {
 		this.createdBy = createdBy;
 	}
 	
+
+	/** 是否允許調整權重 */
+	public Boolean getIsEditable() {
+		return isEditable;
+	}
+
+	public void setIsEditable(Boolean isEditable) {
+		this.isEditable = isEditable;
+	}
 }

@@ -130,6 +130,24 @@ CREATE TABLE `evaluation_modes` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- 系統預設資料：3 套固定評估模式（均衡／衝量／高利潤）
+--
+-- 這三套模式是系統評分功能運作的必要前提（ScoringService 在商品未指定
+-- 專屬模式時會退回讀取 system_settings.current_evaluation_mode_id 指向的
+-- 這幾筆之一），不是選配的示範資料，因此直接放進 schema migration，
+-- 確保任何全新建立的資料庫在 V1 完成後這三套模式就已經存在。
+--
+-- 具體的因子權重明細（evaluation_factors）留給 V3 定義，這裡只建立
+-- 模式本身的 metadata——因子結構後續會被 V3 整個取代，V1 若同時 seed
+-- 因子資料只會在 V3 立刻被刪除重建，沒有必要。
+--
+INSERT INTO `evaluation_modes` (`mode_code`, `mode_name`, `version`, `description`, `is_active`) VALUES
+  ('BALANCED', '均衡模式',   1, '四大分類權重平均分配', 1),
+  ('VOLUME',   '衝量模式',   1, '偏重核心客群匹配與預測人氣，適合衝銷量', 1),
+  ('PROFIT',   '高利潤模式', 1, '偏重商業條件（毛利率），適合追求利潤', 1);
+
+
+--
 -- Table structure for table `festive_campaign_tags`
 --
 

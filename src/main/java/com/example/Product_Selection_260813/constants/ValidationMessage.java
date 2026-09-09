@@ -49,6 +49,18 @@ public class ValidationMessage {
 	public static final String RISK_OPTION_DESCRIPTION_TOO_LONG = "風險選項說明長度不可超過255字元";
 	public static final String RISK_OPTION_ALERT_KEYWORDS_TOO_LONG = "風險提示關鍵字長度不可超過500字元";
 
+	// EvaluationFactor（自訂模式權重編輯）
+	public static final String FACTOR_WEIGHTS_EMPTY = "權重清單不可為空";
+	public static final String FACTOR_CODE_BLANK = "因子代碼不可為空";
+	public static final String FACTOR_WEIGHT_NULL = "權重不可為空";
+	public static final String FACTOR_WEIGHT_RANGE = "單項權重須介於0至100之間";
+	public static final String FACTOR_WEIGHT_OVER_DIGITS = "權重整數位不可超過3位、小數不可超過2位";
+	public static final String FACTOR_MODE_NOT_EDITABLE = "此為系統固定模式，不允許調整權重；請改用自訂模式";
+	public static final String FACTOR_SUM_NOT_100 = "七項權重加總須為100，目前為：";
+	public static final String FACTOR_CODE_UNKNOWN = "無法辨識的因子代碼：";
+	public static final String FACTOR_CODE_DUPLICATE = "因子代碼重複：";
+	public static final String FACTOR_CODE_MISSING = "缺少必要的因子：";
+
 	// Review（商業邏輯驗證，於Service層攔截）
 	public static final String REVIEW_RISK_OPTION_INACTIVE = "風險選項已停用，無法選取：";
 	public static final String REVIEW_REJECT_REASON_REQUIRED = "退件時請至少勾選一項風險或填寫審核備註";
@@ -65,8 +77,9 @@ public class ValidationMessage {
 	public static final String USER_ROLE_NULL = "使用者角色不可為空";
 	public static final String USER_PASSWORD_BLANK = "密碼不可為空";
 	public static final String USER_PASSWORD_TOO_SHORT = "密碼長度至少需8個字元";
-	
-	// User（自身資料修改）
+
+
+	// User（自身資料修改，團隊既有功能，非本次異動範圍）
 	public static final String USER_CURRENT_PASSWORD_BLANK = "目前密碼不可為空";
 	public static final String USER_NEW_PASSWORD_SAME_AS_OLD = "新密碼不可與目前密碼相同";
 }

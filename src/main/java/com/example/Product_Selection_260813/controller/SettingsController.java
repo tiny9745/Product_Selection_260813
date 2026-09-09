@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
@@ -62,6 +63,25 @@ public class SettingsController {
 	public ResponseEntity<ApiResponse<List<EvaluationModeResponse>>> getEvaluationModes() {
 		List<EvaluationModeResponse> result = settingsService.getAllEvaluationModes();
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * 更新自訂模式的權重。
+	 *
+	 * 只有 is_editable = true 的模式可以改；三套固定模式會被 Service 層拒絕。
+	 * 這個檢查必須在後端做，不能只靠前端不顯示編輯按鈕——有人直接呼叫 API
+	 * 就繞過去了，而權重被改掉不會有任何錯誤訊息，只會讓所有商品的分數
+	 * 安靜地變成另一組數字。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/evaluation-modes/{id}/factors")
+	public ResponseEntity<ApiResponse<WeightSnapshot>> updateEvaluationModeFactors(
+			@PathVariable("id") Long id,
+			@Valid @RequestBody EvaluationFactorUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		WeightSnapshot result = settingsService.updateEvaluationModeFactors(id, request, username);
+		return ResponseEntity.ok(ApiResponse.success(
+				"權重已更新。本次調整僅影響之後新送審的商品，已完成審核的紀錄不會變動", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")

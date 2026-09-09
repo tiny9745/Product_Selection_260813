@@ -1,6 +1,9 @@
 package com.example.Product_Selection_260813.service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -14,6 +17,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.service.resolver.MoqResolver;
+import com.example.Product_Selection_260813.service.resolver.ResolvedValue;
+import com.example.Product_Selection_260813.service.scoring.ProductFactorScorer;
 import com.example.Product_Selection_260813.dto.request.ReviewSubmitRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.dto.response.ReviewDetailResponse;
@@ -29,6 +35,10 @@ import com.example.Product_Selection_260813.entity.ReviewRisk;
 import com.example.Product_Selection_260813.entity.ReviewRiskId;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.enums.ReviewRiskSource;
+import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
+import com.example.Product_Selection_260813.service.gate.GateResult;
+import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
 import com.example.Product_Selection_260813.json.ProductSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
@@ -81,6 +91,19 @@ public class ReviewService {
 	@Autowired
 	private AiSelectionService aiSelectionService;
 
+	// Gate 判定。由 ReviewService 注入而非 ScoringService 內部呼叫，
+	// 是為了避免兩個 Service 互相依賴形成循環。
+	@Autowired
+	private GateEvaluationService gateEvaluationService;
+
+	@Autowired
+	private MoqResolver moqResolver;
+
+	// 只用來取運費估算——快照要留下當時採用的運費，
+	// 否則事後拿成本價與售價重算會對不上快照裡的毛利率分數。
+	@Autowired
+	private ProductFactorScorer productFactorScorer;
+
 	// ========================= 查詢 =========================
 
 	/**
@@ -126,13 +149,27 @@ public class ReviewService {
 		Long evaluationModeId = evaluationOpt.map(ProductEvaluation::getEvaluationModeId).orElse(null);
 		Optional<EvaluationMode> evaluationModeOpt = scoringService.getEvaluationMode(evaluationModeId);
 
+		MatchedCampaignSnapshot matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
+		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness).orElse(null);
+		GateResult.Summary gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
+
+		// Gate 判定不通過的項目，對應的風險選項預先標記為系統帶入。
+		// 只標記不代表已勾選——最終是否成立由主管決定，這裡只是提供建議。
+		Map<Long, String> triggerReasons = resolveGateTriggerReasons(gateSummary);
 		List<RiskOptionResponse> availableRiskOptions = riskOptionRepository.findByIsActiveTrue().stream()
-				.map(RiskOptionResponse::from).toList();
+				.map(option -> {
+					RiskOptionResponse dto = RiskOptionResponse.from(option);
+					String reason = triggerReasons.get(option.getId());
+					dto.setAutoTriggered(reason != null);
+					dto.setTriggerReason(reason);
+					return dto;
+				}).toList();
 
 		return ReviewDetailResponse.build(ProductResponse.from(product), product.getSubmissionCount(),
 				evaluationOpt.orElse(null), evaluationModeOpt.orElse(null),
-				scoringService.buildWeightSnapshot(evaluationModeId), scoringService.buildMatchedCampaignSnapshot(product),
-				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions);
+				scoringService.buildWeightSnapshot(evaluationModeId), matchedCampaign,
+				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions,
+				gateSummary);
 	}
 
 	/**
@@ -187,6 +224,14 @@ public class ReviewService {
 		Long evaluationModeId = evaluationOpt.map(ProductEvaluation::getEvaluationModeId).orElse(null);
 		Optional<EvaluationMode> evaluationModeOpt = scoringService.getEvaluationMode(evaluationModeId);
 
+		// Gate 判定：與分數計算同時取得，讓快照留下的是「審核當下」的判定結果。
+		// 不在查詢時重算——之後品類屬性或設定值改了，重算的結果會與當時不同，
+		// 而審核紀錄必須能還原當時的判斷依據。
+		MatchedCampaignSnapshot matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
+		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness).orElse(null);
+		GateResult.Summary gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
+		Map<Long, String> gateTriggerReasons = resolveGateTriggerReasons(gateSummary);
+
 		ReviewRecord record = new ReviewRecord();
 		record.setProductId(product.getId());
 		record.setReviewerId(reviewerId);
@@ -214,7 +259,8 @@ public class ReviewService {
 			record.setForecastScore(evaluation.getForecastScore());
 		});
 
-		record.setMatchedCampaignSnapshot(scoringService.buildMatchedCampaignSnapshot(product));
+		record.setMatchedCampaignSnapshot(matchedCampaign);
+		record.setSystemGateSummary(gateSummary.toDisplaySummary());
 		record.setWeightSnapshot(scoringService.buildWeightSnapshot(evaluationModeId));
 		record.setTrendSnapshot(scoringService.buildTrendSnapshot(product.getId()));
 		record.setProductSnapshot(buildProductSnapshot(product));
@@ -227,12 +273,33 @@ public class ReviewService {
 		}
 
 		ReviewRecord saved = reviewRecordRepository.save(record);
-		List<Long> riskOptionIds = saveReviewRisks(saved.getId(), request.getRiskOptionIds());
+		List<Long> riskOptionIds = saveReviewRisks(saved.getId(), request.getRiskOptionIds(),
+				request.getSystemSuggestedRiskOptionIds(), gateTriggerReasons);
 
 		return ReviewRecordResponse.from(saved, riskOptionIds);
 	}
 
 	// ========================= 內部輔助方法 =========================
+
+
+	/**
+	 * 把 Gate 判定不通過的項目對應到 risk_options，取得「風險選項 id -&gt; 判定原因」。
+	 *
+	 * 只處理 FAILED——資料不足與不適用都不代表確定有風險，不該自動勾選風險選項。
+	 * 尤其是資料不足：把它自動勾成風險，等於因為採購沒填欄位就替商品扣了一筆
+	 * 風險紀錄，這對商品不公平，也會讓風險清單失去意義。
+	 *
+	 * 找不到對應 risk_option 的 Gate 會被略過（不拋錯）——auto_trigger_code 是
+	 * 設定資料，漏設一筆不該讓整筆審核送不出去，只是少了自動勾選的便利。
+	 */
+	private Map<Long, String> resolveGateTriggerReasons(GateResult.Summary summary) {
+		Map<Long, String> reasons = new LinkedHashMap<>();
+		for (GateResult failed : summary.failedResults()) {
+			riskOptionRepository.findByAutoTriggerCode(failed.gateCode())
+					.forEach(option -> reasons.put(option.getId(), failed.reason()));
+		}
+		return reasons;
+	}
 
 	private Product findProductOrThrow(Long id) {
 		return productRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("商品不存在"));
@@ -257,18 +324,59 @@ public class ReviewService {
 		};
 	}
 
+	/**
+	 * 組出審核當下的商品快照。
+	 *
+	 * <b>這是整套設計裡唯一「現在不做、之後補不回來」的地方。</b>
+	 * 審核紀錄不可覆蓋，漏掉的欄位無法回頭補齊——三個月後想查「當初為什麼
+	 * 這個 Gate 不通過」，如果快照裡沒有溫層、效期這些欄位，就只能撈到商品
+	 * 今天的值，而那可能已經被編輯過了。
+	 *
+	 * 因此除了商品自己的欄位，還要存兩類「解析後的結果」：
+	 * <ul>
+	 * <li>resolvedMoq / moqSource：三層解析後實際生效的值與來源。品類預設
+	 *     之後可能被改，只存商品層原始值（可能是 null）無法還原當時判斷。</li>
+	 * <li>freightCostEstimate：毛利率是扣掉運費後才正規化的，而運費來自
+	 *     system_settings，之後會被調整。不存的話，事後拿成本價與售價重算
+	 *     會對不上快照裡的分數。</li>
+	 * </ul>
+	 */
 	private ProductSnapshot buildProductSnapshot(Product product) {
 		ProductSnapshot snapshot = new ProductSnapshot();
 		snapshot.setName(product.getName());
 		snapshot.setPricingType(product.getPricingType() != null ? product.getPricingType().name() : null);
 		snapshot.setCostPrice(product.getCostPrice());
 		snapshot.setSalePrice(product.getSalePrice());
+		// 折扣深度是計分因子，公式用到市價；不存的話這一項分數無法重現
+		snapshot.setMarketPrice(product.getMarketPrice());
 		snapshot.setCampaignTags(product.getCampaignTags());
-		snapshot.setMoq(product.getMoq());
 		snapshot.setSupplyStability(product.getSupplyStability());
 		snapshot.setPriceCompetitiveness(product.getPriceCompetitiveness());
 		snapshot.setTargetCustomerDescription(product.getTargetCustomerDescription());
 		snapshot.setEstimatedPurchaseRate(product.getEstimatedPurchaseRate());
+
+		// moq 存商品層原始值（可能為 null，代表當時是繼承品類），
+		// resolvedMoq 存實際生效的數字。兩者並存才能還原「當時用的是多少、
+		// 而且那個數字是誰給的」。
+		snapshot.setMoq(product.getMoq());
+		ResolvedValue<Integer> resolvedMoq = moqResolver.resolve(product);
+		snapshot.setResolvedMoq(resolvedMoq.value());
+		snapshot.setMoqSource(resolvedMoq.source().name());
+
+		// Gate 判定所依據的商品屬性
+		snapshot.setTemperatureZone(product.getTemperatureZone());
+		snapshot.setShelfLifeTier(product.getShelfLifeTier());
+		snapshot.setSupplierLeadTimeTier(product.getSupplierLeadTimeTier());
+		snapshot.setPackageSizeTier(product.getPackageSizeTier());
+		snapshot.setPackingType(product.getPackingType());
+		snapshot.setHandlingFlags(product.getHandlingFlags());
+		snapshot.setCertificationFlags(product.getCertificationFlags());
+		snapshot.setSupplierMaxCapacity(product.getSupplierMaxCapacity());
+		snapshot.setResaleReferenceProductId(product.getResaleReferenceProductId());
+
+		// 當時採用的運費估算，供事後重現毛利率計算
+		snapshot.setFreightCostEstimate(productFactorScorer.estimateFreightCost(product));
+
 		return snapshot;
 	}
 
@@ -296,31 +404,76 @@ public class ReviewService {
 		}
 	}
 
-	private List<Long> saveReviewRisks(Long reviewId, List<Long> riskOptionIds) {
-		if (riskOptionIds == null || riskOptionIds.isEmpty()) {
+	/**
+	 * 寫入審核風險項目，區分「系統帶入」與「主管勾選」。
+	 *
+	 * 四種組合都必須被記錄：
+	 * <table>
+	 * <tr><td>SYSTEM_AUTO + isSelected=true </td><td>系統判定，主管保留</td></tr>
+	 * <tr><td>SYSTEM_AUTO + isSelected=false</td><td><b>系統判定，主管推翻</b></td></tr>
+	 * <tr><td>MANUAL + isSelected=true      </td><td>主管自行勾選</td></tr>
+	 * <tr><td>MANUAL + isSelected=false     </td><td>不寫入（無此風險）</td></tr>
+	 * </table>
+	 *
+	 * 第二種是稽核價值最高的一筆——「系統說有問題，但主管認為可以」。
+	 * 如果只寫入主管最終勾選的清單，這筆資訊會完全消失，事後就分不出
+	 * 「系統沒建議」和「系統建議了但被推翻」。
+	 *
+	 * @param selectedIds 主管最終勾選的（含他保留下來的系統建議項）
+	 * @param systemSuggested 系統原本建議的（Gate 判定不通過而預先勾選的）
+	 * @param triggerReasons riskOptionId -&gt; Gate 判定原因，供系統帶入項留存說明
+	 * @return 主管最終勾選的 id 清單，供回應使用
+	 */
+	private List<Long> saveReviewRisks(Long reviewId, List<Long> selectedIds,
+			List<Long> systemSuggested, Map<Long, String> triggerReasons) {
+		List<Long> selected = selectedIds == null ? List.of() : selectedIds.stream().distinct().toList();
+		List<Long> suggested = systemSuggested == null ? List.of() : systemSuggested.stream().distinct().toList();
+
+		// 兩份清單的聯集才是要寫入的範圍——被主管取消的系統建議項也要留下紀錄
+		LinkedHashSet<Long> allIds = new LinkedHashSet<>();
+		allIds.addAll(selected);
+		allIds.addAll(suggested);
+		if (allIds.isEmpty()) {
 			return List.of();
 		}
 
-		List<Long> distinctIds = riskOptionIds.stream().distinct().toList();
-		for (Long riskOptionId : distinctIds) {
+		for (Long riskOptionId : allIds) {
+			boolean isSelected = selected.contains(riskOptionId);
+			boolean isSystemSuggested = suggested.contains(riskOptionId);
+
+			// 停用檢查只套用在「主管實際勾選」的項目。
+			// 系統建議但被取消的項目不檢查——那筆紀錄的用途是保留稽核軌跡，
+			// 若因為選項剛好被停用而拋錯，反而會讓整筆審核送不出去。
 			RiskOption riskOption = riskOptionRepository.findById(riskOptionId)
 					.orElseThrow(() -> new IllegalArgumentException("人工風險選項不存在：" + riskOptionId));
-			// 已停用的風險選項不可被「新的」審核勾選——否則設定頁的disable端點形同虛設。
-			// 注意這個檢查只在寫入路徑，不在查詢路徑：歷史審核紀錄引用當時還啟用、
-			// 現在已停用的選項是正常的，getReviewRecords()查詢時不可因此報錯。
-			if (!Boolean.TRUE.equals(riskOption.getIsActive())) {
+			if (isSelected && !Boolean.TRUE.equals(riskOption.getIsActive())) {
 				throw new IllegalArgumentException(
 						ValidationMessage.REVIEW_RISK_OPTION_INACTIVE + riskOption.getName());
 			}
+
 			ReviewRisk reviewRisk = new ReviewRisk();
 			reviewRisk.setId(new ReviewRiskId(reviewId, riskOptionId));
+			reviewRisk.setSource(isSystemSuggested ? ReviewRiskSource.SYSTEM_AUTO : ReviewRiskSource.MANUAL);
+			reviewRisk.setIsSelected(isSelected);
+			if (isSystemSuggested && triggerReasons != null) {
+				reviewRisk.setTriggerReason(triggerReasons.get(riskOptionId));
+			}
 			reviewRiskRepository.save(reviewRisk);
 		}
-		return distinctIds;
+		return selected;
 	}
 
+	/**
+	 * 查詢審核紀錄實際成立的風險項目。
+	 *
+	 * 只回傳 isSelected = true 的——被主管推翻的系統建議項雖然留在資料庫，
+	 * 但它不是「這次審核認定的風險」，不該出現在風險清單裡。
+	 * 要看完整軌跡（含被推翻的項目）請另外查 review_risks。
+	 */
 	private List<Long> getRiskOptionIds(Long reviewId) {
-		return reviewRiskRepository.findById_ReviewId(reviewId).stream().map(risk -> risk.getId().getRiskOptionId())
+		return reviewRiskRepository.findById_ReviewId(reviewId).stream()
+				.filter(risk -> Boolean.TRUE.equals(risk.getIsSelected()))
+				.map(risk -> risk.getId().getRiskOptionId())
 				.toList();
 	}
 }
