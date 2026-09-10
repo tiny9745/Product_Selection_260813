@@ -37,6 +37,17 @@ public class EvaluationFactor {
     
     @Column(name = "sort_order")
     private Integer sortOrder;
+
+    /**
+     * 最後一次權重變更時間；三套固定模式（均衡／衝量／高利潤）維持 null，
+     * 因為從未被寫入過。只有自訂模式透過權重編輯 API 更新時才會有值。
+     */
+    @Column(name = "updated_at")
+    private java.time.LocalDateTime updatedAt;
+
+    /** 最後一次權重變更的操作者；語意同 updatedAt。 */
+    @Column(name = "updated_by")
+    private Long updatedBy;
 
 	public Long getId() {
 		return id;
@@ -102,4 +113,20 @@ public class EvaluationFactor {
 		this.sortOrder = sortOrder;
 	}
     
+
+    public java.time.LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(java.time.LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    public Long getUpdatedBy() {
+        return updatedBy;
+    }
+
+    public void setUpdatedBy(Long updatedBy) {
+        this.updatedBy = updatedBy;
+    }
 }

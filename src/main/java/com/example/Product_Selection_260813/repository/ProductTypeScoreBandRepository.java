@@ -1,5 +1,6 @@
 package com.example.Product_Selection_260813.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -22,4 +23,9 @@ public interface ProductTypeScoreBandRepository extends JpaRepository<ProductTyp
 			+ "WHERE b.productTypeId IS NULL AND b.factorCode = :factorCode AND b.isActive = true "
 			+ "ORDER BY b.version DESC LIMIT 1")
 	Optional<ProductTypeScoreBand> findActiveGlobalByFactor(@Param("factorCode") String factorCode);
+
+	/** 列出全部目標區間（含全域保底），供設定頁一次呈現所有品類×因子的組合。 */
+	@Query("SELECT b FROM ProductTypeScoreBand b WHERE b.isActive = true "
+			+ "ORDER BY b.productTypeId, b.factorCode, b.version DESC")
+	List<ProductTypeScoreBand> findAllActive();
 }

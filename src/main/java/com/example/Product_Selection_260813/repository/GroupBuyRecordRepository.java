@@ -71,4 +71,39 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 	List<GroupBuyRecord> findByProductTypeIdOrderByCampaignStartDateDesc(Long productTypeId);
 
 	List<GroupBuyRecord> findByProductIdOrderByCampaignStartDateDesc(Long productId);
+
+	// ---------------- 歷史毛利率／折扣深度區間計算 ----------------
+
+	/**
+	 * 該品類（大類）有效樣本的成本價、售價（供算毛利率用）。
+	 *
+	 * 只取 costPriceAtTime／salePriceAtTime 皆非 null 的紀錄——這兩欄是
+	 * 後來才補上的，舊資料可能缺，缺了就不該猜測或補值，直接跳過那筆。
+	 * result 限 FULFILLED／FAILED，理由與成團率計算一致：CANCELLED 多半是
+	 * 營運面決定，不代表這個定價不合理，不該污染樣本。
+	 *
+	 * 回傳 Object[]，index 0 = costPriceAtTime，index 1 = salePriceAtTime，
+	 * 在 Java 端計算毛利率而不是在 SQL 裡做除法——除以零的防護、BigDecimal
+	 * 精度控制在 Java 端处理更安全，也跟 ScoringAlgorithms 的其餘計算方式一致。
+	 */
+	@Query("SELECT g.costPriceAtTime, g.salePriceAtTime FROM GroupBuyRecord g "
+			+ "WHERE g.productTypeId = :productTypeId "
+			+ "AND g.result IN ('FULFILLED', 'FAILED') "
+			+ "AND g.costPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
+			+ "AND g.salePriceAtTime > 0")
+	List<Object[]> findMarginRateSamplesByProductType(@Param("productTypeId") Long productTypeId);
+
+	/** 語意同上，供折扣深度使用：index 0 = marketPriceAtTime，index 1 = salePriceAtTime。 */
+	@Query("SELECT g.marketPriceAtTime, g.salePriceAtTime FROM GroupBuyRecord g "
+			+ "WHERE g.productTypeId = :productTypeId "
+			+ "AND g.result IN ('FULFILLED', 'FAILED') "
+			+ "AND g.marketPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
+			+ "AND g.marketPriceAtTime > 0")
+	List<Object[]> findDiscountDepthSamplesByProductType(@Param("productTypeId") Long productTypeId);
+
+	/** 上述兩種樣本中，是否含模擬資料——供快照的 historyIncludesSimulated 使用。 */
+	@Query("SELECT COUNT(g) > 0 FROM GroupBuyRecord g "
+			+ "WHERE g.productTypeId = :productTypeId AND g.isSimulated = true "
+			+ "AND g.costPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL")
+	boolean marginRateSamplesIncludeSimulated(@Param("productTypeId") Long productTypeId);
 }

@@ -68,6 +68,12 @@ public class ProductUpdateRequest {
 	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_MARKET_PRICE_OVER_DIGITS)
 	private BigDecimal marketPrice;
 
+	/**
+	 * 僅 RESALE 商品可修改，語意與 ProductCreateRequest 相同。更新時同樣
+	 * 交由 Service 驗證：NEW 商品帶值會被拒絕、引用的商品須存在且同小類。
+	 */
+	private Long resaleReferenceProductId;
+
 	@Size(max = 255, message = ValidationMessage.PRODUCT_CAMPAIGN_TAGS_TOO_LONG)
 	private String campaignTags;
 
@@ -103,6 +109,14 @@ public class ProductUpdateRequest {
 
 	public void setPricingType(ProductPricingType pricingType) {
 		this.pricingType = pricingType;
+	}
+
+	public Long getResaleReferenceProductId() {
+		return resaleReferenceProductId;
+	}
+
+	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
+		this.resaleReferenceProductId = resaleReferenceProductId;
 	}
 
 	public String getName() {

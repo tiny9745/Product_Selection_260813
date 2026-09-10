@@ -118,4 +118,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("id") Long id,
             @Param("expectedStatus") ProductReviewStatus expectedStatus,
             @Param("newStatus") ProductReviewStatus newStatus);
+
+    /**
+     * RESALE 商品搜尋相似候選參考商品的候選池：同品類（小類）、未封存的商品。
+     *
+     * 只縮小到「同品類」這一個結構化條件——不在 SQL 層做名稱比對，名稱相似度
+     * 交給 Java 端算（見 ProductSimilarityService），因為 Jaro-Winkler 這類
+     * 演算法沒有對應的 SQL 語法，勢必要把候選撈出來後在應用層計算。
+     *
+     * 排除 ARCHIVED：已封存的商品不該被當成新商品要參考的對象，那通常代表
+     * 這個品項已經停止經營，繼續引用它的歷史沒有意義。
+     *
+     * 不排除呼叫端自己（selfId 為 null 時代表新增情境，本來就沒有自己可排除）
+     * 的篩選交給呼叫端在 Java 層處理，這裡只負責基本的候選池查詢。
+     */
+    @Query("SELECT p FROM Product p WHERE p.productTypeId = :productTypeId AND p.itemStatus <> 'ARCHIVED'")
+    List<Product> findCandidatesByProductType(@Param("productTypeId") Long productTypeId);
 }

@@ -38,6 +38,9 @@ public class AlgorithmSettings {
 	public static final String KEY_SHRINKAGE_K_PRODUCT = "shrinkage_k_product";
 	public static final String KEY_TREND_HALF_LIFE_DAYS = "trend_half_life_days";
 	public static final String KEY_NEUTRAL_BASELINE_SCORE = "neutral_baseline_score";
+	public static final String KEY_SCORE_BAND_MIN_SAMPLE_SIZE = "score_band_min_sample_size";
+	public static final String KEY_SCORE_BAND_PERCENTILE_LOWER = "score_band_percentile_lower";
+	public static final String KEY_SCORE_BAND_PERCENTILE_UPPER = "score_band_percentile_upper";
 
 	// 預設值（與 V2 migration 的初值一致）
 	private static final int DEFAULT_MOQ_BENCHMARK_PERCENTILE = 75;
@@ -48,6 +51,9 @@ public class AlgorithmSettings {
 	private static final int DEFAULT_SHRINKAGE_K_PRODUCT = 5;
 	private static final int DEFAULT_TREND_HALF_LIFE_DAYS = 14;
 	private static final BigDecimal DEFAULT_NEUTRAL_BASELINE_SCORE = BigDecimal.valueOf(50);
+	private static final int DEFAULT_SCORE_BAND_MIN_SAMPLE_SIZE = 5;
+	private static final int DEFAULT_SCORE_BAND_PERCENTILE_LOWER = 10;
+	private static final int DEFAULT_SCORE_BAND_PERCENTILE_UPPER = 90;
 
 	private final SystemSettingRepository systemSettingRepository;
 
@@ -91,6 +97,21 @@ public class AlgorithmSettings {
 
 	public BigDecimal getNeutralBaselineScore() {
 		return getDecimal(KEY_NEUTRAL_BASELINE_SCORE, DEFAULT_NEUTRAL_BASELINE_SCORE);
+	}
+
+	/** 目標區間 HISTORICAL 模式的最低樣本數門檻，低於此不計算、回報資料不足。 */
+	public int getScoreBandMinSampleSize() {
+		return getInt(KEY_SCORE_BAND_MIN_SAMPLE_SIZE, DEFAULT_SCORE_BAND_MIN_SAMPLE_SIZE);
+	}
+
+	/** 目標區間下界採用的分位數，預設 P10。 */
+	public int getScoreBandPercentileLower() {
+		return getInt(KEY_SCORE_BAND_PERCENTILE_LOWER, DEFAULT_SCORE_BAND_PERCENTILE_LOWER);
+	}
+
+	/** 目標區間上界採用的分位數，預設 P90。 */
+	public int getScoreBandPercentileUpper() {
+		return getInt(KEY_SCORE_BAND_PERCENTILE_UPPER, DEFAULT_SCORE_BAND_PERCENTILE_UPPER);
 	}
 
 	/**

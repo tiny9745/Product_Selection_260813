@@ -78,7 +78,6 @@ public class ValidationMessage {
 	public static final String USER_PASSWORD_BLANK = "密碼不可為空";
 	public static final String USER_PASSWORD_TOO_SHORT = "密碼長度至少需8個字元";
 
-
 	// User（自身資料修改，團隊既有功能，非本次異動範圍）
 	public static final String USER_CURRENT_PASSWORD_BLANK = "目前密碼不可為空";
 	public static final String USER_NEW_PASSWORD_SAME_AS_OLD = "新密碼不可與目前密碼相同";

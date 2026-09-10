@@ -21,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
+import com.example.Product_Selection_260813.service.scoring.HistoricalScoreCalculator;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
 import com.example.Product_Selection_260813.constants.FactorCode;
@@ -109,6 +111,12 @@ public class ScoringService {
 	private ProductFactorScorer productFactorScorer;
 
 	@Autowired
+	private HistoricalScoreCalculator historicalScoreCalculator;
+
+	@Autowired
+	private ScoreBandResolver scoreBandResolver;
+
+	@Autowired
 	private AlgorithmSettings algorithmSettings;
 
 	@Autowired
@@ -164,8 +172,28 @@ public class ScoringService {
 	 * 組裝review_records.weight_snapshot：該評估模式當下的完整固定權重明細。
 	 * evaluationModeId為null（商品尚未評估過）或查無此模式時回傳null。
 	 */
+	/**
+	 * 不含商品情境的版本——供純粹顯示評估模式結構使用（例如設定頁的
+	 * GET /evaluation-modes/{id}/factors，那裡沒有特定商品可以參照）。
+	 * 這個版本的 scoreBands／historySampleSize* 一律為 null，因為這些
+	 * 資訊依商品所屬品類而定，沒有商品就沒有品類可查。
+	 */
 	@Transactional(readOnly = true)
 	public WeightSnapshot buildWeightSnapshot(Long evaluationModeId) {
+		return buildWeightSnapshot(evaluationModeId, null);
+	}
+
+	/**
+	 * 含商品情境的版本——審核流程（getReviewDetail／submitReview）都應該用
+	 * 這個版本，才能把「當時用的目標區間、歷史樣本數」一併凍結進快照。
+	 *
+	 * 這裡曾經是一個已知缺口：scoreBands／historySampleSizeCategory／
+	 * historySampleSizeProduct／historyIncludesSimulated 這四個欄位存在於
+	 * WeightSnapshot 的資料結構裡，但先前從未被賦值——目標區間之後如果被
+	 * 調整，已審核商品的快照裡查不到「當時用的是哪一組區間」。現在補上。
+	 */
+	@Transactional(readOnly = true)
+	public WeightSnapshot buildWeightSnapshot(Long evaluationModeId, Product product) {
 		return getEvaluationMode(evaluationModeId).map(mode -> {
 			List<EvaluationFactor> factors = evaluationFactorRepository
 					.findByEvaluationModeIdOrderBySortOrderAsc(mode.getId());
@@ -182,6 +210,26 @@ public class ScoringService {
 			snapshot.setShrinkageKCategory(algorithmSettings.getShrinkageKCategory());
 			snapshot.setShrinkageKProduct(algorithmSettings.getShrinkageKProduct());
 			snapshot.setTrendHalfLifeDays(algorithmSettings.getTrendHalfLifeDays());
+
+			if (product != null) {
+				// 歷史樣本數：直接重用 HistoricalScoreCalculator 已經算好的結果，
+				// 不重新查一次資料庫——避免同一次審核裡兩處查詢可能因為
+				// 極端情況下的並發寫入而得到微幅不同的樣本數。
+				var historyResult = historicalScoreCalculator.calculate(product);
+				snapshot.setHistorySampleSizeCategory(historyResult.categorySampleSize());
+				snapshot.setHistorySampleSizeProduct(historyResult.productSampleSize());
+				snapshot.setHistoryIncludesSimulated(historyResult.includesSimulatedData());
+
+				// 目標區間：只有 MARGIN_RATE／DISCOUNT_DEPTH 兩個因子有對應區間，
+				// 其餘因子沒有「目標區間」這個概念，不強行塞入空區間。
+				Map<String, List<BigDecimal>> bands = new LinkedHashMap<>();
+				for (String code : List.of(ScoreBandResolver.FACTOR_MARGIN_RATE, ScoreBandResolver.FACTOR_DISCOUNT_DEPTH)) {
+					scoreBandResolver.resolve(product.getProductTypeId(), code).ifPresent(band ->
+							bands.put(code, List.of(band.getLowerBound(), band.getUpperBound())));
+				}
+				snapshot.setScoreBands(bands);
+			}
+
 			return snapshot;
 		}).orElse(null);
 	}

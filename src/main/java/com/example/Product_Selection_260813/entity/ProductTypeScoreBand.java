@@ -50,6 +50,28 @@ public class ProductTypeScoreBand {
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = true;
 
+	/** HISTORICAL=由歷史開團紀錄算出並凍結 / MANUAL=主管直接輸入。對應 ScoreBandSourceMode。 */
+	@Column(name = "source_mode", nullable = false, length = 20)
+	private String sourceMode = "MANUAL";
+
+	/** HISTORICAL 模式下，算出這組區間時實際用了多少筆有效開團紀錄；MANUAL 模式為 null。 */
+	@Column(name = "sample_size")
+	private Integer sampleSize;
+
+	/** HISTORICAL 模式下，樣本是否含模擬資料；MANUAL 模式為 null。 */
+	@Column(name = "includes_simulated")
+	private Boolean includesSimulated;
+
+	/** HISTORICAL 模式下，這組區間最後一次被計算並凍結的時間；MANUAL 模式為 null。 */
+	@Column(name = "computed_at")
+	private java.time.LocalDateTime computedAt;
+
+	@Column(name = "updated_at")
+	private java.time.LocalDateTime updatedAt;
+
+	@Column(name = "updated_by")
+	private Long updatedBy;
+
 	public Long getId() {
 		return id;
 	}
@@ -104,5 +126,53 @@ public class ProductTypeScoreBand {
 
 	public void setIsActive(Boolean isActive) {
 		this.isActive = isActive;
+	}
+
+	public String getSourceMode() {
+		return sourceMode;
+	}
+
+	public void setSourceMode(String sourceMode) {
+		this.sourceMode = sourceMode;
+	}
+
+	public Integer getSampleSize() {
+		return sampleSize;
+	}
+
+	public void setSampleSize(Integer sampleSize) {
+		this.sampleSize = sampleSize;
+	}
+
+	public Boolean getIncludesSimulated() {
+		return includesSimulated;
+	}
+
+	public void setIncludesSimulated(Boolean includesSimulated) {
+		this.includesSimulated = includesSimulated;
+	}
+
+	public java.time.LocalDateTime getComputedAt() {
+		return computedAt;
+	}
+
+	public void setComputedAt(java.time.LocalDateTime computedAt) {
+		this.computedAt = computedAt;
+	}
+
+	public java.time.LocalDateTime getUpdatedAt() {
+		return updatedAt;
+	}
+
+	public void setUpdatedAt(java.time.LocalDateTime updatedAt) {
+		this.updatedAt = updatedAt;
+	}
+
+	public Long getUpdatedBy() {
+		return updatedBy;
+	}
+
+	public void setUpdatedBy(Long updatedBy) {
+		this.updatedBy = updatedBy;
 	}
 }

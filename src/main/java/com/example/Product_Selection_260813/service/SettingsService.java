@@ -39,6 +39,15 @@ import com.example.Product_Selection_260813.repository.AppUserRepository;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
+import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
+import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
+import com.example.Product_Selection_260813.enums.ScoreBandSourceMode;
+import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
+import com.example.Product_Selection_260813.repository.ProductTypeScoreBandRepository;
+import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
@@ -130,6 +139,16 @@ public class SettingsService {
 	@Autowired
 	private FestiveCampaignTagRepository festiveCampaignTagRepository;
 
+	// 目標區間 HISTORICAL 模式需要的兩個依賴
+	@Autowired
+	private ProductTypeScoreBandRepository productTypeScoreBandRepository;
+
+	@Autowired
+	private GroupBuyRecordRepository groupBuyRecordRepository;
+
+	@Autowired
+	private com.example.Product_Selection_260813.service.resolver.AlgorithmSettings algorithmSettings;
+
 	// ========================= 評估模式 =========================
 
 	/**
@@ -197,12 +216,18 @@ public class SettingsService {
 		}
 
 		// 全部通過才寫入
+		Long operatorId = resolveUserId(username);
+		java.time.LocalDateTime now = java.time.LocalDateTime.now();
 		List<EvaluationFactor> factors = evaluationFactorRepository
 				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId);
 		for (EvaluationFactor factor : factors) {
 			BigDecimal newWeight = incoming.get(factor.getFactorCode());
 			if (newWeight != null) {
 				factor.setWeight(newWeight);
+				// 稽核欄位：權重被改了，要能查到是誰、什麼時候改的，不能只靠
+				// 應用程式日誌（不可查詢、會被輪替清除）。
+				factor.setUpdatedAt(now);
+				factor.setUpdatedBy(operatorId);
 			}
 		}
 		evaluationFactorRepository.saveAll(factors);
@@ -218,6 +243,161 @@ public class SettingsService {
 	 * 缺一不可——少檢查「齊全」的話，使用者只送三項且加總 100 也會通過，
 	 * 但另外四項會維持舊值，實際加總就不是 100 了。
 	 */
+	/** 列出全部目標區間，供設定頁呈現。 */
+	@Transactional(readOnly = true)
+	public List<ProductTypeScoreBandResponse> getProductTypeScoreBands() {
+		return productTypeScoreBandRepository.findAllActive().stream()
+				.map(ProductTypeScoreBandResponse::from)
+				.toList();
+	}
+
+	// ============================================================
+	// 目標區間：HISTORICAL / MANUAL 切換
+	// ============================================================
+
+	/**
+	 * 更新目標區間。依 sourceMode 分兩條路徑，見 {@link ProductTypeScoreBandUpdateRequest}
+	 * 的類別註解說明兩種模式的差異。
+	 *
+	 * HISTORICAL 模式在這裡「當下計算一次並凍結寫入」，不是留一個公式讓評分時
+	 * 動態運算——這是為了維持可重現性：如果每次評分都重新查歷史資料算區間，
+	 * 同一件商品在不同時間會因為資料庫累積了新紀錄而算出不同分數，而且
+	 * 已審核商品的快照會對不上重新計算的結果。
+	 */
+	@Transactional
+	public ProductTypeScoreBandResponse updateProductTypeScoreBand(Long bandId,
+			ProductTypeScoreBandUpdateRequest request, String username) {
+		ProductTypeScoreBand band = productTypeScoreBandRepository.findById(bandId)
+				.orElseThrow(() -> new IllegalArgumentException("目標區間不存在"));
+
+		ScoreBandSourceMode mode;
+		try {
+			mode = ScoreBandSourceMode.valueOf(request.getSourceMode().trim().toUpperCase());
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException("來源模式須為 HISTORICAL 或 MANUAL，目前為：" + request.getSourceMode());
+		}
+
+		Long operatorId = resolveUserId(username);
+		LocalDateTime now = LocalDateTime.now();
+
+		if (mode == ScoreBandSourceMode.MANUAL) {
+			applyManualBand(band, request);
+		} else {
+			applyHistoricalBand(band, now);
+		}
+
+		band.setSourceMode(mode.name());
+		band.setUpdatedAt(now);
+		band.setUpdatedBy(operatorId);
+		productTypeScoreBandRepository.save(band);
+
+		log.info("目標區間已更新：id={}，模式={}，操作者={}", bandId, mode, username);
+		return ProductTypeScoreBandResponse.from(band);
+	}
+
+	/**
+	 * MANUAL 模式：主管直接輸入固定數字。
+	 *
+	 * 未提供新數字時沿用資料庫裡目前的值，不清空——對應「手動設定預設值為
+	 * 固定值」的需求：切到 MANUAL 不代表要求主管立刻重新輸入，可以先沿用
+	 * 現狀，之後再慢慢調整。
+	 *
+	 * 切到 MANUAL 後，HISTORICAL 專屬的三個欄位（樣本數、是否含模擬資料、
+	 * 計算時間）清空——這些欄位的語意是「這組數字是算出來的」，MANUAL 模式
+	 * 下不成立，留著舊值會誤導看畫面的人以為現在的數字還是算出來的。
+	 */
+	private void applyManualBand(ProductTypeScoreBand band, ProductTypeScoreBandUpdateRequest request) {
+		BigDecimal lower = request.getLowerBound() != null ? request.getLowerBound() : band.getLowerBound();
+		BigDecimal upper = request.getUpperBound() != null ? request.getUpperBound() : band.getUpperBound();
+
+		if (lower == null || upper == null) {
+			throw new IllegalArgumentException("首次設定為 MANUAL 模式時，上下界必須提供");
+		}
+		if (upper.compareTo(lower) <= 0) {
+			throw new IllegalArgumentException("上界必須大於下界，目前下界=" + lower + " 上界=" + upper);
+		}
+
+		band.setLowerBound(lower);
+		band.setUpperBound(upper);
+		band.setSampleSize(null);
+		band.setIncludesSimulated(null);
+		band.setComputedAt(null);
+	}
+
+	/**
+	 * HISTORICAL 模式：從歷史開團紀錄算出建議區間並凍結。
+	 *
+	 * 只有 MARGIN_RATE、DISCOUNT_DEPTH 這兩個因子有對應的歷史資料來源可以算
+	 * （分別對應 group_buy_records 的成本價／售價、市價／售價）。其餘因子
+	 * 目前沒有歷史區間的計算邏輯，切 HISTORICAL 會被拒絕——不是遺漏，是
+	 * 因為那些因子本來就不是靠「成本／售價比較」這種公式算分數。
+	 *
+	 * 上下界採用分位數而非最大最小值，理由與 MOQ 可行性判定用分位數而非
+	 * 歷史最大值一致：最大最小值容易被單一離群樣本主導。預設取 P10／P90，
+	 * 可調整（見 AlgorithmSettings）。
+	 */
+	private void applyHistoricalBand(ProductTypeScoreBand band, LocalDateTime now) {
+		Long productTypeId = band.getProductTypeId();
+		if (productTypeId == null) {
+			throw new IllegalArgumentException("全域保底區間（product_type_id 為空）不支援 HISTORICAL 模式，" +
+					"歷史資料需要指定品類才能計算");
+		}
+
+		List<BigDecimal> ratios;
+		boolean includesSimulated;
+
+		if (ScoreBandResolver.FACTOR_MARGIN_RATE.equals(band.getFactorCode())) {
+			List<Object[]> samples = groupBuyRecordRepository.findMarginRateSamplesByProductType(productTypeId);
+			ratios = samples.stream()
+					.map(row -> computeRatio((BigDecimal) row[1], (BigDecimal) row[0], (BigDecimal) row[1]))
+					.filter(java.util.Objects::nonNull)
+					.toList();
+			includesSimulated = groupBuyRecordRepository.marginRateSamplesIncludeSimulated(productTypeId);
+		} else if (ScoreBandResolver.FACTOR_DISCOUNT_DEPTH.equals(band.getFactorCode())) {
+			List<Object[]> samples = groupBuyRecordRepository.findDiscountDepthSamplesByProductType(productTypeId);
+			ratios = samples.stream()
+					.map(row -> computeRatio((BigDecimal) row[0], (BigDecimal) row[1], (BigDecimal) row[0]))
+					.filter(java.util.Objects::nonNull)
+					.toList();
+			includesSimulated = false; // 折扣深度目前未提供含模擬資料的查詢，先保守標 false 而非猜測
+		} else {
+			throw new IllegalArgumentException(
+					"因子「" + band.getFactorCode() + "」沒有對應的歷史資料計算邏輯，僅 MARGIN_RATE／DISCOUNT_DEPTH 支援 HISTORICAL 模式");
+		}
+
+		int minSample = algorithmSettings.getScoreBandMinSampleSize();
+		if (ratios.size() < minSample) {
+			throw new IllegalArgumentException(String.format(
+					"該品類有效樣本僅 %d 筆（需 %d 筆以上），樣本不足無法計算歷史區間，請改用 MANUAL 模式手動輸入",
+					ratios.size(), minSample));
+		}
+
+		BigDecimal lower = ScoringAlgorithms.percentile(ratios, algorithmSettings.getScoreBandPercentileLower());
+		BigDecimal upper = ScoringAlgorithms.percentile(ratios, algorithmSettings.getScoreBandPercentileUpper());
+		if (upper.compareTo(lower) <= 0) {
+			// 極端情況：樣本高度集中導致兩個分位數算出相同或反轉的值。
+			// 不寫入一個無效區間，明確報錯讓人知道資料異常，而不是靜默寫入
+			// 一組會讓 normalizeByBand() 拋例外的壞資料。
+			throw new IllegalStateException("計算出的歷史區間上下界異常（下界=" + lower + " 上界=" + upper
+					+ "），可能是樣本過度集中，建議改用 MANUAL 模式");
+		}
+
+		band.setLowerBound(lower);
+		band.setUpperBound(upper);
+		band.setSampleSize(ratios.size());
+		band.setIncludesSimulated(includesSimulated);
+		band.setComputedAt(now);
+	}
+
+	/** (分子1 − 分子2) / 分母，分母為 0 或任一輸入為 null 時回傳 null（跳過該筆樣本）。 */
+	private BigDecimal computeRatio(BigDecimal minuend, BigDecimal subtrahend, BigDecimal denominator) {
+		if (minuend == null || subtrahend == null || denominator == null
+				|| denominator.compareTo(BigDecimal.ZERO) == 0) {
+			return null;
+		}
+		return minuend.subtract(subtrahend).divide(denominator, 6, java.math.RoundingMode.HALF_UP);
+	}
+
 	private Map<String, BigDecimal> validateAndCollectFactors(EvaluationFactorUpdateRequest request) {
 		Map<String, BigDecimal> collected = new LinkedHashMap<>();
 		for (EvaluationFactorUpdateRequest.FactorWeight fw : request.getFactors()) {

@@ -18,6 +18,8 @@ public class GroupBuyRecordResponse {
 	private LocalDate campaignEndDate;
 	private Integer moqAtTime;
 	private BigDecimal salePriceAtTime;
+	private BigDecimal costPriceAtTime;
+	private BigDecimal marketPriceAtTime;
 	private Integer targetQuantity;
 	private Integer actualQuantity;
 	private Integer participantCount;
@@ -39,6 +41,8 @@ public class GroupBuyRecordResponse {
 		r.campaignEndDate = entity.getCampaignEndDate();
 		r.moqAtTime = entity.getMoqAtTime();
 		r.salePriceAtTime = entity.getSalePriceAtTime();
+		r.costPriceAtTime = entity.getCostPriceAtTime();
+		r.marketPriceAtTime = entity.getMarketPriceAtTime();
 		r.targetQuantity = entity.getTargetQuantity();
 		r.actualQuantity = entity.getActualQuantity();
 		r.participantCount = entity.getParticipantCount();
@@ -60,6 +64,8 @@ public class GroupBuyRecordResponse {
 	public LocalDate getCampaignEndDate() { return campaignEndDate; }
 	public Integer getMoqAtTime() { return moqAtTime; }
 	public BigDecimal getSalePriceAtTime() { return salePriceAtTime; }
+	public BigDecimal getCostPriceAtTime() { return costPriceAtTime; }
+	public BigDecimal getMarketPriceAtTime() { return marketPriceAtTime; }
 	public Integer getTargetQuantity() { return targetQuantity; }
 	public Integer getActualQuantity() { return actualQuantity; }
 	public Integer getParticipantCount() { return participantCount; }

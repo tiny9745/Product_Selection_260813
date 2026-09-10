@@ -1,5 +1,6 @@
 package com.example.Product_Selection_260813.controller;
 
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.dto.response.SimilarProductCandidateResponse;
+import com.example.Product_Selection_260813.service.ProductSimilarityService;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
@@ -48,6 +51,9 @@ public class ProductController {
 
 	@Autowired
 	private ProductService productService;
+
+	@Autowired
+	private ProductSimilarityService productSimilarityService;
 
 	/**
 	 * GET /api/products：品項管理主清單。 支援關鍵字、審核狀態、品項狀態、候選狀態、商品類型篩選，以及分頁/排序參數。
@@ -89,6 +95,28 @@ public class ProductController {
 		ProductResponse result = productService.getProduct(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
+
+	/**
+	 * GET /api/products/similar-candidates：RESALE 商品搜尋相似候選參考商品。
+	 *
+	 * 系統只排序建議，不做自動合併判定——回傳的候選清單要交給使用者人工
+	 * 確認後，才把選定的 id 填進 ProductCreateRequest／ProductUpdateRequest
+	 * 的 resaleReferenceProductId 送出，這支端點本身不會修改任何資料。
+	 *
+	 * name／supplierName 用 @RequestParam 而非包成一個 DTO：這是唯讀查詢，
+	 * 沒有需要驗證的商業規則，用 DTO 包裝反而增加不必要的類別。
+	 */
+	@GetMapping("/similar-candidates")
+	public ResponseEntity<ApiResponse<List<SimilarProductCandidateResponse>>> findSimilarCandidates(
+			@RequestParam("productTypeId") Long productTypeId,
+			@RequestParam("name") String name,
+			@RequestParam(value = "supplierName", required = false) String supplierName,
+			@RequestParam(value = "excludeId", required = false) Long excludeId) {
+		List<SimilarProductCandidateResponse> result = productSimilarityService
+				.findSimilarCandidates(productTypeId, name, supplierName, excludeId);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
 
 	/**
 	 * POST /api/products：手動新增品項，直接為正式候選（CANDIDATE）。

@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
@@ -90,6 +92,30 @@ public class SettingsController {
 		WeightSnapshot result = settingsService.getEvaluationModeFactors(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
+
+	// ========================= 目標區間 =========================
+
+	/**
+	 * 更新目標區間。sourceMode=MANUAL 時 body 需帶 lowerBound／upperBound；
+	 * sourceMode=HISTORICAL 時這兩個欄位會被忽略，由後端從歷史開團紀錄重新
+	 * 計算並凍結——見 SettingsService.updateProductTypeScoreBand() 的完整說明。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/product-type-score-bands/{id}")
+	public ResponseEntity<ApiResponse<ProductTypeScoreBandResponse>> updateProductTypeScoreBand(
+			@PathVariable("id") Long id,
+			@Valid @RequestBody ProductTypeScoreBandUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		ProductTypeScoreBandResponse result = settingsService.updateProductTypeScoreBand(id, request, username);
+		return ResponseEntity.ok(ApiResponse.success("目標區間已更新", result));
+	}
+
+	@GetMapping("/product-type-score-bands")
+	public ResponseEntity<ApiResponse<List<ProductTypeScoreBandResponse>>> getProductTypeScoreBands() {
+		List<ProductTypeScoreBandResponse> result = settingsService.getProductTypeScoreBands();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
 
 	// [操作+管理]，不加@PreAuthorize
 	@GetMapping("/evaluation-mode/current")

@@ -54,7 +54,7 @@ public class AuthService {
 	 * @return token與使用者資訊；Cookie的設定屬於HTTP層職責，交由AuthController處理，
 	 *         這裡刻意不回傳Controller/HTTP層的物件，讓這支method不依賴Servlet API。
 	 */
-	@Transactional(readOnly = true)
+	@Transactional
 	public LoginResult login(String username, String rawPassword) {
 		AppUser user = appUserRepository.findByUsername(username)
 				.orElseThrow(InvalidCredentialsException::new);
@@ -67,10 +67,21 @@ public class AuthService {
 			throw new AccountDisabledException();
 		}
 
-		String token = jwtTokenProvider.generateToken(user);
-		log.info("使用者登入成功 username={} role={}", user.getUsername(), user.getRole());
+		// 單一登入：遞增版本號並存檔，讓這次登入之前發出的所有舊 token
+		// （不論在哪個裝置）在下一次請求時都會被 JwtAuthenticationFilter
+		// 判定版本不符而失效。順序刻意是「先存檔、再產生 token」——
+		// generateToken() 讀的是 user 物件當下的 activeSessionVersion，
+		// 沒有先遞增的話新 token 會帶著舊版本號，等於一發出就已經失效。
+		// 方法本身也從 readOnly 改為一般 @Transactional，因為現在真的
+		// 有寫入動作，不再是純查詢。
+		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
+		AppUser saved = appUserRepository.save(user);
 
-		return new LoginResult(token, jwtTokenProvider.getExpirationSeconds(), UserResponse.from(user));
+		String token = jwtTokenProvider.generateToken(saved);
+		log.info("使用者登入成功 username={} role={} sessionVersion={}",
+				saved.getUsername(), saved.getRole(), saved.getActiveSessionVersion());
+
+		return new LoginResult(token, jwtTokenProvider.getExpirationSeconds(), UserResponse.from(saved));
 	}
 
 	/**
@@ -103,12 +114,23 @@ public class AuthService {
 	/**
 	 * POST /api/auth/logout 業務邏輯。
 	 *
-	 * JWT本質無狀態，Service層目前沒有可以「讓token失效」的機制（無黑名單、無Session），
-	 * 真正清除登入狀態的動作（清除httpOnly Cookie）發生在Controller層。
-	 * 這個method目前只做登出稽核記錄，保留這支API的語意完整性，並作為未來若要加上
-	 * token黑名單機制時的擴充點（見六-4、十三 Phase 2待辦）。
+	 * 【單一登入上線後，這裡不再只是稽核記錄】
+	 * 原本的限制是「JWT本質無狀態，Service層沒有可以讓token失效的機制」——
+	 * 單一登入機制上線後這裡同樣遞增 activeSessionVersion，讓這次登出所屬的
+	 * token 立即失效。這麼做的實際效益：如果 token 在登出前已經外洩（例如
+	 * 被瀏覽器擴充功能竊取），單純清 Cookie 並不會讓外洩的那份 token 失效，
+	 * 遞增版本號才會讓「登出」這個動作真正產生效果，而不只是前端不再帶著
+	 * 它送出請求而已。
+	 *
+	 * 這裡跟 login() 不同的地方是不需要回傳新 token——登出後就是沒有
+	 * 有效登入狀態，不像密碼變更那樣需要讓當下這個 session 繼續使用。
 	 */
+	@Transactional
 	public void logout(String username) {
+		appUserRepository.findByUsername(username).ifPresent(user -> {
+			user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
+			appUserRepository.save(user);
+		});
 		log.info("使用者登出 username={}", username);
 	}
 	
@@ -147,9 +169,12 @@ public class AuthService {
 	 * 重新確認，沒有理由要求他重新登入；回傳LoginResult讓Controller
 	 * 沿用login()那套Cookie設定邏輯即可。
 	 *
-	 * 限制（沿用六-4決議：無token黑名單機制）：這支API只讓「目前這個
-	 * session」拿到新token，其餘裝置上尚未過期的舊JWT仍可繼續使用到
-	 * 自然過期（最長8小時）才會失效，不會因密碼變更而立即作廢。
+	 * 【單一登入上線後，下面這段舊限制已經不成立，附帶被修正了】
+	 * 原本這裡的限制是「其餘裝置上尚未過期的舊JWT仍可繼續使用到自然過期
+	 * 才會失效」——單一登入機制上線後，這裡同樣遞增 activeSessionVersion，
+	 * 密碼變更後其他裝置上的舊 token 會在下一次請求時就失效，不用等到
+	 * 自然過期。這不是本次功能的直接需求，是單一登入這個機制的必然結果，
+	 * 但正好補上了先前文件裡明確記載的一個已知缺口。
 	 */
 	@Transactional
 	public LoginResult changePassword(String username, String currentPassword, String newPassword) {
@@ -169,8 +194,10 @@ public class AuthService {
 		}
 
 		user.setPassword(passwordEncoder.encode(newPassword));
+		// 同 login()：遞增版本號並存檔，讓其他裝置上的舊 token 立即失效。
+		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
 		AppUser saved = appUserRepository.save(user);
-		log.info("使用者修改自身密碼 username={}", username);
+		log.info("使用者修改自身密碼 username={} sessionVersion={}", username, saved.getActiveSessionVersion());
 
 		String token = jwtTokenProvider.generateToken(saved);
 		return new LoginResult(token, jwtTokenProvider.getExpirationSeconds(), UserResponse.from(saved));

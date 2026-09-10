@@ -34,6 +34,7 @@ public class JwtTokenProvider {
 	private static final String CLAIM_USER_ID = "userId";
 	private static final String CLAIM_ROLE = "role";
 	private static final String CLAIM_NAME = "name";
+	private static final String CLAIM_SESSION_VERSION = "sessionVersion";
 
 	private final SecretKey signingKey;
 	private final long expirationMs;
@@ -52,6 +53,14 @@ public class JwtTokenProvider {
 		return expirationMs / 1000;
 	}
 
+	/**
+	 * 產生 token 時把使用者當下的 activeSessionVersion 一併寫進 claim。
+	 *
+	 * 呼叫端（AuthService）必須先把資料庫裡的版本號遞增、存檔，再呼叫這個
+	 * 方法用「遞增後」的 AppUser 物件產生 token——這樣新 token 裡的版本號
+	 * 才會跟資料庫最新值一致，後續 JwtAuthenticationFilter 才通過得了。
+	 * 順序顛倒的話，新 token 會帶著遞增前的舊版本號，等於一發出就已經失效。
+	 */
 	public String generateToken(AppUser user) {
 		Date now = new Date();
 		Date expiry = new Date(now.getTime() + expirationMs);
@@ -61,6 +70,7 @@ public class JwtTokenProvider {
 				.claim(CLAIM_USER_ID, user.getId())
 				.claim(CLAIM_ROLE, user.getRole().name())
 				.claim(CLAIM_NAME, user.getName())
+				.claim(CLAIM_SESSION_VERSION, user.getActiveSessionVersion())
 				.issuedAt(now)
 				.expiration(expiry)
 				.signWith(signingKey)
@@ -90,5 +100,15 @@ public class JwtTokenProvider {
 
 	public String getRole(Claims claims) {
 		return claims.get(CLAIM_ROLE, String.class);
+	}
+
+	/**
+	 * token 裡帶的登入版本號。用 Integer 取值再做 null 防呆——理論上這個
+	 * claim 在 generateToken() 必定會寫入，但舊版（V5 上線前）簽發的 token
+	 * 裡沒有這個 claim，遇到 null 時交由呼叫端（JwtAuthenticationFilter）
+	 * 判定為版本不符、視為失效，而不是在這裡直接拋例外讓整個過濾器出錯。
+	 */
+	public Integer getSessionVersion(Claims claims) {
+		return claims.get(CLAIM_SESSION_VERSION, Integer.class);
 	}
 }

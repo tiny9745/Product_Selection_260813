@@ -57,6 +57,20 @@ public class GroupBuyRecord {
 	@Column(name = "sale_price_at_time", precision = 10, scale = 2)
 	private BigDecimal salePriceAtTime;
 
+	/**
+	 * 開團當下的成本價，供歷史毛利率區間計算使用。
+	 *
+	 * 為 null 代表匯入時未提供——舊資料在這次擴充之前就已存在，或匯入方
+	 * 沒有這個資訊。歷史區間計算會跳過這兩欄任一為 null 的紀錄，不會
+	 * 猜測或補值。
+	 */
+	@Column(name = "cost_price_at_time", precision = 10, scale = 2)
+	private BigDecimal costPriceAtTime;
+
+	/** 開團當下的市價，供歷史折扣深度區間計算使用。語意與 costPriceAtTime 相同。 */
+	@Column(name = "market_price_at_time", precision = 10, scale = 2)
+	private BigDecimal marketPriceAtTime;
+
 	@Column(name = "target_quantity")
 	private Integer targetQuantity;
 
@@ -244,5 +258,21 @@ public class GroupBuyRecord {
 
 	public void setImportedBy(Long importedBy) {
 		this.importedBy = importedBy;
+	}
+
+	public BigDecimal getCostPriceAtTime() {
+		return costPriceAtTime;
+	}
+
+	public void setCostPriceAtTime(BigDecimal costPriceAtTime) {
+		this.costPriceAtTime = costPriceAtTime;
+	}
+
+	public BigDecimal getMarketPriceAtTime() {
+		return marketPriceAtTime;
+	}
+
+	public void setMarketPriceAtTime(BigDecimal marketPriceAtTime) {
+		this.marketPriceAtTime = marketPriceAtTime;
 	}
 }

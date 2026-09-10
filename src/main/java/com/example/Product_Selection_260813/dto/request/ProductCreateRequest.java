@@ -60,6 +60,21 @@ public class ProductCreateRequest {
 	@PositiveOrZero(message = ValidationMessage.PRODUCT_MARKET_PRICE_NEGATIVE)
 	@Digits(integer = 8, fraction = 2, message = ValidationMessage.PRODUCT_MARKET_PRICE_OVER_DIGITS)
 	private BigDecimal marketPrice;
+
+	/**
+	 * 僅 RESALE 商品填寫，指向系統內既有商品的 id，供歷史成團率分數改查那件
+	 * 參考商品的紀錄（見 HistoricalScoreCalculator）。NEW 商品帶了值，
+	 * Service 層會拒絕，驗證方式與 marketPrice 一致。
+	 *
+	 * 不在這裡加 @NotNull——RESALE 商品完全可以不指定參考商品，這種情況下
+	 * 歷史分數自然退回品類層，是預期內的優雅降級，不是錯誤。
+	 *
+	 * 候選清單建議透過 GET /api/products/similar-candidates 取得，由系統
+	 * 依品類／名稱相似度／供應商排序建議，最終由使用者手動確認後才送出這個
+	 * id——系統本身不做自動合併判定，避免誤判把兩件不同商品的歷史紀錄
+	 * 混在一起計算。
+	 */
+	private Long resaleReferenceProductId;
 
 	@Size(max = 255, message = ValidationMessage.PRODUCT_CAMPAIGN_TAGS_TOO_LONG)
 	private String campaignTags;
@@ -101,6 +116,14 @@ public class ProductCreateRequest {
 
 	public void setPricingType(ProductPricingType pricingType) {
 		this.pricingType = pricingType;
+	}
+
+	public Long getResaleReferenceProductId() {
+		return resaleReferenceProductId;
+	}
+
+	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
+		this.resaleReferenceProductId = resaleReferenceProductId;
 	}
 
 	public String getName() {

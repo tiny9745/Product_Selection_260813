@@ -34,6 +34,10 @@ dependencies {
 	// 資料驗證
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 
+	// 商品相似度比對：RESALE 商品搜尋候選參考商品用（Jaro-Winkler 演算法）
+	// 不在 Spring Boot BOM 管理範圍內，需自行指定版本
+	implementation 'org.apache.commons:commons-text:1.13.0'
+
 	// JWT：簽發/解析 Access Token
 	// 這三個是 io.jsonwebtoken 自家的模組，不在 Spring Boot BOM 管理範圍內，需自行指定版本
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'

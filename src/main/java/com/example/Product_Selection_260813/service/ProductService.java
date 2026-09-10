@@ -249,6 +249,8 @@ public class ProductService {
 		}
 		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
 		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
+		validateResaleReferenceProduct(request.getPricingType(), request.getResaleReferenceProductId(),
+				request.getProductTypeId(), null);
 
 		Long userId = resolveUserId(username);
 
@@ -262,6 +264,7 @@ public class ProductService {
 		product.setCostPrice(request.getCostPrice());
 		product.setSalePrice(request.getSalePrice());
 		product.setMarketPrice(request.getMarketPrice());
+		product.setResaleReferenceProductId(request.getResaleReferenceProductId());
 		product.setCampaignTags(request.getCampaignTags());
 		product.setMoq(request.getMoq());
 		product.setSupplyStability(request.getSupplyStability());
@@ -307,6 +310,8 @@ public class ProductService {
 		// 阻擋選用停用中的類型（見createProduct()）。
 		validateMarketPriceOnlyForResale(request.getPricingType(), request.getMarketPrice());
 		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
+		validateResaleReferenceProduct(request.getPricingType(), request.getResaleReferenceProductId(),
+				request.getProductTypeId(), product.getId());
 
 		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
 			assertCoreDataUnchanged(product, request);
@@ -326,6 +331,7 @@ public class ProductService {
 		product.setCostPrice(request.getCostPrice());
 		product.setSalePrice(request.getSalePrice());
 		product.setMarketPrice(request.getMarketPrice());
+		product.setResaleReferenceProductId(request.getResaleReferenceProductId());
 		product.setCampaignTags(request.getCampaignTags());
 		product.setMoq(request.getMoq());
 		product.setSupplyStability(request.getSupplyStability());
@@ -614,6 +620,41 @@ public class ProductService {
 	private void validateMarketPriceOnlyForResale(ProductPricingType pricingType, BigDecimal marketPrice) {
 		if (pricingType == ProductPricingType.NEW && marketPrice != null) {
 			throw new IllegalArgumentException("市售價格僅適用於再販售(RESALE)商品");
+		}
+	}
+
+	/**
+	 * resaleReferenceProductId 僅 RESALE 商品可填，驗證方式與 marketPrice 一致：
+	 * NEW 商品帶了值視為請求格式錯誤，不是靜默忽略。
+	 *
+	 * 有值時再做兩項檢查：
+	 * 1. 引用的商品必須存在——不存在時歷史分數計算會靜默查不到任何紀錄，
+	 *    表面上看起來正常（退回品類層），但那不是使用者原本的意圖，應該
+	 *    在存檔前就擋下，而不是留給採購自己發現「怎麼分數沒變」。
+	 * 2. 引用的商品必須跟目前商品同一個小類（product_type_id）——貝氏收縮的
+	 *    品類層收縮基準（prior）是「這個商品自己的品類」，如果允許跨品類引用，
+	 *    商品層的原始比率會跟品類層的收縮基準來自不同分佈，統計上失去意義。
+	 *
+	 * 不在這裡檢查「這兩件是不是真的同一款商品」——那是
+	 * GET /api/products/similar-candidates 加上人工確認要負責的事，這支方法
+	 * 只確認資料形式合法（商品存在、品類相符），不做語意層級的相似度判斷。
+	 */
+	private void validateResaleReferenceProduct(ProductPricingType pricingType, Long resaleReferenceProductId,
+			Long productTypeId, Long selfId) {
+		if (resaleReferenceProductId == null) {
+			return;
+		}
+		if (pricingType == ProductPricingType.NEW) {
+			throw new IllegalArgumentException("參考商品僅適用於再販售(RESALE)商品");
+		}
+		if (selfId != null && resaleReferenceProductId.equals(selfId)) {
+			throw new IllegalArgumentException("參考商品不可為商品自己");
+		}
+		Product reference = productRepository.findById(resaleReferenceProductId)
+				.orElseThrow(() -> new IllegalArgumentException("參考商品不存在：" + resaleReferenceProductId));
+		if (!Objects.equals(reference.getProductTypeId(), productTypeId)) {
+			throw new IllegalArgumentException("參考商品須與本商品屬於同一分類，參考商品目前分類為："
+					+ reference.getProductTypeId());
 		}
 	}
 

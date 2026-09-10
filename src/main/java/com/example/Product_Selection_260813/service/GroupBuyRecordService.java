@@ -57,6 +57,7 @@ public class GroupBuyRecordService {
 	private static final List<String> KNOWN_HEADERS = List.of(
 			"product_id", "product_type_id", "external_product_name", "supplier_name",
 			"campaign_start_date", "campaign_end_date", "moq_at_time", "sale_price_at_time",
+			"cost_price_at_time", "market_price_at_time",
 			"target_quantity", "actual_quantity", "participant_count", "result",
 			"complaint_count", "return_count", "is_simulated");
 
@@ -233,6 +234,12 @@ public class GroupBuyRecordService {
 		record.setMoqAtTime(parseNonNegativeInt(row.get("moq_at_time"), rowNumber, "moq_at_time", errors));
 		record.setSalePriceAtTime(parseNonNegativeDecimal(row.get("sale_price_at_time"), rowNumber,
 				"sale_price_at_time", errors));
+		// 成本價與市價皆選填——舊資料在這次擴充之前匯入的沒有這兩欄是正常的，
+		// 不強制要求；有填就驗證非負數，之後供目標區間 HISTORICAL 模式計算使用。
+		record.setCostPriceAtTime(parseNonNegativeDecimal(row.get("cost_price_at_time"), rowNumber,
+				"cost_price_at_time", errors));
+		record.setMarketPriceAtTime(parseNonNegativeDecimal(row.get("market_price_at_time"), rowNumber,
+				"market_price_at_time", errors));
 		record.setTargetQuantity(parseNonNegativeInt(row.get("target_quantity"), rowNumber, "target_quantity", errors));
 		record.setParticipantCount(parseNonNegativeInt(row.get("participant_count"), rowNumber, "participant_count",
 				errors));
