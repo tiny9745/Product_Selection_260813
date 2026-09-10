@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
@@ -86,6 +87,9 @@ public class ProductService {
 
 	@Autowired
 	private ScoringService scoringService;
+
+	@Autowired
+	private com.example.Product_Selection_260813.service.gate.GateEvaluationService gateEvaluationService;
 
 	@Autowired
 	private ProductEvaluationRepository productEvaluationRepository;
@@ -211,7 +215,19 @@ public class ProductService {
 		Product product = findProductOrThrow(id);
 		String createdByName = product.getCreatedBy() == null ? null
 				: appUserRepository.findById(product.getCreatedBy()).map(AppUser::getName).orElse(null);
-		return ProductResponse.from(product).withCreatedByName(createdByName);
+
+		// Gate 結果：只在單筆詳情這裡計算，不在清單／搜尋端點附上（見
+		// ProductResponse.gateResults 欄位註解，一次回傳多筆時重算成本太高）。
+		// dataCompleteness／matchedCampaign 沿用既有評估流程會用到的同一批資料，
+		// 不是另外發明一套——跟 ReviewService.submitReview() 取得這兩項的方式一致。
+		BigDecimal dataCompleteness = productEvaluationRepository.findByProductId(id)
+				.map(ProductEvaluation::getDataCompleteness).orElse(null);
+		var matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
+		var gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
+
+		return ProductResponse.from(product)
+				.withCreatedByName(createdByName)
+				.withGateResults(gateSummary);
 	}
 
 	// ========================= 新增 =========================
@@ -271,6 +287,30 @@ public class ProductService {
 		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
 		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
 		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
+		// 9 個 Gate 屬性欄位：DTO 端是列舉型別（型別安全，Jackson 自動擋掉不合法
+		// 的值），Entity 端存的是 String（GateEvaluationService 內部再自行
+		// valueOf() 解析），這裡用 enumName() 做 null-safe 轉換——列舉欄位皆為
+		// 選填，商品沒填時應該存 NULL 讓三層繼承機制生效，不是拋例外。
+		product.setTemperatureZone(enumName(request.getTemperatureZone()));
+		product.setShelfLifeTier(enumName(request.getShelfLifeTier()));
+		product.setSupplierLeadTimeTier(enumName(request.getSupplierLeadTimeTier()));
+		product.setPackageSizeTier(enumName(request.getPackageSizeTier()));
+		product.setPackingType(enumName(request.getPackingType()));
+		product.setHandlingFlags(request.getHandlingFlags());
+		product.setCertificationFlags(request.getCertificationFlags());
+		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
+		// 9 個 Gate 屬性欄位：DTO 端是列舉型別（型別安全，Jackson 自動擋掉不合法
+		// 的值），Entity 端存的是 String（GateEvaluationService 內部再自行
+		// valueOf() 解析），這裡用 enumName() 做 null-safe 轉換——列舉欄位皆為
+		// 選填，商品沒填時應該存 NULL 讓三層繼承機制生效，不是拋例外。
+		product.setTemperatureZone(enumName(request.getTemperatureZone()));
+		product.setShelfLifeTier(enumName(request.getShelfLifeTier()));
+		product.setSupplierLeadTimeTier(enumName(request.getSupplierLeadTimeTier()));
+		product.setPackageSizeTier(enumName(request.getPackageSizeTier()));
+		product.setPackingType(enumName(request.getPackingType()));
+		product.setHandlingFlags(request.getHandlingFlags());
+		product.setCertificationFlags(request.getCertificationFlags());
+		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
 
 		// review_status／item_status／candidate_status：Entity欄位預設值已經是
 		// PENDING／ACTIVE／CANDIDATE（見Product.java），這裡不重複賦值。
@@ -607,6 +647,15 @@ public class ProductService {
 	}
 
 	/** username -&gt; app_users.id；沿用AuthService.getCurrentUser()同樣的重查邏輯與理由。 */
+	/**
+	 * 列舉轉字串的 null-safe 版本，供 9 個 Gate 屬性欄位寫入 Entity 使用。
+	 * Entity 端存的是 String，列舉為 null（欄位未填）時直接回傳 null，
+	 * 不是丟例外——這些欄位全部選填，沒填代表交由品類繼承機制決定。
+	 */
+	private String enumName(Enum<?> value) {
+		return value == null ? null : value.name();
+	}
+
 	private Long resolveUserId(String username) {
 		AppUser user = appUserRepository.findByUsername(username)
 				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));

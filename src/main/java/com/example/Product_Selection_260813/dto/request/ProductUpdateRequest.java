@@ -4,6 +4,11 @@ import java.math.BigDecimal;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
+import com.example.Product_Selection_260813.enums.TemperatureZone;
+import com.example.Product_Selection_260813.enums.ShelfLifeTier;
+import com.example.Product_Selection_260813.enums.SupplierLeadTimeTier;
+import com.example.Product_Selection_260813.enums.PackageSizeTier;
+import com.example.Product_Selection_260813.enums.PackingType;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -94,6 +99,22 @@ public class ProductUpdateRequest {
 	@DecimalMin(value = "0.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	@DecimalMax(value = "1.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	private BigDecimal estimatedPurchaseRate;
+
+	/** 語意與 ProductCreateRequest 相同，見該檔案類別內的完整說明。 */
+	private TemperatureZone temperatureZone;
+	private ShelfLifeTier shelfLifeTier;
+	private SupplierLeadTimeTier supplierLeadTimeTier;
+	private PackageSizeTier packageSizeTier;
+	private PackingType packingType;
+
+	@Size(max = 200, message = "處理注意事項長度不可超過200字元")
+	private String handlingFlags;
+
+	@Size(max = 200, message = "認證狀態長度不可超過200字元")
+	private String certificationFlags;
+
+	@PositiveOrZero(message = "供應商產能上限不可為負數")
+	private Integer supplierMaxCapacity;
 
 	public Long getProductTypeId() {
 		return productTypeId;
@@ -117,6 +138,70 @@ public class ProductUpdateRequest {
 
 	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
 		this.resaleReferenceProductId = resaleReferenceProductId;
+	}
+
+	public TemperatureZone getTemperatureZone() {
+		return temperatureZone;
+	}
+
+	public void setTemperatureZone(TemperatureZone temperatureZone) {
+		this.temperatureZone = temperatureZone;
+	}
+
+	public ShelfLifeTier getShelfLifeTier() {
+		return shelfLifeTier;
+	}
+
+	public void setShelfLifeTier(ShelfLifeTier shelfLifeTier) {
+		this.shelfLifeTier = shelfLifeTier;
+	}
+
+	public SupplierLeadTimeTier getSupplierLeadTimeTier() {
+		return supplierLeadTimeTier;
+	}
+
+	public void setSupplierLeadTimeTier(SupplierLeadTimeTier supplierLeadTimeTier) {
+		this.supplierLeadTimeTier = supplierLeadTimeTier;
+	}
+
+	public PackageSizeTier getPackageSizeTier() {
+		return packageSizeTier;
+	}
+
+	public void setPackageSizeTier(PackageSizeTier packageSizeTier) {
+		this.packageSizeTier = packageSizeTier;
+	}
+
+	public PackingType getPackingType() {
+		return packingType;
+	}
+
+	public void setPackingType(PackingType packingType) {
+		this.packingType = packingType;
+	}
+
+	public String getHandlingFlags() {
+		return handlingFlags;
+	}
+
+	public void setHandlingFlags(String handlingFlags) {
+		this.handlingFlags = handlingFlags;
+	}
+
+	public String getCertificationFlags() {
+		return certificationFlags;
+	}
+
+	public void setCertificationFlags(String certificationFlags) {
+		this.certificationFlags = certificationFlags;
+	}
+
+	public Integer getSupplierMaxCapacity() {
+		return supplierMaxCapacity;
+	}
+
+	public void setSupplierMaxCapacity(Integer supplierMaxCapacity) {
+		this.supplierMaxCapacity = supplierMaxCapacity;
 	}
 
 	public String getName() {

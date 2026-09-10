@@ -4,6 +4,11 @@ import java.math.BigDecimal;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
+import com.example.Product_Selection_260813.enums.TemperatureZone;
+import com.example.Product_Selection_260813.enums.ShelfLifeTier;
+import com.example.Product_Selection_260813.enums.SupplierLeadTimeTier;
+import com.example.Product_Selection_260813.enums.PackageSizeTier;
+import com.example.Product_Selection_260813.enums.PackingType;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -101,6 +106,32 @@ public class ProductCreateRequest {
 	@DecimalMin(value = "0.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	@DecimalMax(value = "1.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)
 	private BigDecimal estimatedPurchaseRate;
+
+	/**
+	 * 以下 9 個欄位原本只有資料庫欄位與 Entity，這支 DTO 從未真正開放過——
+	 * 商品建立當下沒有管道能設定它們，這 9 欄實際上永遠是 NULL。這是本次
+	 * 補上的缺口：接進來之後，Gate 判定（GateEvaluationService）才能真正
+	 * 讀到商品層自己填的值，而不是永遠只能靠品類繼承。
+	 *
+	 * 用實際的列舉型別而非 String，跟 pricingType 的既有寫法一致——送入
+	 * 不合法的值會被 Jackson 在反序列化階段直接拒絕（400），不需要額外寫
+	 * 驗證邏輯去檢查字串是不是合法的列舉值。
+	 */
+	private TemperatureZone temperatureZone;
+	private ShelfLifeTier shelfLifeTier;
+	private SupplierLeadTimeTier supplierLeadTimeTier;
+	private PackageSizeTier packageSizeTier;
+	private PackingType packingType;
+
+	/** 逗號分隔的自由文字標籤，不是列舉——處理注意事項的組合方式沒有固定選項集。 */
+	@Size(max = 200, message = "處理注意事項長度不可超過200字元")
+	private String handlingFlags;
+
+	@Size(max = 200, message = "認證狀態長度不可超過200字元")
+	private String certificationFlags;
+
+	@PositiveOrZero(message = "供應商產能上限不可為負數")
+	private Integer supplierMaxCapacity;
 
 	public Long getProductTypeId() {
 		return productTypeId;
@@ -124,6 +155,70 @@ public class ProductCreateRequest {
 
 	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
 		this.resaleReferenceProductId = resaleReferenceProductId;
+	}
+
+	public TemperatureZone getTemperatureZone() {
+		return temperatureZone;
+	}
+
+	public void setTemperatureZone(TemperatureZone temperatureZone) {
+		this.temperatureZone = temperatureZone;
+	}
+
+	public ShelfLifeTier getShelfLifeTier() {
+		return shelfLifeTier;
+	}
+
+	public void setShelfLifeTier(ShelfLifeTier shelfLifeTier) {
+		this.shelfLifeTier = shelfLifeTier;
+	}
+
+	public SupplierLeadTimeTier getSupplierLeadTimeTier() {
+		return supplierLeadTimeTier;
+	}
+
+	public void setSupplierLeadTimeTier(SupplierLeadTimeTier supplierLeadTimeTier) {
+		this.supplierLeadTimeTier = supplierLeadTimeTier;
+	}
+
+	public PackageSizeTier getPackageSizeTier() {
+		return packageSizeTier;
+	}
+
+	public void setPackageSizeTier(PackageSizeTier packageSizeTier) {
+		this.packageSizeTier = packageSizeTier;
+	}
+
+	public PackingType getPackingType() {
+		return packingType;
+	}
+
+	public void setPackingType(PackingType packingType) {
+		this.packingType = packingType;
+	}
+
+	public String getHandlingFlags() {
+		return handlingFlags;
+	}
+
+	public void setHandlingFlags(String handlingFlags) {
+		this.handlingFlags = handlingFlags;
+	}
+
+	public String getCertificationFlags() {
+		return certificationFlags;
+	}
+
+	public void setCertificationFlags(String certificationFlags) {
+		this.certificationFlags = certificationFlags;
+	}
+
+	public Integer getSupplierMaxCapacity() {
+		return supplierMaxCapacity;
+	}
+
+	public void setSupplierMaxCapacity(Integer supplierMaxCapacity) {
+		this.supplierMaxCapacity = supplierMaxCapacity;
 	}
 
 	public String getName() {

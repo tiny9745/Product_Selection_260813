@@ -42,6 +42,24 @@ public class ProductResponse {
 	private BigDecimal priceCompetitiveness;
 	private String targetCustomerDescription;
 	private BigDecimal estimatedPurchaseRate;
+
+	/**
+	 * 以下 9 個欄位過去從未被回傳過——GateEvaluationService 的判定邏輯
+	 * 完整存在，但商品詳情頁拿不到這幾個原始屬性值，也看不到 Gate 結果。
+	 * gateResults 只在 GET /api/products/{id} 才會有值（見 withGateResults()），
+	 * 清單／搜尋端點不附上——那些端點一次可能回傳幾十筆，每筆都重算五個
+	 * Gate 判定成本太高，Gate 結果只有看單一商品詳情時才需要。
+	 */
+	private String temperatureZone;
+	private String shelfLifeTier;
+	private String supplierLeadTimeTier;
+	private String packageSizeTier;
+	private String packingType;
+	private String handlingFlags;
+	private String certificationFlags;
+	private Integer supplierMaxCapacity;
+
+	private com.example.Product_Selection_260813.service.gate.GateResult.Summary gateResults;
 	private ProductReviewStatus reviewStatus;
 	private ProductCandidateStatus candidateStatus;
 	private ProductPricingStatus pricingStatus;
@@ -89,6 +107,14 @@ public class ProductResponse {
 		dto.priceCompetitiveness = product.getPriceCompetitiveness();
 		dto.targetCustomerDescription = product.getTargetCustomerDescription();
 		dto.estimatedPurchaseRate = product.getEstimatedPurchaseRate();
+		dto.temperatureZone = product.getTemperatureZone();
+		dto.shelfLifeTier = product.getShelfLifeTier();
+		dto.supplierLeadTimeTier = product.getSupplierLeadTimeTier();
+		dto.packageSizeTier = product.getPackageSizeTier();
+		dto.packingType = product.getPackingType();
+		dto.handlingFlags = product.getHandlingFlags();
+		dto.certificationFlags = product.getCertificationFlags();
+		dto.supplierMaxCapacity = product.getSupplierMaxCapacity();
 		dto.reviewStatus = product.getReviewStatus();
 		dto.candidateStatus = product.getCandidateStatus();
 		dto.pricingStatus = product.getPricingStatus();
@@ -113,6 +139,11 @@ public class ProductResponse {
 		this.createdByName = createdByName;
 		return this;
 	}
+
+	public ProductResponse withGateResults(com.example.Product_Selection_260813.service.gate.GateResult.Summary gateResults) {
+		this.gateResults = gateResults;
+		return this;
+	}
 
 	/**
 	 * 補上批次查詢好的分數，回傳 this 方便鏈式呼叫，用法同 withCreatedByName()：
@@ -151,6 +182,42 @@ public class ProductResponse {
 
 	public void setPricingType(ProductPricingType pricingType) {
 		this.pricingType = pricingType;
+	}
+
+	public String getTemperatureZone() {
+		return temperatureZone;
+	}
+
+	public String getShelfLifeTier() {
+		return shelfLifeTier;
+	}
+
+	public String getSupplierLeadTimeTier() {
+		return supplierLeadTimeTier;
+	}
+
+	public String getPackageSizeTier() {
+		return packageSizeTier;
+	}
+
+	public String getPackingType() {
+		return packingType;
+	}
+
+	public String getHandlingFlags() {
+		return handlingFlags;
+	}
+
+	public String getCertificationFlags() {
+		return certificationFlags;
+	}
+
+	public Integer getSupplierMaxCapacity() {
+		return supplierMaxCapacity;
+	}
+
+	public com.example.Product_Selection_260813.service.gate.GateResult.Summary getGateResults() {
+		return gateResults;
 	}
 
 	public String getName() {
