@@ -41,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
@@ -249,6 +250,69 @@ public class SettingsService {
 		return productTypeScoreBandRepository.findAllActive().stream()
 				.map(ProductTypeScoreBandResponse::from)
 				.toList();
+	}
+
+	// ============================================================
+	// 目標區間：新增品類專屬覆寫
+	// ============================================================
+
+	/**
+	 * 新增「品類專屬」目標區間。只支援 MANUAL 模式建立，理由見
+	 * {@link ProductTypeScoreBandCreateRequest} 類別註解。
+	 *
+	 * 三項驗證缺一不可：
+	 * 1. 品類必須存在（FK 完整性，給清楚訊息而非讓資料庫 FK 例外冒出來）
+	 * 2. 因子代碼必須是 {@link FactorCode#ALL} 認得的七個之一，
+	 *    否則 ScoreBandResolver／ScoringAlgorithms 之後查不到對應的計分邏輯，
+	 *    會變成一筆永遠用不到的死資料
+	 * 3. 該品類×因子不能已經有生效中的列（uk_bands_type_factor_version
+	 *    唯一鍵事先在 Service 層擋下，給使用者「已存在」而非資料庫例外訊息）
+	 * 4. 上界必須大於下界——與 applyManualBand() 的規則一致
+	 */
+	@Transactional
+	public ProductTypeScoreBandResponse createProductTypeScoreBand(ProductTypeScoreBandCreateRequest request,
+			String username) {
+		Long productTypeId = request.getProductTypeId();
+
+		if (!productTypeRepository.existsById(productTypeId)) {
+			throw new IllegalArgumentException("商品類型不存在：id=" + productTypeId);
+		}
+
+		String factorCode = request.getFactorCode() == null ? null : request.getFactorCode().trim().toUpperCase();
+		if (!FactorCode.ALL.contains(factorCode)) {
+			throw new IllegalArgumentException(
+					"因子代碼「" + request.getFactorCode() + "」不存在，須為以下七者之一：" + FactorCode.ALL);
+		}
+
+		if (productTypeScoreBandRepository.existsByProductTypeIdAndFactorCodeAndIsActiveTrue(productTypeId,
+				factorCode)) {
+			throw new IllegalArgumentException(
+					"品類 id=" + productTypeId + " 的因子「" + factorCode + "」已存在生效中的目標區間，請改用編輯而非新增");
+		}
+
+		BigDecimal lower = request.getLowerBound();
+		BigDecimal upper = request.getUpperBound();
+		if (upper.compareTo(lower) <= 0) {
+			throw new IllegalArgumentException("上界必須大於下界，目前下界=" + lower + " 上界=" + upper);
+		}
+
+		Long operatorId = resolveUserId(username);
+		LocalDateTime now = LocalDateTime.now();
+
+		ProductTypeScoreBand band = new ProductTypeScoreBand();
+		band.setProductTypeId(productTypeId);
+		band.setFactorCode(factorCode);
+		band.setLowerBound(lower);
+		band.setUpperBound(upper);
+		band.setVersion(1);
+		band.setIsActive(true);
+		band.setSourceMode(ScoreBandSourceMode.MANUAL.name());
+		band.setUpdatedAt(now);
+		band.setUpdatedBy(operatorId);
+
+		ProductTypeScoreBand saved = productTypeScoreBandRepository.save(band);
+		log.info("已新增品類專屬目標區間：productTypeId={}，factorCode={}，操作者={}", productTypeId, factorCode, username);
+		return ProductTypeScoreBandResponse.from(saved);
 	}
 
 	// ============================================================

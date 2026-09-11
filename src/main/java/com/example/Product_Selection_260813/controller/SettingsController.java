@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
@@ -94,6 +95,20 @@ public class SettingsController {
 	}
 
 	// ========================= 目標區間 =========================
+
+	/**
+	 * 新增「品類專屬」目標區間。只支援 MANUAL 模式建立，理由見
+	 * ProductTypeScoreBandCreateRequest 類別註解；已存在的品類×因子組合
+	 * 會被拒絕（400），請改用下方 PUT 端點編輯既有列。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/product-type-score-bands")
+	public ResponseEntity<ApiResponse<ProductTypeScoreBandResponse>> createProductTypeScoreBand(
+			@Valid @RequestBody ProductTypeScoreBandCreateRequest request,
+			@AuthenticationPrincipal String username) {
+		ProductTypeScoreBandResponse result = settingsService.createProductTypeScoreBand(request, username);
+		return ResponseEntity.ok(ApiResponse.success("已新增品類專屬目標區間", result));
+	}
 
 	/**
 	 * 更新目標區間。sourceMode=MANUAL 時 body 需帶 lowerBound／upperBound；

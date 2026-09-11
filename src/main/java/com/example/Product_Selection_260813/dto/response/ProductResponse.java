@@ -42,6 +42,14 @@ public class ProductResponse {
 	private BigDecimal priceCompetitiveness;
 	private String targetCustomerDescription;
 	private BigDecimal estimatedPurchaseRate;
+	/**
+	 * 僅 RESALE 商品可能有值；NEW 商品恆為 null。
+	 *
+	 * 補上這個欄位的原因：Create／Update 的 Request DTO 都已經接受這個欄位
+	 * 讓使用者設定，但 GET 回應原本沒有回傳，導致前端編輯既有 RESALE 商品時
+	 * 完全不知道目前設定的是哪一個參考商品，等於「只能寫入、看不到目前值」。
+	 */
+	private Long resaleReferenceProductId;
 
 	/**
 	 * 以下 9 個欄位過去從未被回傳過——GateEvaluationService 的判定邏輯
@@ -107,6 +115,7 @@ public class ProductResponse {
 		dto.priceCompetitiveness = product.getPriceCompetitiveness();
 		dto.targetCustomerDescription = product.getTargetCustomerDescription();
 		dto.estimatedPurchaseRate = product.getEstimatedPurchaseRate();
+		dto.resaleReferenceProductId = product.getResaleReferenceProductId();
 		dto.temperatureZone = product.getTemperatureZone();
 		dto.shelfLifeTier = product.getShelfLifeTier();
 		dto.supplierLeadTimeTier = product.getSupplierLeadTimeTier();
@@ -322,6 +331,14 @@ public class ProductResponse {
 
 	public void setEstimatedPurchaseRate(BigDecimal estimatedPurchaseRate) {
 		this.estimatedPurchaseRate = estimatedPurchaseRate;
+	}
+
+	public Long getResaleReferenceProductId() {
+		return resaleReferenceProductId;
+	}
+
+	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
+		this.resaleReferenceProductId = resaleReferenceProductId;
 	}
 
 	public ProductReviewStatus getReviewStatus() {

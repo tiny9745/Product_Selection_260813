@@ -28,4 +28,14 @@ public interface ProductTypeScoreBandRepository extends JpaRepository<ProductTyp
 	@Query("SELECT b FROM ProductTypeScoreBand b WHERE b.isActive = true "
 			+ "ORDER BY b.productTypeId, b.factorCode, b.version DESC")
 	List<ProductTypeScoreBand> findAllActive();
+
+	/**
+	 * 檢查某品類×因子是否已存在生效中的目標區間。
+	 *
+	 * 新增品類覆寫前先查這個，給出清楚的「已存在」錯誤訊息，
+	 * 而不是讓 uk_bands_type_factor_version 的資料庫唯一鍵直接丟出
+	 * DataIntegrityViolationException——那個例外對使用者不友善，
+	 * 且會被 GlobalExceptionHandler 當成未預期錯誤處理成 500。
+	 */
+	boolean existsByProductTypeIdAndFactorCodeAndIsActiveTrue(Long productTypeId, String factorCode);
 }
