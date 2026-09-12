@@ -150,7 +150,15 @@ public class ReviewService {
 		Optional<EvaluationMode> evaluationModeOpt = scoringService.getEvaluationMode(evaluationModeId);
 
 		MatchedCampaignSnapshot matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
-		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness).orElse(null);
+		// orElseGet 而非 orElse(null)：evaluationOpt 為空理論上不該發生
+		// （商品透過 createProduct()/updateProduct() 建立時就會觸發
+		// calculateEvaluation() 寫入這筆快取），但如果因為任何原因這筆
+		// 快取還沒寫入（例如資料庫直接匯入、或極端的時序競態），與其讓
+		// 完整度靜默變成 null、審核頁顯示一個空白的「—」看起來像資料
+		// 缺漏，不如即時算一次——這個計算只讀商品自己的欄位，不依賴
+		// 任何外部狀態，重新算一次的成本很低，值得當作防禦性備援。
+		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness)
+				.orElseGet(() -> scoringService.calculateDataCompleteness(product));
 		GateResult.Summary gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
 
 		// Gate 判定不通過的項目，對應的風險選項預先標記為系統帶入。
@@ -228,7 +236,15 @@ public class ReviewService {
 		// 不在查詢時重算——之後品類屬性或設定值改了，重算的結果會與當時不同，
 		// 而審核紀錄必須能還原當時的判斷依據。
 		MatchedCampaignSnapshot matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
-		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness).orElse(null);
+		// orElseGet 而非 orElse(null)：evaluationOpt 為空理論上不該發生
+		// （商品透過 createProduct()/updateProduct() 建立時就會觸發
+		// calculateEvaluation() 寫入這筆快取），但如果因為任何原因這筆
+		// 快取還沒寫入（例如資料庫直接匯入、或極端的時序競態），與其讓
+		// 完整度靜默變成 null、審核頁顯示一個空白的「—」看起來像資料
+		// 缺漏，不如即時算一次——這個計算只讀商品自己的欄位，不依賴
+		// 任何外部狀態，重新算一次的成本很低，值得當作防禦性備援。
+		BigDecimal dataCompleteness = evaluationOpt.map(ProductEvaluation::getDataCompleteness)
+				.orElseGet(() -> scoringService.calculateDataCompleteness(product));
 		GateResult.Summary gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
 		Map<Long, String> gateTriggerReasons = resolveGateTriggerReasons(gateSummary);
 

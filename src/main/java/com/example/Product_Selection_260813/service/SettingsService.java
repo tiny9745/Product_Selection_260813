@@ -41,7 +41,6 @@ import java.util.LinkedHashMap;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
-import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
@@ -62,6 +61,8 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.repository.RiskOptionRepository;
+import com.example.Product_Selection_260813.constants.SystemSettingRegistry;
+import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.repository.SystemSettingRepository;
 
 /**
@@ -250,69 +251,6 @@ public class SettingsService {
 		return productTypeScoreBandRepository.findAllActive().stream()
 				.map(ProductTypeScoreBandResponse::from)
 				.toList();
-	}
-
-	// ============================================================
-	// 目標區間：新增品類專屬覆寫
-	// ============================================================
-
-	/**
-	 * 新增「品類專屬」目標區間。只支援 MANUAL 模式建立，理由見
-	 * {@link ProductTypeScoreBandCreateRequest} 類別註解。
-	 *
-	 * 三項驗證缺一不可：
-	 * 1. 品類必須存在（FK 完整性，給清楚訊息而非讓資料庫 FK 例外冒出來）
-	 * 2. 因子代碼必須是 {@link FactorCode#ALL} 認得的七個之一，
-	 *    否則 ScoreBandResolver／ScoringAlgorithms 之後查不到對應的計分邏輯，
-	 *    會變成一筆永遠用不到的死資料
-	 * 3. 該品類×因子不能已經有生效中的列（uk_bands_type_factor_version
-	 *    唯一鍵事先在 Service 層擋下，給使用者「已存在」而非資料庫例外訊息）
-	 * 4. 上界必須大於下界——與 applyManualBand() 的規則一致
-	 */
-	@Transactional
-	public ProductTypeScoreBandResponse createProductTypeScoreBand(ProductTypeScoreBandCreateRequest request,
-			String username) {
-		Long productTypeId = request.getProductTypeId();
-
-		if (!productTypeRepository.existsById(productTypeId)) {
-			throw new IllegalArgumentException("商品類型不存在：id=" + productTypeId);
-		}
-
-		String factorCode = request.getFactorCode() == null ? null : request.getFactorCode().trim().toUpperCase();
-		if (!FactorCode.ALL.contains(factorCode)) {
-			throw new IllegalArgumentException(
-					"因子代碼「" + request.getFactorCode() + "」不存在，須為以下七者之一：" + FactorCode.ALL);
-		}
-
-		if (productTypeScoreBandRepository.existsByProductTypeIdAndFactorCodeAndIsActiveTrue(productTypeId,
-				factorCode)) {
-			throw new IllegalArgumentException(
-					"品類 id=" + productTypeId + " 的因子「" + factorCode + "」已存在生效中的目標區間，請改用編輯而非新增");
-		}
-
-		BigDecimal lower = request.getLowerBound();
-		BigDecimal upper = request.getUpperBound();
-		if (upper.compareTo(lower) <= 0) {
-			throw new IllegalArgumentException("上界必須大於下界，目前下界=" + lower + " 上界=" + upper);
-		}
-
-		Long operatorId = resolveUserId(username);
-		LocalDateTime now = LocalDateTime.now();
-
-		ProductTypeScoreBand band = new ProductTypeScoreBand();
-		band.setProductTypeId(productTypeId);
-		band.setFactorCode(factorCode);
-		band.setLowerBound(lower);
-		band.setUpperBound(upper);
-		band.setVersion(1);
-		band.setIsActive(true);
-		band.setSourceMode(ScoreBandSourceMode.MANUAL.name());
-		band.setUpdatedAt(now);
-		band.setUpdatedBy(operatorId);
-
-		ProductTypeScoreBand saved = productTypeScoreBandRepository.save(band);
-		log.info("已新增品類專屬目標區間：productTypeId={}，factorCode={}，操作者={}", productTypeId, factorCode, username);
-		return ProductTypeScoreBandResponse.from(saved);
 	}
 
 	// ============================================================
@@ -691,7 +629,22 @@ public class SettingsService {
 	 */
 	@Transactional(readOnly = true)
 	public List<ProductTypeResponse> getAllProductTypes() {
-		return productTypeRepository.findAll().stream().map(ProductTypeResponse::from).toList();
+		// 使用品項數：先前這個統計恆為 null（前端註解明確寫著「後端沒有這個
+		// 統計」），導致設定頁「使用品項」欄位永遠顯示「—」，看起來像資料
+		// 缺漏。一次 GROUP BY 查出所有品類的使用數量，再用 Map 對照填入，
+		// 不對每個品類各自查一次（避免 N+1）。
+		Map<Long, Long> usedCountByTypeId = productRepository.countGroupedByProductType().stream()
+				.collect(java.util.stream.Collectors.toMap(
+						row -> (Long) row[0],
+						row -> (Long) row[1]));
+
+		return productTypeRepository.findAll().stream()
+				.map(type -> {
+					ProductTypeResponse dto = ProductTypeResponse.from(type);
+					dto.setUsedCount(usedCountByTypeId.getOrDefault(type.getId(), 0L));
+					return dto;
+				})
+				.toList();
 	}
 
 	/**
@@ -885,6 +838,106 @@ public class SettingsService {
 	// ========================= 內部輔助方法 =========================
 
 	/** username -&gt; app_users.id；沿用ProductService／ReviewService同樣的慣例。 */
+	// ============================================================
+	// system_settings 通用讀寫（演算法參數：貝氏收縮 k 值、趨勢半衰期等）
+	// ============================================================
+
+	/**
+	 * 列出登記表（SystemSettingRegistry）裡全部已知的設定，每筆附上目前
+	 * 生效值——資料庫沒有紀錄的 key 一併回傳登記表預設值，讓畫面一開始
+	 * 就能顯示「目前實際生效的數字」，不是留白。
+	 *
+	 * 只回傳登記表裡有的 key，不是 SELECT * FROM system_settings——
+	 * 資料庫裡可能存在登記表沒收錄的 key（例如 gemini_calls_2026-08
+	 * 這種內部計數器用途的 key），那些不是給使用者調整的參數，不該出現
+	 * 在這支給管理層看的設定畫面上。
+	 */
+	@Transactional(readOnly = true)
+	public List<SystemSettingResponse> getSystemSettings() {
+		Map<String, SystemSetting> stored = systemSettingRepository.findAll().stream()
+				.collect(java.util.stream.Collectors.toMap(SystemSetting::getSettingKey, s -> s));
+
+		return SystemSettingRegistry.all().values().stream()
+				.map(meta -> {
+					SystemSetting existing = stored.get(meta.key());
+					String updatedByName = null;
+					if (existing != null && existing.getUpdatedBy() != null) {
+						updatedByName = appUserRepository.findById(existing.getUpdatedBy())
+								.map(AppUser::getName).orElse(null);
+					}
+					return SystemSettingResponse.from(meta,
+							existing != null ? existing.getSettingValue() : null,
+							existing != null ? existing.getUpdatedAt() : null,
+							updatedByName);
+				})
+				.toList();
+	}
+
+	/**
+	 * 更新單一設定值。型別與範圍驗證對照 SystemSettingRegistry 的中繼資料，
+	 * 不管是不是真的透過前端過來的請求都會被擋下——前端的輸入元件限制只是
+	 * 體驗優化，這裡才是真正的防線。
+	 *
+	 * key 不在登記表裡（可能是打錯字，或想調整一個不開放調整的內部 key）
+	 * 一律拒絕，不會不明不白地寫入一個沒人管理過的 key。
+	 */
+	@Transactional
+	public SystemSettingResponse updateSystemSetting(String key, String value, String username) {
+		SystemSettingRegistry.Metadata meta = SystemSettingRegistry.get(key);
+		if (meta == null) {
+			throw new IllegalArgumentException("不支援調整的設定項目：" + key);
+		}
+		validateSettingValue(meta, value);
+
+		SystemSetting setting = systemSettingRepository.findById(key).orElseGet(() -> {
+			SystemSetting s = new SystemSetting();
+			s.setSettingKey(key);
+			return s;
+		});
+		setting.setSettingValue(value);
+		setting.setUpdatedBy(resolveUserId(username));
+		SystemSetting saved = systemSettingRepository.save(setting);
+
+		log.info("系統設定已更新：key={} value={} 操作者={}", key, value, username);
+
+		String updatedByName = appUserRepository.findById(saved.getUpdatedBy())
+				.map(AppUser::getName).orElse(null);
+		return SystemSettingResponse.from(meta, saved.getSettingValue(), saved.getUpdatedAt(), updatedByName);
+	}
+
+	/**
+	 * 型別與範圍驗證。STRING 型別（例如 supported_temperature_zones）
+	 * 不做數值範圍檢查，只確認非空——它的合法值域是「逗號分隔的溫層代碼」，
+	 * 這種結構化字串驗證交給前端下拉多選元件保證格式，後端在這裡不重新
+	 * 實作一次溫層列舉的解析。
+	 */
+	private void validateSettingValue(SystemSettingRegistry.Metadata meta, String value) {
+		if (value == null || value.isBlank()) {
+			throw new IllegalArgumentException("設定值不可為空");
+		}
+		if (meta.dataType() == SystemSettingRegistry.DataType.STRING) {
+			return;
+		}
+		java.math.BigDecimal parsed;
+		try {
+			parsed = new java.math.BigDecimal(value.trim());
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException(meta.displayName() + " 必須是數字，目前輸入：" + value);
+		}
+		if (meta.dataType() == SystemSettingRegistry.DataType.INTEGER
+				&& parsed.stripTrailingZeros().scale() > 0) {
+			throw new IllegalArgumentException(meta.displayName() + " 必須是整數，目前輸入：" + value);
+		}
+		if (meta.minValue() != null && parsed.compareTo(meta.minValue()) < 0) {
+			throw new IllegalArgumentException(String.format("%s 不可小於 %s，目前輸入：%s",
+					meta.displayName(), meta.minValue(), value));
+		}
+		if (meta.maxValue() != null && parsed.compareTo(meta.maxValue()) > 0) {
+			throw new IllegalArgumentException(String.format("%s 不可大於 %s，目前輸入：%s",
+					meta.displayName(), meta.maxValue(), value));
+		}
+	}
+
 	private Long resolveUserId(String username) {
 		AppUser user = appUserRepository.findByUsername(username)
 				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));

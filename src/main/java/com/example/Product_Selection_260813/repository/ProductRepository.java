@@ -21,6 +21,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 審核狀態／品項狀態／候選狀態三個欄位語意各自獨立，不可合併判斷；
      * 是否預設candidateStatus=CANDIDATE由Service層依畫面需求決定，
      * 本方法只負責「帶入什麼就篩什麼、不帶就不篩」。
+     *
+     * updatedFrom／updatedTo：依「商品修改時間」篩選（Product.updatedAt），
+     * 兩者皆為閉區間、皆選填、可只帶一邊。選用 updatedAt 而非
+     * createdAt——使用者要找的通常是「最近異動過的商品」，新增當下
+     * updatedAt 與 createdAt 相同，之後每次編輯都會更新 updatedAt，
+     * 這樣篩選出來的清單才會反映「最近有變化」而不是「最早建立」。
      */
     @Query("""
             SELECT p FROM Product p
@@ -29,6 +35,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (:candidateStatus IS NULL OR p.candidateStatus = :candidateStatus)
               AND (:productTypeId IS NULL OR p.productTypeId = :productTypeId)
               AND (:keyword IS NULL OR p.name LIKE CONCAT('%', :keyword, '%'))
+              AND (:updatedFrom IS NULL OR p.updatedAt >= :updatedFrom)
+              AND (:updatedTo IS NULL OR p.updatedAt <= :updatedTo)
             """)
     Page<Product> search(
             @Param("reviewStatus") ProductReviewStatus reviewStatus,
@@ -36,6 +44,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("candidateStatus") ProductCandidateStatus candidateStatus,
             @Param("productTypeId") Long productTypeId,
             @Param("keyword") String keyword,
+            @Param("updatedFrom") java.time.LocalDateTime updatedFrom,
+            @Param("updatedTo") java.time.LocalDateTime updatedTo,
             Pageable pageable);
 
     /**
@@ -59,6 +69,21 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 選品轉換率分子：目前review_status=APPROVED的不重複商品數。
      */
     long countByReviewStatus(ProductReviewStatus reviewStatus);
+
+    /**
+     * 依品類分組計數，供設定頁「使用品項」欄位使用。
+     *
+     * 原本這個統計恆為 null（前端註解明確寫著「後端沒有這個統計」），
+     * 導致畫面上這一欄永遠顯示「—」，看起來像是資料缺漏，這次補上。
+     *
+     * 用 GROUP BY 一次查全部，不要在 Service 層對每個品類各自呼叫一次
+     * count 查詢——品類數量不多（目前 39 筆），但沒有理由把 N+1 的
+     * 查詢模式當成預設寫法，一次撈完再用 Map 對照即可。
+     *
+     * 回傳 Object[]，index 0 = productTypeId，index 1 = count。
+     */
+    @Query("SELECT p.productTypeId, COUNT(p) FROM Product p WHERE p.productTypeId IS NOT NULL GROUP BY p.productTypeId")
+    List<Object[]> countGroupedByProductType();
 
     /**
      * AI推薦Top10（GET /api/dashboard/recommendations）：
