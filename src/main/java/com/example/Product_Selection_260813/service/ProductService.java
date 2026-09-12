@@ -26,7 +26,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
@@ -87,9 +86,6 @@ public class ProductService {
 
 	@Autowired
 	private ScoringService scoringService;
-
-	@Autowired
-	private com.example.Product_Selection_260813.service.gate.GateEvaluationService gateEvaluationService;
 
 	@Autowired
 	private ProductEvaluationRepository productEvaluationRepository;
@@ -162,13 +158,15 @@ public class ProductService {
 	 */
 	@Transactional(readOnly = true)
 	public Page<ProductResponse> searchProducts(ProductReviewStatus reviewStatus, ProductItemStatus itemStatus,
-			ProductCandidateStatus candidateStatus, Long productTypeId, String keyword, Pageable pageable) {
+			ProductCandidateStatus candidateStatus, Long productTypeId, String keyword,
+			java.time.LocalDateTime updatedFrom, java.time.LocalDateTime updatedTo, Pageable pageable) {
 
 		ProductCandidateStatus effectiveCandidateStatus = candidateStatus != null ? candidateStatus
 				: ProductCandidateStatus.CANDIDATE;
 
 		Page<Product> page = productRepository
-				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword, pageable);
+				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword,
+						updatedFrom, updatedTo, pageable);
 
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
@@ -196,13 +194,55 @@ public class ProductService {
 		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
 		return page.map(product -> {
 			ProductEvaluation evaluation = evaluationById.get(product.getId());
-			return ProductResponse.from(product)
+			ProductResponse dto = ProductResponse.from(product)
 					.withCreatedByName(
 							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
 					.withEvaluationSummary(
 							evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
+			dto.setSuggestionReason(buildSuggestionReason(product.getId()));
+			return dto;
 		});
+	}
+
+	/**
+	 * 用跟 AiSuggestionBatchService.shouldSuggest() 完全一樣的兩個判定條件
+	 * （門檻值、天數都刻意保持一致，避免兩處各自維護一份、日後改了一邊
+	 * 忘記改另一邊），重新算一次「為什麼」，組成人看得懂的一句話。
+	 *
+	 * 不在批次當下把這句話存起來的原因：判定條件是固定、可重現的計算，
+	 * 每次查詢重算一次的成本很低，不需要為了省這點計算就多維護一個欄位、
+	 * 多一種「資料庫存的理由」跟「批次邏輯」不同步的風險。
+	 */
+	private static final java.math.BigDecimal AI_SUGGEST_POPULARITY_THRESHOLD = java.math.BigDecimal.valueOf(70);
+	private static final int AI_SUGGEST_CONSECUTIVE_UP_DAYS = 3;
+
+	private String buildSuggestionReason(Long productId) {
+		List<com.example.Product_Selection_260813.entity.TrendSignal> recentSignals = trendSignalRepository
+				.findTop3ByProductIdOrderByCollectedAtDesc(productId);
+		if (recentSignals.isEmpty()) {
+			return null;
+		}
+
+		com.example.Product_Selection_260813.entity.TrendSignal latest = recentSignals.get(0);
+		if (latest.getPopularityScore() != null
+				&& latest.getPopularityScore().compareTo(AI_SUGGEST_POPULARITY_THRESHOLD) > 0) {
+			return String.format("最新熱度分數 %s 分，超過 %s 分門檻。", latest.getPopularityScore().toPlainString(),
+					AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString());
+		}
+
+		if (recentSignals.size() >= AI_SUGGEST_CONSECUTIVE_UP_DAYS
+				&& recentSignals.stream()
+						.limit(AI_SUGGEST_CONSECUTIVE_UP_DAYS)
+						.allMatch(signal -> signal.getTrendDirection() == com.example.Product_Selection_260813.enums.TrendSignalTrendDirection.UP)) {
+			return String.format("連續 %d 天呈上升趨勢。", AI_SUGGEST_CONSECUTIVE_UP_DAYS);
+		}
+
+		// 理論上不會走到這裡——商品會被標記 AI_SUGGESTED，代表批次當下
+		// 一定符合上述兩個條件之一。如果真的發生（例如條件後來被人為
+		// 改過但商品狀態沒有重新計算過），誠實顯示「無法重建理由」，
+		// 不要編造一個看似合理但其實是猜的說法。
+		return "（依當時的判定條件標記為建議，目前重新計算對不上任何條件，可能是判定邏輯之後有調整過）";
 	}
 
 	/**
@@ -215,19 +255,7 @@ public class ProductService {
 		Product product = findProductOrThrow(id);
 		String createdByName = product.getCreatedBy() == null ? null
 				: appUserRepository.findById(product.getCreatedBy()).map(AppUser::getName).orElse(null);
-
-		// Gate 結果：只在單筆詳情這裡計算，不在清單／搜尋端點附上（見
-		// ProductResponse.gateResults 欄位註解，一次回傳多筆時重算成本太高）。
-		// dataCompleteness／matchedCampaign 沿用既有評估流程會用到的同一批資料，
-		// 不是另外發明一套——跟 ReviewService.submitReview() 取得這兩項的方式一致。
-		BigDecimal dataCompleteness = productEvaluationRepository.findByProductId(id)
-				.map(ProductEvaluation::getDataCompleteness).orElse(null);
-		var matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
-		var gateSummary = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
-
-		return ProductResponse.from(product)
-				.withCreatedByName(createdByName)
-				.withGateResults(gateSummary);
+		return ProductResponse.from(product).withCreatedByName(createdByName);
 	}
 
 	// ========================= 新增 =========================
@@ -287,30 +315,6 @@ public class ProductService {
 		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
 		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
 		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
-		// 9 個 Gate 屬性欄位：DTO 端是列舉型別（型別安全，Jackson 自動擋掉不合法
-		// 的值），Entity 端存的是 String（GateEvaluationService 內部再自行
-		// valueOf() 解析），這裡用 enumName() 做 null-safe 轉換——列舉欄位皆為
-		// 選填，商品沒填時應該存 NULL 讓三層繼承機制生效，不是拋例外。
-		product.setTemperatureZone(enumName(request.getTemperatureZone()));
-		product.setShelfLifeTier(enumName(request.getShelfLifeTier()));
-		product.setSupplierLeadTimeTier(enumName(request.getSupplierLeadTimeTier()));
-		product.setPackageSizeTier(enumName(request.getPackageSizeTier()));
-		product.setPackingType(enumName(request.getPackingType()));
-		product.setHandlingFlags(request.getHandlingFlags());
-		product.setCertificationFlags(request.getCertificationFlags());
-		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
-		// 9 個 Gate 屬性欄位：DTO 端是列舉型別（型別安全，Jackson 自動擋掉不合法
-		// 的值），Entity 端存的是 String（GateEvaluationService 內部再自行
-		// valueOf() 解析），這裡用 enumName() 做 null-safe 轉換——列舉欄位皆為
-		// 選填，商品沒填時應該存 NULL 讓三層繼承機制生效，不是拋例外。
-		product.setTemperatureZone(enumName(request.getTemperatureZone()));
-		product.setShelfLifeTier(enumName(request.getShelfLifeTier()));
-		product.setSupplierLeadTimeTier(enumName(request.getSupplierLeadTimeTier()));
-		product.setPackageSizeTier(enumName(request.getPackageSizeTier()));
-		product.setPackingType(enumName(request.getPackingType()));
-		product.setHandlingFlags(request.getHandlingFlags());
-		product.setCertificationFlags(request.getCertificationFlags());
-		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
 
 		// review_status／item_status／candidate_status：Entity欄位預設值已經是
 		// PENDING／ACTIVE／CANDIDATE（見Product.java），這裡不重複賦值。
@@ -647,15 +651,6 @@ public class ProductService {
 	}
 
 	/** username -&gt; app_users.id；沿用AuthService.getCurrentUser()同樣的重查邏輯與理由。 */
-	/**
-	 * 列舉轉字串的 null-safe 版本，供 9 個 Gate 屬性欄位寫入 Entity 使用。
-	 * Entity 端存的是 String，列舉為 null（欄位未填）時直接回傳 null，
-	 * 不是丟例外——這些欄位全部選填，沒填代表交由品類繼承機制決定。
-	 */
-	private String enumName(Enum<?> value) {
-		return value == null ? null : value.name();
-	}
-
 	private Long resolveUserId(String username) {
 		AppUser user = appUserRepository.findByUsername(username)
 				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));

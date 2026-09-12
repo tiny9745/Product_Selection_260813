@@ -19,22 +19,6 @@ public class RiskOptionResponse {
 	private String category;
 
 	/**
-	 * 觸發 AI 風險提示用的關鍵字。原本這支 DTO 完全沒有暴露這個欄位——
-	 * CREATE／UPDATE 請求都能寫入，GET 卻從來讀不回來，等於「能設定但
-	 * 看不到目前設定的是什麼」，管理層想確認或修改既有關鍵字時無從得知
-	 * 目前存了什麼，只能用「猜」或整個重新輸入一次去覆蓋。
-	 */
-	private String alertKeywords;
-
-	public String getAlertKeywords() {
-		return alertKeywords;
-	}
-
-	public void setAlertKeywords(String alertKeywords) {
-		this.alertKeywords = alertKeywords;
-	}
-
-	/**
 	 * 此選項是否由 Gate 判定自動帶入（預先勾選）。
 	 *
 	 * 前端據此顯示「系統判定」徽章。主管可以取消勾選，但取消後仍要把該項 id
@@ -54,7 +38,6 @@ public class RiskOptionResponse {
 		dto.description = option.getDescription();
 		dto.isSystemDefault = option.getIsSystemDefault();
 		dto.category = option.getCategory();
-		dto.alertKeywords = option.getAlertKeywords();
 		return dto;
 	}
 

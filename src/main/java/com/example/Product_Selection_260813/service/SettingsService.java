@@ -41,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
@@ -251,6 +252,51 @@ public class SettingsService {
 		return productTypeScoreBandRepository.findAllActive().stream()
 				.map(ProductTypeScoreBandResponse::from)
 				.toList();
+	}
+
+	/**
+	 * 新增目標區間——原本這支方法完全不存在，Controller 呼叫的是一個從未
+	 * 被實作過的方法名稱，導致整個專案編譯不過。
+	 *
+	 * 新增一律是 MANUAL 模式（見 settings.html 註解：「新增的列一律為
+	 * 『手動填入』模式；建立後若已有足夠歷史開團紀錄，可再切換成
+	 * 『依歷史紀錄計算』」）——不提供新增當下就選 HISTORICAL 的入口，
+	 * 因為 HISTORICAL 模式的語意是「已經有真實資料可以算」，一個剛
+	 * 新增、還沒人手動填過任何數字的區間沒有這個前提。
+	 *
+	 * 同一商品類型的同一因子只能有一筆生效中（is_active=true）的區間，
+	 * 重複新增直接拒絕，不會讓兩筆同時生效造成評分邏輯不知道該用哪一筆。
+	 */
+	@Transactional
+	public ProductTypeScoreBandResponse createProductTypeScoreBand(
+			ProductTypeScoreBandCreateRequest request, String username) {
+		if (productTypeScoreBandRepository.existsByProductTypeIdAndFactorCodeAndIsActiveTrue(
+				request.getProductTypeId(), request.getFactorCode())) {
+			throw new IllegalStateException(
+					"此商品類型的「" + request.getFactorCode() + "」因子已有生效中的目標區間，重複新增會被拒絕。");
+		}
+		if (request.getUpperBound().compareTo(request.getLowerBound()) <= 0) {
+			throw new IllegalArgumentException(
+					"上界必須大於下界，目前下界=" + request.getLowerBound() + " 上界=" + request.getUpperBound());
+		}
+
+		Long operatorId = resolveUserId(username);
+		LocalDateTime now = LocalDateTime.now();
+
+		ProductTypeScoreBand band = new ProductTypeScoreBand();
+		band.setProductTypeId(request.getProductTypeId());
+		band.setFactorCode(request.getFactorCode());
+		band.setLowerBound(request.getLowerBound());
+		band.setUpperBound(request.getUpperBound());
+		band.setSourceMode(ScoreBandSourceMode.MANUAL.name());
+		band.setIsActive(true);
+		band.setUpdatedAt(now);
+		band.setUpdatedBy(operatorId);
+		productTypeScoreBandRepository.save(band);
+
+		log.info("目標區間已新增：productTypeId={}，factorCode={}，操作者={}",
+				request.getProductTypeId(), request.getFactorCode(), username);
+		return ProductTypeScoreBandResponse.from(band);
 	}
 
 	// ============================================================

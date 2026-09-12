@@ -68,9 +68,15 @@ public class ProductController {
 			@RequestParam(value = "itemStatus", required = false) ProductItemStatus itemStatus,
 			@RequestParam(value = "candidateStatus", required = false) ProductCandidateStatus candidateStatus,
 			@RequestParam(value = "productTypeId", required = false) Long productTypeId,
+			@RequestParam(value = "updatedFrom", required = false)
+			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+			java.time.LocalDateTime updatedFrom,
+			@RequestParam(value = "updatedTo", required = false)
+			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+			java.time.LocalDateTime updatedTo,
 			@PageableDefault(size = 20) Pageable pageable) {
 		Page<ProductResponse> result = productService.searchProducts(reviewStatus, itemStatus, candidateStatus,
-				productTypeId, keyword, pageable);
+				productTypeId, keyword, updatedFrom, updatedTo, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

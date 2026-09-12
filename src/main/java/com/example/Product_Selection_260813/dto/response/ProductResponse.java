@@ -42,32 +42,6 @@ public class ProductResponse {
 	private BigDecimal priceCompetitiveness;
 	private String targetCustomerDescription;
 	private BigDecimal estimatedPurchaseRate;
-	/**
-	 * 僅 RESALE 商品可能有值；NEW 商品恆為 null。
-	 *
-	 * 補上這個欄位的原因：Create／Update 的 Request DTO 都已經接受這個欄位
-	 * 讓使用者設定，但 GET 回應原本沒有回傳，導致前端編輯既有 RESALE 商品時
-	 * 完全不知道目前設定的是哪一個參考商品，等於「只能寫入、看不到目前值」。
-	 */
-	private Long resaleReferenceProductId;
-
-	/**
-	 * 以下 9 個欄位過去從未被回傳過——GateEvaluationService 的判定邏輯
-	 * 完整存在，但商品詳情頁拿不到這幾個原始屬性值，也看不到 Gate 結果。
-	 * gateResults 只在 GET /api/products/{id} 才會有值（見 withGateResults()），
-	 * 清單／搜尋端點不附上——那些端點一次可能回傳幾十筆，每筆都重算五個
-	 * Gate 判定成本太高，Gate 結果只有看單一商品詳情時才需要。
-	 */
-	private String temperatureZone;
-	private String shelfLifeTier;
-	private String supplierLeadTimeTier;
-	private String packageSizeTier;
-	private String packingType;
-	private String handlingFlags;
-	private String certificationFlags;
-	private Integer supplierMaxCapacity;
-
-	private com.example.Product_Selection_260813.service.gate.GateResult.Summary gateResults;
 	private ProductReviewStatus reviewStatus;
 	private ProductCandidateStatus candidateStatus;
 	private ProductPricingStatus pricingStatus;
@@ -96,6 +70,25 @@ public class ProductResponse {
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 	private Long updatedBy;
+	/**
+	 * 「為什麼被 AI 推薦」的說明文字。只有 GET /api/products/ai-suggested
+	 * 這支端點會填值，其餘所有回傳 ProductResponse 的端點一律是 null——
+	 * 原本前端這個欄位是恆為 null 的死欄位，因為判定「要不要推薦」的
+	 * AiSuggestionBatchService 只把結果寫成一個布林值（改
+	 * candidate_status），沒有把「為什麼」這件事存下來或回傳過。
+	 * 這裡不改動批次判定邏輯本身，只是在查詢清單時，用同樣的兩個判定
+	 * 條件（最新熱度分數／連續三天上升趨勢）重新算一次，組成一句人看得懂
+	 * 的說明——判定條件是固定、可重現的，不需要在批次當下就存起來。
+	 */
+	private String suggestionReason;
+
+	public String getSuggestionReason() {
+		return suggestionReason;
+	}
+
+	public void setSuggestionReason(String suggestionReason) {
+		this.suggestionReason = suggestionReason;
+	}
 
 	public static ProductResponse from(Product product) {
 		ProductResponse dto = new ProductResponse();
@@ -115,15 +108,6 @@ public class ProductResponse {
 		dto.priceCompetitiveness = product.getPriceCompetitiveness();
 		dto.targetCustomerDescription = product.getTargetCustomerDescription();
 		dto.estimatedPurchaseRate = product.getEstimatedPurchaseRate();
-		dto.resaleReferenceProductId = product.getResaleReferenceProductId();
-		dto.temperatureZone = product.getTemperatureZone();
-		dto.shelfLifeTier = product.getShelfLifeTier();
-		dto.supplierLeadTimeTier = product.getSupplierLeadTimeTier();
-		dto.packageSizeTier = product.getPackageSizeTier();
-		dto.packingType = product.getPackingType();
-		dto.handlingFlags = product.getHandlingFlags();
-		dto.certificationFlags = product.getCertificationFlags();
-		dto.supplierMaxCapacity = product.getSupplierMaxCapacity();
 		dto.reviewStatus = product.getReviewStatus();
 		dto.candidateStatus = product.getCandidateStatus();
 		dto.pricingStatus = product.getPricingStatus();
@@ -148,11 +132,6 @@ public class ProductResponse {
 		this.createdByName = createdByName;
 		return this;
 	}
-
-	public ProductResponse withGateResults(com.example.Product_Selection_260813.service.gate.GateResult.Summary gateResults) {
-		this.gateResults = gateResults;
-		return this;
-	}
 
 	/**
 	 * 補上批次查詢好的分數，回傳 this 方便鏈式呼叫，用法同 withCreatedByName()：
@@ -191,42 +170,6 @@ public class ProductResponse {
 
 	public void setPricingType(ProductPricingType pricingType) {
 		this.pricingType = pricingType;
-	}
-
-	public String getTemperatureZone() {
-		return temperatureZone;
-	}
-
-	public String getShelfLifeTier() {
-		return shelfLifeTier;
-	}
-
-	public String getSupplierLeadTimeTier() {
-		return supplierLeadTimeTier;
-	}
-
-	public String getPackageSizeTier() {
-		return packageSizeTier;
-	}
-
-	public String getPackingType() {
-		return packingType;
-	}
-
-	public String getHandlingFlags() {
-		return handlingFlags;
-	}
-
-	public String getCertificationFlags() {
-		return certificationFlags;
-	}
-
-	public Integer getSupplierMaxCapacity() {
-		return supplierMaxCapacity;
-	}
-
-	public com.example.Product_Selection_260813.service.gate.GateResult.Summary getGateResults() {
-		return gateResults;
 	}
 
 	public String getName() {
@@ -331,14 +274,6 @@ public class ProductResponse {
 
 	public void setEstimatedPurchaseRate(BigDecimal estimatedPurchaseRate) {
 		this.estimatedPurchaseRate = estimatedPurchaseRate;
-	}
-
-	public Long getResaleReferenceProductId() {
-		return resaleReferenceProductId;
-	}
-
-	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
-		this.resaleReferenceProductId = resaleReferenceProductId;
 	}
 
 	public ProductReviewStatus getReviewStatus() {
