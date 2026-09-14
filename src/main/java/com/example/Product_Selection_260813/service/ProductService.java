@@ -737,8 +737,8 @@ public class ProductService {
 				&& bigDecimalEquals(current.getSalePrice(), request.getSalePrice())
 				&& Objects.equals(current.getCampaignTags(), request.getCampaignTags())
 				&& Objects.equals(current.getMoq(), request.getMoq())
-				&& bigDecimalEquals(current.getSupplyStability(), request.getSupplyStability())
-				&& bigDecimalEquals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())
+				&& Objects.equals(current.getSupplyStability(), request.getSupplyStability())
+				&& Objects.equals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())
 				&& Objects.equals(current.getTargetCustomerDescription(), request.getTargetCustomerDescription())
 				&& bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate());
 

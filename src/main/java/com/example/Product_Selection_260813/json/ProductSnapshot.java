@@ -26,9 +26,9 @@ public class ProductSnapshot {
 
     private Integer moq;
 
-    private BigDecimal supplyStability;
+    private Integer supplyStability;
 
-    private BigDecimal priceCompetitiveness;
+    private Integer priceCompetitiveness;
 
     private String targetCustomerDescription;
 
@@ -126,19 +126,19 @@ public class ProductSnapshot {
         this.moq = moq;
     }
 
-    public BigDecimal getSupplyStability() {
+    public Integer getSupplyStability() {
         return supplyStability;
     }
 
-    public void setSupplyStability(BigDecimal supplyStability) {
+    public void setSupplyStability(Integer supplyStability) {
         this.supplyStability = supplyStability;
     }
 
-    public BigDecimal getPriceCompetitiveness() {
+    public Integer getPriceCompetitiveness() {
         return priceCompetitiveness;
     }
 
-    public void setPriceCompetitiveness(BigDecimal priceCompetitiveness) {
+    public void setPriceCompetitiveness(Integer priceCompetitiveness) {
         this.priceCompetitiveness = priceCompetitiveness;
     }
 

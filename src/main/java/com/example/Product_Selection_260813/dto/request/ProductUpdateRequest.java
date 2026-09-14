@@ -11,6 +11,8 @@ import com.example.Product_Selection_260813.enums.PackageSizeTier;
 import com.example.Product_Selection_260813.enums.PackingType;
 
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -85,13 +87,15 @@ public class ProductUpdateRequest {
 	@PositiveOrZero(message = ValidationMessage.PRODUCT_MOQ_NEGATIVE)
 	private Integer moq;
 
-	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
-	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
-	private BigDecimal supplyStability;
+	// 資料庫欄位已改成 tinyint（整數 1~5 等級），型別直接用 Integer，
+	// @Min/@Max 結構性地擋掉小數值。
+	@Min(value = 1, message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	@Max(value = 5, message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	private Integer supplyStability;
 
-	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
-	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
-	private BigDecimal priceCompetitiveness;
+	@Min(value = 1, message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	@Max(value = 5, message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	private Integer priceCompetitiveness;
 
 	// targetCustomerDescription對應TEXT欄位，不設長度上限
 	private String targetCustomerDescription;
@@ -276,19 +280,19 @@ public class ProductUpdateRequest {
 		this.moq = moq;
 	}
 
-	public BigDecimal getSupplyStability() {
+	public Integer getSupplyStability() {
 		return supplyStability;
 	}
 
-	public void setSupplyStability(BigDecimal supplyStability) {
+	public void setSupplyStability(Integer supplyStability) {
 		this.supplyStability = supplyStability;
 	}
 
-	public BigDecimal getPriceCompetitiveness() {
+	public Integer getPriceCompetitiveness() {
 		return priceCompetitiveness;
 	}
 
-	public void setPriceCompetitiveness(BigDecimal priceCompetitiveness) {
+	public void setPriceCompetitiveness(Integer priceCompetitiveness) {
 		this.priceCompetitiveness = priceCompetitiveness;
 	}
 

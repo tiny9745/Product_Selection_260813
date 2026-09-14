@@ -38,8 +38,8 @@ public class ProductResponse {
 	private BigDecimal marketPrice;
 	private String campaignTags;
 	private Integer moq;
-	private BigDecimal supplyStability;
-	private BigDecimal priceCompetitiveness;
+	private Integer supplyStability;
+	private Integer priceCompetitiveness;
 	private String targetCustomerDescription;
 	private BigDecimal estimatedPurchaseRate;
 	private ProductReviewStatus reviewStatus;
@@ -244,19 +244,19 @@ public class ProductResponse {
 		this.moq = moq;
 	}
 
-	public BigDecimal getSupplyStability() {
+	public Integer getSupplyStability() {
 		return supplyStability;
 	}
 
-	public void setSupplyStability(BigDecimal supplyStability) {
+	public void setSupplyStability(Integer supplyStability) {
 		this.supplyStability = supplyStability;
 	}
 
-	public BigDecimal getPriceCompetitiveness() {
+	public Integer getPriceCompetitiveness() {
 		return priceCompetitiveness;
 	}
 
-	public void setPriceCompetitiveness(BigDecimal priceCompetitiveness) {
+	public void setPriceCompetitiveness(Integer priceCompetitiveness) {
 		this.priceCompetitiveness = priceCompetitiveness;
 	}
 

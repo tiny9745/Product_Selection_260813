@@ -11,6 +11,8 @@ import com.example.Product_Selection_260813.enums.PackageSizeTier;
 import com.example.Product_Selection_260813.enums.PackingType;
 
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -90,13 +92,16 @@ public class ProductCreateRequest {
 	// 1~5分制人工評估。ScoringService.calculateBusinessScore()雖有clamp()保護分數不超出
 	// 0~100，但那只保護「分數」，不保護「存進資料庫的原始值」——沒有這層驗證，
 	// supply_stability=999會原封不動存入並寫進審核快照。
-	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
-	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
-	private BigDecimal supplyStability;
+	// 資料庫欄位已改成 tinyint（整數 1~5 等級，前端對應顯示成「供應充足」
+	// 這類文字敘述），不再是 0–5 分制小數。型別直接用 Integer，@Min/@Max
+	// 本身就結構性地擋掉小數值，不需要再另外疊加 @Digits。
+	@Min(value = 1, message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	@Max(value = 5, message = ValidationMessage.PRODUCT_SUPPLY_STABILITY_RANGE)
+	private Integer supplyStability;
 
-	@DecimalMin(value = "1.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
-	@DecimalMax(value = "5.0", message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
-	private BigDecimal priceCompetitiveness;
+	@Min(value = 1, message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	@Max(value = 5, message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
+	private Integer priceCompetitiveness;
 
 	// targetCustomerDescription對應TEXT欄位，不設長度上限
 	private String targetCustomerDescription;
@@ -293,19 +298,19 @@ public class ProductCreateRequest {
 		this.moq = moq;
 	}
 
-	public BigDecimal getSupplyStability() {
+	public Integer getSupplyStability() {
 		return supplyStability;
 	}
 
-	public void setSupplyStability(BigDecimal supplyStability) {
+	public void setSupplyStability(Integer supplyStability) {
 		this.supplyStability = supplyStability;
 	}
 
-	public BigDecimal getPriceCompetitiveness() {
+	public Integer getPriceCompetitiveness() {
 		return priceCompetitiveness;
 	}
 
-	public void setPriceCompetitiveness(BigDecimal priceCompetitiveness) {
+	public void setPriceCompetitiveness(Integer priceCompetitiveness) {
 		this.priceCompetitiveness = priceCompetitiveness;
 	}
 

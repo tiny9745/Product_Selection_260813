@@ -101,11 +101,11 @@ public class Product {
 	@Column(name = "moq")
 	private Integer moq;
 
-	@Column(name = "supply_stability", precision = 5, scale = 2)
-	private BigDecimal supplyStability;
+	@Column(name = "supply_stability")
+	private Integer supplyStability;
 
-	@Column(name = "price_competitiveness", precision = 5, scale = 2)
-	private BigDecimal priceCompetitiveness;
+	@Column(name = "price_competitiveness")
+	private Integer priceCompetitiveness;
 
 	@Column(name = "target_customer_description", columnDefinition = "TEXT")
 	private String targetCustomerDescription;
@@ -315,19 +315,19 @@ public class Product {
 		this.moq = moq;
 	}
 
-	public BigDecimal getSupplyStability() {
+	public Integer getSupplyStability() {
 		return supplyStability;
 	}
 
-	public void setSupplyStability(BigDecimal supplyStability) {
+	public void setSupplyStability(Integer supplyStability) {
 		this.supplyStability = supplyStability;
 	}
 
-	public BigDecimal getPriceCompetitiveness() {
+	public Integer getPriceCompetitiveness() {
 		return priceCompetitiveness;
 	}
 
-	public void setPriceCompetitiveness(BigDecimal priceCompetitiveness) {
+	public void setPriceCompetitiveness(Integer priceCompetitiveness) {
 		this.priceCompetitiveness = priceCompetitiveness;
 	}
 

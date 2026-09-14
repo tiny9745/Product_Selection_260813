@@ -146,11 +146,12 @@ public class ProductFactorScorer {
 	 * 但送出與儲存的仍是 1~5 的數值，後端邏輯不受影響。
 	 */
 	public BigDecimal scoreSupplyStability(Product product) {
-		BigDecimal raw = product.getSupplyStability();
+		Integer raw = product.getSupplyStability();
 		if (raw == null) {
 			return null;
 		}
-		return ScoringAlgorithms.clamp(raw.multiply(BigDecimal.valueOf(20)), BigDecimal.ZERO, HUNDRED);
+		return ScoringAlgorithms.clamp(BigDecimal.valueOf(raw).multiply(BigDecimal.valueOf(20)), BigDecimal.ZERO,
+				HUNDRED);
 	}
 
 	// =====================================================================
