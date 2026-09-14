@@ -30,11 +30,13 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
+import com.example.Product_Selection_260813.dto.request.SystemSettingUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
 import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
+import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.service.SettingsService;
 
@@ -131,6 +133,37 @@ public class SettingsController {
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
+	// ========================= 系統設定（演算法參數）=========================
+
+	/**
+	 * 列出登記表（SystemSettingRegistry）裡全部已知的演算法參數（貝氏收縮 k 值、
+	 * 趨勢新鮮度半衰期等），每筆附上目前生效值與型別／範圍中繼資料。
+	 *
+	 * ⚠️ 補上此端點前，SettingsService.getSystemSettings()／updateSystemSetting()
+	 * 業務邏輯早已完成，只是從未被 Controller 掛上路由，導致前端「演算法參數」
+	 * 分頁一直打到不存在的端點、收到非 ApiResponse 格式的 404，被前端錯誤處理
+	 * 邏輯退化顯示成「伺服器發生錯誤，請稍後再試」。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/system-settings")
+	public ResponseEntity<ApiResponse<List<SystemSettingResponse>>> getSystemSettings() {
+		List<SystemSettingResponse> result = settingsService.getSystemSettings();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * 更新單一演算法參數。key 是路徑參數，不是 body 欄位；型別與範圍驗證
+	 * 交給 SettingsService 對照 SystemSettingRegistry 的中繼資料做。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/system-settings/{key}")
+	public ResponseEntity<ApiResponse<SystemSettingResponse>> updateSystemSetting(
+			@PathVariable("key") String key,
+			@Valid @RequestBody SystemSettingUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		SystemSettingResponse result = settingsService.updateSystemSetting(key, request.getValue(), username);
+		return ResponseEntity.ok(ApiResponse.success("已更新演算法參數", result));
+	}
 
 	// [操作+管理]，不加@PreAuthorize
 	@GetMapping("/evaluation-mode/current")
