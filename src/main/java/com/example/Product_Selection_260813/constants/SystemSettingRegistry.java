@@ -69,16 +69,16 @@ public final class SystemSettingRegistry {
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(365), "天", "14");
 
 		// ---------------- MOQ 可行性判定 ----------------
-		register("moq_benchmark_percentile", "MOQ判定", "MOQ可行性基準分位數",
+		register("moq_benchmark_percentile", "最低訂購量(MOQ)判定", "MOQ可行性基準分位數",
 				"用該品類歷史集單量的第幾分位數當作可行性門檻，避免單一離群值（例如一次爆紅）主導判斷。",
-				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(99), "百分位", "75");
-		register("moq_safety_factor", "MOQ判定", "MOQ安全係數",
+				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(99), "%", "75");
+		register("moq_safety_factor", "最低訂購量(MOQ)判定", "MOQ安全係數",
 				"基準分位數乘上這個係數才是實際門檻，大於1代表放寬容忍度。",
 				DataType.DECIMAL, new BigDecimal("0.1"), BigDecimal.TEN, "倍", "1.0");
-		register("moq_min_sample_size", "MOQ判定", "MOQ判定最低樣本數",
+		register("moq_min_sample_size", "最低訂購量(MOQ)判定", "MOQ判定最低樣本數",
 				"低於這個樣本數，MOQ可行性一律回報資料不足，不勉強計算。",
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(1000), "筆", "5");
-		register("default_moq", "MOQ判定", "全域預設MOQ",
+		register("default_moq", "最低訂購量(MOQ)判定", "全域預設MOQ",
 				"商品與品類都沒有設定MOQ時的最後保底值。",
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(100000), "件", "1");
 
@@ -106,10 +106,10 @@ public final class SystemSettingRegistry {
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(1000), "筆", "5");
 		register("score_band_percentile_lower", "目標區間", "目標區間下界分位數",
 				"HISTORICAL 模式計算下界時採用的分位數。",
-				DataType.INTEGER, BigDecimal.ZERO, BigDecimal.valueOf(49), "百分位", "10");
+				DataType.INTEGER, BigDecimal.ZERO, BigDecimal.valueOf(49), "%", "10");
 		register("score_band_percentile_upper", "目標區間", "目標區間上界分位數",
 				"HISTORICAL 模式計算上界時採用的分位數，必須大於下界分位數（畫面與後端皆須驗證）。",
-				DataType.INTEGER, BigDecimal.valueOf(51), BigDecimal.valueOf(100), "百分位", "90");
+				DataType.INTEGER, BigDecimal.valueOf(51), BigDecimal.valueOf(100), "%", "90");
 	}
 
 	public static Map<String, Metadata> all() {
