@@ -18,4 +18,13 @@ public interface ProductTypeRepository extends JpaRepository<ProductType, Long> 
     List<ProductType> findByLevelAndIsActiveTrueOrderBySortOrderAsc(Integer level);
 
     List<ProductType> findByParentIdAndIsActiveTrueOrderBySortOrderAsc(Long parentId);
+
+    /**
+     * 依名稱查小類（level=2）。供歷史開團紀錄 CSV 匯入使用——匯入格式這次
+     * 改成填品類「名稱」而非數字 id（見 GroupBuyRecordService 類別註解），
+     * 商品只能掛在小類，所以這裡限定 level=2，避免大類名稱被誤當成合法值。
+     * 回傳 List 而非 Optional：資料庫沒有名稱唯一約束，理論上可能有同名
+     * 小類（不同大類底下），Service 層依實際回傳筆數決定要不要視為錯誤。
+     */
+    List<ProductType> findByNameAndLevel(String name, Integer level);
 }

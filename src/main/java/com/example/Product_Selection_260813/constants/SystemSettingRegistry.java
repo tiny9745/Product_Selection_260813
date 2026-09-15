@@ -87,7 +87,7 @@ public final class SystemSettingRegistry {
 				"品類沒有專屬門檻時使用的全域效期天數門檻。",
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(3650), "天", "21");
 		register("supported_temperature_zones", "溫層判定", "通路支援溫層",
-				"逗號分隔，例如 NORMAL,CHILLED,FROZEN。商品溫層不在此清單內會被 Gate 判定為不通過。",
+				"以逗號分隔",
 				DataType.STRING, null, null, null, "NORMAL,CHILLED,FROZEN");
 
 		// ---------------- 運費估算 ----------------

@@ -159,4 +159,37 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      */
     @Query("SELECT p FROM Product p WHERE p.productTypeId = :productTypeId AND p.itemStatus <> 'ARCHIVED'")
     List<Product> findCandidatesByProductType(@Param("productTypeId") Long productTypeId);
+
+    /**
+     * RESALE 逐層過濾參考商品：第一層（商品分類已固定）之後，列出該分類下
+     * 有供貨紀錄的供應商，供第二層下拉選單使用。
+     *
+     * DISTINCT 且排除空白值——supplierName 在 Entity 層是選填欄位，舊資料
+     * 或人工建立時可能沒填，這種商品不該在下拉選單裡變成一個空白選項。
+     */
+    @Query("""
+            SELECT DISTINCT p.supplierName FROM Product p
+             WHERE p.productTypeId = :productTypeId
+               AND p.itemStatus <> 'ARCHIVED'
+               AND p.supplierName IS NOT NULL
+               AND p.supplierName <> ''
+             ORDER BY p.supplierName
+            """)
+    List<String> findDistinctSupplierNamesByProductType(@Param("productTypeId") Long productTypeId);
+
+    /**
+     * RESALE 逐層過濾參考商品：第二層，選定分類＋供應商之後列出可選的商品，
+     * 供第三層下拉選單使用。篩選邏輯與 findCandidatesByProductType() 一致
+     * （排除 ARCHIVED），差別只在多一個供應商精準比對條件。
+     */
+    @Query("""
+            SELECT p FROM Product p
+             WHERE p.productTypeId = :productTypeId
+               AND p.supplierName = :supplierName
+               AND p.itemStatus <> 'ARCHIVED'
+             ORDER BY p.name
+            """)
+    List<Product> findCandidatesByProductTypeAndSupplier(
+            @Param("productTypeId") Long productTypeId,
+            @Param("supplierName") String supplierName);
 }

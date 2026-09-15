@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -21,11 +22,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.dto.request.ClaimGroupBuyRecordsRequest;
 import com.example.Product_Selection_260813.dto.response.GroupBuyImportResult;
 import com.example.Product_Selection_260813.dto.response.GroupBuyImportResult.RowError;
+import com.example.Product_Selection_260813.dto.response.GroupBuyRecordClaimCandidateResponse;
 import com.example.Product_Selection_260813.dto.response.GroupBuyRecordResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.GroupBuyRecord;
+import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.enums.GroupBuyResult;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
@@ -49,13 +54,13 @@ public class GroupBuyRecordService {
 
 	private static final Logger log = LoggerFactory.getLogger(GroupBuyRecordService.class);
 
-	/** CSV 必要欄位。product_type_id 必填是刻意的，見類別註解與 validateRow()。 */
+	/** CSV 必要欄位。product_type_name 必填是刻意的，見類別註解與 validateRow()。 */
 	private static final List<String> REQUIRED_HEADERS = List.of(
-			"product_type_id", "external_product_name",
+			"product_type_name", "external_product_name",
 			"campaign_start_date", "campaign_end_date", "actual_quantity", "result");
 
 	private static final List<String> KNOWN_HEADERS = List.of(
-			"product_id", "product_type_id", "external_product_name", "supplier_name",
+			"product_id", "product_type_name", "external_product_name", "supplier_name",
 			"campaign_start_date", "campaign_end_date", "moq_at_time", "sale_price_at_time",
 			"cost_price_at_time", "market_price_at_time",
 			"target_quantity", "actual_quantity", "participant_count", "result",
@@ -112,26 +117,39 @@ public class GroupBuyRecordService {
 		// ---- 逐列驗證與轉換 ----
 		List<GroupBuyRecord> parsed = new ArrayList<>();
 		List<RowError> errors = new ArrayList<>();
-		// 先把用到的品類與商品 id 蒐集起來一次查完，避免逐列打 DB 造成 N+1
-		Set<Long> productTypeIds = new HashSet<>();
+		// 先把用到的品類名稱與商品 id 蒐集起來一次查完，避免逐列打 DB 造成 N+1
+		Set<String> productTypeNames = new HashSet<>();
 		Set<Long> productIds = new HashSet<>();
 
 		List<Map<String, String>> rowMaps = new ArrayList<>();
 		for (int i = 1; i < rows.size(); i++) {
 			Map<String, String> map = toRowMap(rows.get(i), columnIndex);
 			rowMaps.add(map);
-			addIfLong(productTypeIds, map.get("product_type_id"));
+			String typeName = map.get("product_type_name");
+			if (isPresent(typeName)) {
+				productTypeNames.add(typeName.trim());
+			}
 			addIfLong(productIds, map.get("product_id"));
 		}
-		Set<Long> existingTypeIds = new HashSet<>();
-		productTypeRepository.findAllById(productTypeIds).forEach(t -> existingTypeIds.add(t.getId()));
+		// 品類名稱 → id 對照。findByNameAndLevel() 回傳 List 是為了讓這裡能
+		// 偵測「同名小類有多筆」這種資料庫沒有唯一約束擋住的邊界情況——
+		// 只有剛好一筆才放進對照表，兩筆以上的名稱之後在 validateAndConvert()
+		// 會查不到對照、被當成「品類名稱不存在」報錯，而不是靜默取第一筆
+		// 造成使用者以為連到 A 品類、實際連到 B 品類。
+		Map<String, Long> typeIdByName = new HashMap<>();
+		for (String name : productTypeNames) {
+			List<ProductType> matches = productTypeRepository.findByNameAndLevel(name, 2);
+			if (matches.size() == 1) {
+				typeIdByName.put(name, matches.get(0).getId());
+			}
+		}
 		Set<Long> existingProductIds = new HashSet<>();
 		productRepository.findAllById(productIds).forEach(p -> existingProductIds.add(p.getId()));
 
 		for (int i = 0; i < rowMaps.size(); i++) {
 			int csvRowNumber = i + 2; // +1 跳過標頭、+1 因為使用者看到的列號從 1 起算
 			GroupBuyRecord record = validateAndConvert(rowMaps.get(i), csvRowNumber,
-					existingTypeIds, existingProductIds, errors);
+					typeIdByName, existingProductIds, errors);
 			if (record != null) {
 				parsed.add(record);
 			}
@@ -178,20 +196,25 @@ public class GroupBuyRecordService {
 	 * 改一輪就好，不用反覆重送才逐個發現。
 	 */
 	private GroupBuyRecord validateAndConvert(Map<String, String> row, int rowNumber,
-			Set<Long> existingTypeIds, Set<Long> existingProductIds, List<RowError> errors) {
+			Map<String, Long> typeIdByName, Set<Long> existingProductIds, List<RowError> errors) {
 		int errorCountBefore = errors.size();
 		GroupBuyRecord record = new GroupBuyRecord();
 
-		// product_type_id：必填，且必須存在。
+		// product_type_name：必填，且必須剛好對應到一筆小類。
 		// 匯入必須指定品類、不做商品名稱模糊比對——自動比對會錯配，
 		// 而錯配的資料會經由歷史分數進入不可覆蓋的審核快照。
-		Long typeId = parseLong(row.get("product_type_id"));
-		if (typeId == null) {
-			errors.add(new RowError(rowNumber, "product_type_id", "品類 id 必填且須為數字"));
-		} else if (!existingTypeIds.contains(typeId)) {
-			errors.add(new RowError(rowNumber, "product_type_id", "品類 id " + typeId + " 不存在"));
+		//
+		// ⚠️ 這裡刻意用「名稱」不用「id」：準備這份 CSV 的人多半不是這套
+		// 系統的使用者（見類別註解「匯入資料的商品多半不在系統內」），
+		// 沒有理由要求他們先另外查過品類在資料庫裡的數字編號才能填表。
+		String typeName = row.get("product_type_name");
+		if (!isPresent(typeName)) {
+			errors.add(new RowError(rowNumber, "product_type_name", "品類名稱必填"));
+		} else if (!typeIdByName.containsKey(typeName.trim())) {
+			errors.add(new RowError(rowNumber, "product_type_name",
+					"品類名稱「" + typeName.trim() + "」不存在，或對應到一筆以上的品類（請確認名稱是否唯一）"));
 		} else {
-			record.setProductTypeId(typeId);
+			record.setProductTypeId(typeIdByName.get(typeName.trim()));
 		}
 
 		// product_id：選填，但有填就必須存在
@@ -426,5 +449,100 @@ public class GroupBuyRecordService {
 			return null;
 		}
 		return appUserRepository.findByUsername(username).map(AppUser::getId).orElse(null);
+	}
+
+	// =====================================================================
+	// 認領歷史紀錄（新增商品時，把匯入當下沒有對應系統商品的舊紀錄補上連結）
+	// =====================================================================
+
+	private static final BigDecimal CLAIM_NAME_WEIGHT = new BigDecimal("0.7");
+	private static final BigDecimal CLAIM_SUPPLIER_WEIGHT = new BigDecimal("0.3");
+	private static final BigDecimal CLAIM_MIN_SCORE_THRESHOLD = new BigDecimal("0.3");
+	private static final int CLAIM_MAX_RESULTS = 10;
+	private final org.apache.commons.text.similarity.JaroWinklerSimilarity jaroWinkler =
+			new org.apache.commons.text.similarity.JaroWinklerSimilarity();
+
+	/**
+	 * 認領候選池：指定品類下 product_id 為 null 的歷史紀錄，依名稱／供應商
+	 * 相似度排序。比對邏輯與門檻值刻意對齊 ProductSimilarityService
+	 * ——同一個概念（人工核對候選、不自動判定）不該在系統裡有兩套不同的
+	 * 相似度標準，讓使用者在兩個畫面看到不一致的「像不像」判斷。
+	 */
+	@Transactional(readOnly = true)
+	public List<GroupBuyRecordClaimCandidateResponse> searchUnlinkedCandidates(Long productTypeId, String name,
+			String supplierName) {
+		List<GroupBuyRecord> pool = groupBuyRecordRepository.findByProductIdIsNullAndProductTypeId(productTypeId);
+
+		return pool.stream()
+				.map(record -> scoreClaim(record, name, supplierName))
+				.filter(r -> r.getCombinedScore().compareTo(CLAIM_MIN_SCORE_THRESHOLD) >= 0)
+				.sorted(Comparator.comparing(GroupBuyRecordClaimCandidateResponse::getCombinedScore).reversed())
+				.limit(CLAIM_MAX_RESULTS)
+				.toList();
+	}
+
+	private GroupBuyRecordClaimCandidateResponse scoreClaim(GroupBuyRecord record, String name,
+			String supplierName) {
+		BigDecimal nameSim = similarityScore(name, record.getExternalProductName());
+
+		BigDecimal supplierSim = (supplierName != null && !supplierName.isBlank()
+				&& record.getSupplierName() != null && !record.getSupplierName().isBlank())
+				? similarityScore(supplierName, record.getSupplierName())
+				: null;
+
+		BigDecimal combined = supplierSim != null
+				? nameSim.multiply(CLAIM_NAME_WEIGHT).add(supplierSim.multiply(CLAIM_SUPPLIER_WEIGHT))
+				: nameSim;
+
+		return GroupBuyRecordClaimCandidateResponse.of(record, nameSim, supplierSim,
+				combined.setScale(4, java.math.RoundingMode.HALF_UP));
+	}
+
+	private BigDecimal similarityScore(String a, String b) {
+		if (a == null || b == null) {
+			return BigDecimal.ZERO;
+		}
+		double score = jaroWinkler.apply(a.trim(), b.trim());
+		return BigDecimal.valueOf(score).setScale(4, java.math.RoundingMode.HALF_UP);
+	}
+
+	/**
+	 * 把選定的歷史紀錄連結到指定商品。
+	 *
+	 * 全有全無：任一筆驗證失敗就整批拒絕，不做部分連結——部分成功會讓
+	 * 使用者無法判斷到底連了哪幾筆，還要回頭比對，這跟 CSV 匯入的
+	 * 全有全無原則是同一個理由。
+	 *
+	 * 驗證規則：
+	 * 1. 商品必須存在
+	 * 2. 每一筆歷史紀錄都必須存在
+	 * 3. 每一筆歷史紀錄目前的 product_id 必須是 null——已經連結過的紀錄
+	 *    不能被覆蓋，避免一次不小心的操作打斷別人已經建立好的連結
+	 * 4. 每一筆歷史紀錄的 product_type_id 必須與商品的 product_type_id 一致
+	 *    ——不同品類的紀錄不該被連到這件商品，那通常代表選錯了候選
+	 */
+	@Transactional
+	public void claimRecords(ClaimGroupBuyRecordsRequest request) {
+		Product product = productRepository.findById(request.getProductId())
+				.orElseThrow(() -> new IllegalArgumentException("商品 id " + request.getProductId() + " 不存在"));
+
+		List<GroupBuyRecord> records = groupBuyRecordRepository.findAllById(request.getGroupBuyRecordIds());
+		if (records.size() != request.getGroupBuyRecordIds().size()) {
+			throw new IllegalArgumentException("部分歷史紀錄 id 不存在");
+		}
+		for (GroupBuyRecord record : records) {
+			if (record.getProductId() != null) {
+				throw new IllegalStateException("歷史紀錄 " + record.getId() + " 已經連結過其他商品，不可覆蓋");
+			}
+			if (!record.getProductTypeId().equals(product.getProductTypeId())) {
+				throw new IllegalStateException("歷史紀錄 " + record.getId() + " 的品類與商品不一致，不可連結");
+			}
+		}
+
+		for (GroupBuyRecord record : records) {
+			record.setProductId(product.getId());
+		}
+		groupBuyRecordRepository.saveAll(records);
+		log.info("歷史紀錄認領完成：商品 {}，共 {} 筆", product.getId(), records.size());
 	}
 }

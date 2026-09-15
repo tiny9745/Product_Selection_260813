@@ -9,6 +9,7 @@ import org.apache.commons.text.similarity.JaroWinklerSimilarity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.example.Product_Selection_260813.dto.response.ResaleReferenceOptionResponse;
 import com.example.Product_Selection_260813.dto.response.SimilarProductCandidateResponse;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.repository.ProductRepository;
@@ -110,5 +111,31 @@ public class ProductSimilarityService {
 		}
 		double score = jaroWinkler.apply(a.trim(), b.trim());
 		return BigDecimal.valueOf(score).setScale(4, RoundingMode.HALF_UP);
+	}
+
+	// =====================================================================
+	// 逐層過濾參考商品（取代打字模糊比對，見團隊決議：改成品類→供應商→
+	// 商品名稱三層下拉，不再依賴使用者輸入的新商品名稱去模糊比對）
+	// =====================================================================
+
+	/**
+	 * 逐層過濾第一層：列出指定品類下有供貨紀錄的供應商。
+	 */
+	public List<String> listSuppliers(Long productTypeId) {
+		return productRepository.findDistinctSupplierNamesByProductType(productTypeId);
+	}
+
+	/**
+	 * 逐層過濾第二層：列出指定品類＋供應商下可選的商品。
+	 *
+	 * excludeId 語意與 findSimilarCandidates() 一致：編輯既有商品時排除
+	 * 自己，新增時傳 null 不排除任何商品。
+	 */
+	public List<ResaleReferenceOptionResponse> listCandidateProducts(Long productTypeId, String supplierName,
+			Long excludeId) {
+		return productRepository.findCandidatesByProductTypeAndSupplier(productTypeId, supplierName).stream()
+				.filter(p -> excludeId == null || !excludeId.equals(p.getId()))
+				.map(ResaleReferenceOptionResponse::of)
+				.toList();
 	}
 }

@@ -72,6 +72,15 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 
 	List<GroupBuyRecord> findByProductIdOrderByCampaignStartDateDesc(Long productId);
 
+	/**
+	 * 認領歷史紀錄的候選池：指定品類下尚未連結任何系統商品的紀錄。
+	 *
+	 * product_id 為 null 的原因見類別註解——匯入時大多沒有對應的系統商品，
+	 * 這支方法把這批「當時沒有、現在可能有了」的紀錄找出來，供新增商品時
+	 * 人工核對後補上連結（見 GroupBuyRecordService.claimRecords()）。
+	 */
+	List<GroupBuyRecord> findByProductIdIsNullAndProductTypeId(Long productTypeId);
+
 	// ---------------- 歷史毛利率／折扣深度區間計算 ----------------
 
 	/**

@@ -10,15 +10,20 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.dto.request.ClaimGroupBuyRecordsRequest;
 import com.example.Product_Selection_260813.dto.response.GroupBuyImportResult;
+import com.example.Product_Selection_260813.dto.response.GroupBuyRecordClaimCandidateResponse;
 import com.example.Product_Selection_260813.dto.response.GroupBuyRecordResponse;
 import com.example.Product_Selection_260813.service.GroupBuyRecordService;
+
+import jakarta.validation.Valid;
 
 /**
  * 歷史開團紀錄。
@@ -86,5 +91,35 @@ public class GroupBuyRecordController {
 	public ResponseEntity<ApiResponse<Void>> deleteBatch(@PathVariable("batchId") String batchId) {
 		int deleted = groupBuyRecordService.deleteBatch(batchId);
 		return ResponseEntity.ok(ApiResponse.success("已回退批次 " + batchId + "，共刪除 " + deleted + " 筆"));
+	}
+
+	/**
+	 * GET /api/group-buy-records/unlinked-candidates：認領歷史紀錄的候選查詢。
+	 *
+	 * 唯讀查詢，不修改任何資料。[操作+管理] 皆可存取——與建立商品本身的權限
+	 * 一致，認領本來就是「新增／編輯商品」流程裡的一個步驟，不該比建立商品
+	 * 本身的權限還嚴格。
+	 */
+	@GetMapping("/unlinked-candidates")
+	public ResponseEntity<ApiResponse<List<GroupBuyRecordClaimCandidateResponse>>> searchUnlinkedCandidates(
+			@RequestParam("productTypeId") Long productTypeId,
+			@RequestParam("name") String name,
+			@RequestParam(value = "supplierName", required = false) String supplierName) {
+		List<GroupBuyRecordClaimCandidateResponse> result = groupBuyRecordService
+				.searchUnlinkedCandidates(productTypeId, name, supplierName);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * POST /api/group-buy-records/claim：把選定的歷史紀錄連結到指定商品。
+	 *
+	 * ⚠️ 這是 group_buy_records「不提供單筆編輯」原則下的窄範圍例外，見
+	 * GroupBuyRecordService.claimRecords() 類別註解。[操作+管理] 皆可存取，
+	 * 理由同上；權限邊界是否要收緊到僅管理，待你視實際使用狀況決定。
+	 */
+	@PostMapping("/claim")
+	public ResponseEntity<ApiResponse<Void>> claim(@Valid @RequestBody ClaimGroupBuyRecordsRequest request) {
+		groupBuyRecordService.claimRecords(request);
+		return ResponseEntity.ok(ApiResponse.success("已連結 " + request.getGroupBuyRecordIds().size() + " 筆歷史紀錄"));
 	}
 }

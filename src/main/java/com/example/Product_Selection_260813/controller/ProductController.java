@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.dto.response.ResaleReferenceOptionResponse;
 import com.example.Product_Selection_260813.dto.response.SimilarProductCandidateResponse;
 import com.example.Product_Selection_260813.service.ProductSimilarityService;
 import com.example.Product_Selection_260813.common.ApiResponse;
@@ -120,6 +121,43 @@ public class ProductController {
 			@RequestParam(value = "excludeId", required = false) Long excludeId) {
 		List<SimilarProductCandidateResponse> result = productSimilarityService
 				.findSimilarCandidates(productTypeId, name, supplierName, excludeId);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * GET /api/products/resale-reference/suppliers：RESALE 逐層過濾參考商品，
+	 * 第一層——列出指定品類下有供貨紀錄的供應商，供下拉選單使用。
+	 *
+	 * 取代原本「打字輸入新商品名稱、系統模糊比對舊商品」的搜尋方式（見
+	 * findSimilarCandidates()，該端點與方法保留但品項表單這次改用這組）：
+	 * 舊機制把「幫新商品取名字」跟「找出哪件舊商品是同一件」兩件事綁在
+	 * 同一個輸入框，使用者命名習慣跟舊商品不同時，模糊比對分數過低會
+	 * 完全找不到候選，且無法在沒有先打字的情況下瀏覽既有商品。逐層過濾
+	 * （品類→供應商→商品名稱）讓使用者能確定地縮小範圍找到正確的參考
+	 * 商品，不依賴猜測命名相似度。
+	 */
+	@GetMapping("/resale-reference/suppliers")
+	public ResponseEntity<ApiResponse<List<String>>> listResaleReferenceSuppliers(
+			@RequestParam("productTypeId") Long productTypeId) {
+		List<String> result = productSimilarityService.listSuppliers(productTypeId);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * GET /api/products/resale-reference/products：逐層過濾參考商品，
+	 * 第二層——選定品類＋供應商後列出可選的商品名稱，供第三層下拉選單使用。
+	 *
+	 * 選定其中一筆之後，前端另外呼叫既有的 GET /api/products/{id} 取得
+	 * 完整資料做表單預填，這支端點只負責列出精簡選項（見
+	 * ResaleReferenceOptionResponse 類別註解）。
+	 */
+	@GetMapping("/resale-reference/products")
+	public ResponseEntity<ApiResponse<List<ResaleReferenceOptionResponse>>> listResaleReferenceProducts(
+			@RequestParam("productTypeId") Long productTypeId,
+			@RequestParam("supplierName") String supplierName,
+			@RequestParam(value = "excludeId", required = false) Long excludeId) {
+		List<ResaleReferenceOptionResponse> result = productSimilarityService
+				.listCandidateProducts(productTypeId, supplierName, excludeId);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
