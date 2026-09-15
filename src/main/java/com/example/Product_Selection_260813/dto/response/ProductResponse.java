@@ -9,6 +9,7 @@ import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.service.gate.GateResult;
 
 /**
  * 品項管理列表／詳情共用的商品資料格式。
@@ -18,11 +19,15 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
  * GET /api/products/{id} 這種聚合端點的組裝交由Controller呼叫多個Service後合併，
  * ProductResponse不越界去裝其他網域的資料。
  *
- * ⚠️ finalScore／dataCompleteness 是這條規則唯一的例外：GET /api/products 清單
+ * ⚠️ finalScore／dataCompleteness 是這條規則的例外：GET /api/products 清單
  * 頁需要顯示這兩個欄位，但逐筆呼叫 /evaluation 是前端 N+1、後端逐筆查也是
  * 服務層 N+1。做法比照 createdByName——批次查詢（見 ProductService.
  * resolveEvaluations()）後透過 withEvaluationSummary() 補上，from(Product)
  * 本身仍然不碰 product_evaluations 表，只是多了兩個「查完才填」的欄位。
+ *
+ * ⚠️ gateResults 是第二個例外，語意同上：只有 GET /api/products/{id}（單筆
+ * 詳情）才會透過 withGateResults() 補上，清單／搜尋端點恆為 null——一次
+ * 回傳多筆時重算五項 Gate 判定的成本太高，見 ProductService.getProduct()。
  */
 public class ProductResponse {
 
@@ -42,6 +47,42 @@ public class ProductResponse {
 	private Integer priceCompetitiveness;
 	private String targetCustomerDescription;
 	private BigDecimal estimatedPurchaseRate;
+	/** 再販售參考商品；僅 RESALE 商品可能有值。語意見 Product Entity 同名欄位。 */
+	private Long resaleReferenceProductId;
+
+	/**
+	 * 以下 9 個欄位供 Gate 判定（GateEvaluationService）讀取，對應 Entity 同名欄位。
+	 * 先前這批完全沒有被任何端點回傳過——商品層填了溫層、效期級距等屬性，
+	 * 畫面上看不到，Gate 判定也只能靠品類層繼承。這裡補上之後才第一次
+	 * 真正串起來（配合 ProductService.createProduct()／updateProduct() 這次
+	 * 同步補上的寫入路徑）。
+	 *
+	 * ⚠️ 全部宣告為 String，不是對應的列舉型別（TemperatureZone 等）：
+	 * GateEvaluationService.parseEnum() 本身就是寬鬆解析、容忍資料庫裡的
+	 * 不合法值（回 null 讓 Gate 判定標示資料不足，而非整支查詢 500）。
+	 * 若這裡改用 Enum.valueOf() 反序列化，一筆髒資料就會讓 GET
+	 * /api/products/{id} 直接壞掉，兩邊的容錯态度不一致。
+	 */
+	private String temperatureZone;
+	private String shelfLifeTier;
+	private String supplierLeadTimeTier;
+	private String packageSizeTier;
+	private String packingType;
+	private String handlingFlags;
+	private String certificationFlags;
+	private Integer supplierMaxCapacity;
+
+	/**
+	 * Gate 判定結果彙總。⚠️ 這是 finalScore／dataCompleteness 之後的第二個
+	 * 「查完才填」例外：from(Product) 本身不執行 Gate 判定（那要多查 MOQ
+	 * 分位數、節慶檔期等資料，清單頁 N 筆各跑一次成本太高），只有
+	 * ProductService.getProduct()（單筆詳情）才會透過 withGateResults() 補上，
+	 * 做法與 ReviewService.getReviewDetail() 完全一致。清單／搜尋端點
+	 * 這個欄位恆為 null，前端 product-api.contract.ts 的 gateResults 已宣告
+	 * 為 optional，樣板不應假設清單頁每一筆都有值。
+	 */
+	private GateResult.Summary gateResults;
+
 	private ProductReviewStatus reviewStatus;
 	private ProductCandidateStatus candidateStatus;
 	private ProductPricingStatus pricingStatus;
@@ -108,6 +149,15 @@ public class ProductResponse {
 		dto.priceCompetitiveness = product.getPriceCompetitiveness();
 		dto.targetCustomerDescription = product.getTargetCustomerDescription();
 		dto.estimatedPurchaseRate = product.getEstimatedPurchaseRate();
+		dto.resaleReferenceProductId = product.getResaleReferenceProductId();
+		dto.temperatureZone = product.getTemperatureZone();
+		dto.shelfLifeTier = product.getShelfLifeTier();
+		dto.supplierLeadTimeTier = product.getSupplierLeadTimeTier();
+		dto.packageSizeTier = product.getPackageSizeTier();
+		dto.packingType = product.getPackingType();
+		dto.handlingFlags = product.getHandlingFlags();
+		dto.certificationFlags = product.getCertificationFlags();
+		dto.supplierMaxCapacity = product.getSupplierMaxCapacity();
 		dto.reviewStatus = product.getReviewStatus();
 		dto.candidateStatus = product.getCandidateStatus();
 		dto.pricingStatus = product.getPricingStatus();
@@ -145,6 +195,15 @@ public class ProductResponse {
 	public ProductResponse withEvaluationSummary(BigDecimal finalScore, BigDecimal dataCompleteness) {
 		this.finalScore = finalScore;
 		this.dataCompleteness = dataCompleteness;
+		return this;
+	}
+
+	/**
+	 * 補上單筆詳情頁才會算的 Gate 判定結果，回傳 this 方便鏈式呼叫，用法同
+	 * withCreatedByName()：ProductResponse.from(product).withGateResults(gateResults)
+	 */
+	public ProductResponse withGateResults(GateResult.Summary gateResults) {
+		this.gateResults = gateResults;
 		return this;
 	}
 
@@ -274,6 +333,86 @@ public class ProductResponse {
 
 	public void setEstimatedPurchaseRate(BigDecimal estimatedPurchaseRate) {
 		this.estimatedPurchaseRate = estimatedPurchaseRate;
+	}
+
+	public Long getResaleReferenceProductId() {
+		return resaleReferenceProductId;
+	}
+
+	public void setResaleReferenceProductId(Long resaleReferenceProductId) {
+		this.resaleReferenceProductId = resaleReferenceProductId;
+	}
+
+	public String getTemperatureZone() {
+		return temperatureZone;
+	}
+
+	public void setTemperatureZone(String temperatureZone) {
+		this.temperatureZone = temperatureZone;
+	}
+
+	public String getShelfLifeTier() {
+		return shelfLifeTier;
+	}
+
+	public void setShelfLifeTier(String shelfLifeTier) {
+		this.shelfLifeTier = shelfLifeTier;
+	}
+
+	public String getSupplierLeadTimeTier() {
+		return supplierLeadTimeTier;
+	}
+
+	public void setSupplierLeadTimeTier(String supplierLeadTimeTier) {
+		this.supplierLeadTimeTier = supplierLeadTimeTier;
+	}
+
+	public String getPackageSizeTier() {
+		return packageSizeTier;
+	}
+
+	public void setPackageSizeTier(String packageSizeTier) {
+		this.packageSizeTier = packageSizeTier;
+	}
+
+	public String getPackingType() {
+		return packingType;
+	}
+
+	public void setPackingType(String packingType) {
+		this.packingType = packingType;
+	}
+
+	public String getHandlingFlags() {
+		return handlingFlags;
+	}
+
+	public void setHandlingFlags(String handlingFlags) {
+		this.handlingFlags = handlingFlags;
+	}
+
+	public String getCertificationFlags() {
+		return certificationFlags;
+	}
+
+	public void setCertificationFlags(String certificationFlags) {
+		this.certificationFlags = certificationFlags;
+	}
+
+	public Integer getSupplierMaxCapacity() {
+		return supplierMaxCapacity;
+	}
+
+	public void setSupplierMaxCapacity(Integer supplierMaxCapacity) {
+		this.supplierMaxCapacity = supplierMaxCapacity;
+	}
+
+	public GateResult.Summary getGateResults() {
+		return gateResults;
+	}
+
+	public void setGateResults(GateResult.Summary gateResults) {
+		this.gateResults = gateResults;
 	}
 
 	public ProductReviewStatus getReviewStatus() {

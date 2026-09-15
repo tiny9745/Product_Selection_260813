@@ -31,8 +31,12 @@ import jakarta.validation.constraints.Size;
  * 一般基本資料（name/description/imageUrl/supplierName）：任何審核狀態下都可改 -
  * 選品核心資料（productTypeId/pricingType/costPrice/salePrice/campaignTags/
  * moq/supplyStability/priceCompetitiveness/targetCustomerDescription/
- * estimatedPurchaseRate）：review_status=APPROVED時，若送來的值與目前值不同，
- * Service層會丟IllegalStateException(409)拒絕，而非靜默忽略——避免前端誤以為
+ * estimatedPurchaseRate，以及以下 8 個 Gate 判定屬性：temperatureZone/
+ * shelfLifeTier/supplierLeadTimeTier/packageSizeTier/packingType/
+ * handlingFlags/certificationFlags/supplierMaxCapacity——併入同一組是因為
+ * 這批欄位一樣會寫進審核快照ProductSnapshot，核准後被改掉會讓稽核記錄失真）：
+ * review_status=APPROVED時，若送來的值與目前值不同，Service層會丟
+ * IllegalStateException(409)拒絕，而非靜默忽略——避免前端誤以為
  * 修改已生效但實際上後端沒有套用，造成資料落差。
  *
  * review_status／candidate_status／pricing_status／item_status／submission_count

@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -42,9 +43,12 @@ import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
+import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
+import com.example.Product_Selection_260813.service.gate.GateResult;
 /**
  * 對應 API總表 三、品項管理（不含四、評估／趨勢／AI，那些屬於ScoringService／
  * TrendService／AiSelectionService的職責，見企劃書十二-13分層決議）：
@@ -86,6 +90,16 @@ public class ProductService {
 
 	@Autowired
 	private ScoringService scoringService;
+
+	/**
+	 * GET /api/products/{id} 組裝 gateResults 用（見 getProduct()）。這裡直接
+	 * 依賴 GateEvaluationService，寫法與 ReviewService.getReviewDetail() 一致；
+	 * 沒有循環依賴風險——GateEvaluationService 只依賴 ProductTypeAttributeResolver
+	 * ／MoqResolver／AlgorithmSettings／GroupBuyRecordRepository／
+	 * FestiveCampaignRepository，皆不反向依賴 ProductService。
+	 */
+	@Autowired
+	private GateEvaluationService gateEvaluationService;
 
 	@Autowired
 	private ProductEvaluationRepository productEvaluationRepository;
@@ -246,16 +260,31 @@ public class ProductService {
 	}
 
 	/**
-	 * GET /api/products/{id}：商品核心資料。
+	 * GET /api/products/{id}：商品核心資料，含 Gate 判定結果。
 	 *
-	 * 評估／趨勢／AI／風險等聚合資料不在這裡組裝，見類別註解。
+	 * 評估／趨勢／AI／風險等聚合資料不在這裡組裝，見類別註解；gateResults
+	 * 是這條規則的例外，見 ProductResponse 類別註解與下方組裝邏輯的說明。
 	 */
 	@Transactional(readOnly = true)
 	public ProductResponse getProduct(Long id) {
 		Product product = findProductOrThrow(id);
 		String createdByName = product.getCreatedBy() == null ? null
 				: appUserRepository.findById(product.getCreatedBy()).map(AppUser::getName).orElse(null);
-		return ProductResponse.from(product).withCreatedByName(createdByName);
+
+		// gateResults 是 ProductResponse 類別註解裡記錄的第二個「查完才填」例外，
+		// 組裝方式與 ReviewService.getReviewDetail() 完全一致：dataCompleteness
+		// 優先讀 ProductEvaluation 快取，找不到（理論上不該發生，見同一段邏輯在
+		// ReviewService 的註解）才即時算一次；matchedCampaign 由 ScoringService
+		// 查詢，避免 ProductService／GateEvaluationService 互相依賴形成循環。
+		BigDecimal dataCompleteness = productEvaluationRepository.findByProductId(id)
+				.map(ProductEvaluation::getDataCompleteness)
+				.orElseGet(() -> scoringService.calculateDataCompleteness(product));
+		MatchedCampaignSnapshot matchedCampaign = scoringService.buildMatchedCampaignSnapshot(product);
+		GateResult.Summary gateResults = gateEvaluationService.evaluate(product, dataCompleteness, matchedCampaign);
+
+		return ProductResponse.from(product)
+				.withCreatedByName(createdByName)
+				.withGateResults(gateResults);
 	}
 
 	// ========================= 新增 =========================
@@ -315,6 +344,19 @@ public class ProductService {
 		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
 		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
 		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
+
+		// Gate 判定用的商品層屬性（見 ProductCreateRequest 類別註解）：全部選填，
+		// 留空時 Gate 判定會依三層繼承規則改用品類層的預設屬性。列舉型別用
+		// nameOrNull() 轉成 Entity 要的 String；handlingFlags／certificationFlags／
+		// supplierMaxCapacity 本身型別已經對得上，直接賦值。
+		product.setTemperatureZone(nameOrNull(request.getTemperatureZone()));
+		product.setShelfLifeTier(nameOrNull(request.getShelfLifeTier()));
+		product.setSupplierLeadTimeTier(nameOrNull(request.getSupplierLeadTimeTier()));
+		product.setPackageSizeTier(nameOrNull(request.getPackageSizeTier()));
+		product.setPackingType(nameOrNull(request.getPackingType()));
+		product.setHandlingFlags(request.getHandlingFlags());
+		product.setCertificationFlags(request.getCertificationFlags());
+		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
 
 		// review_status／item_status／candidate_status：Entity欄位預設值已經是
 		// PENDING／ACTIVE／CANDIDATE（見Product.java），這裡不重複賦值。
@@ -382,6 +424,19 @@ public class ProductService {
 		product.setPriceCompetitiveness(request.getPriceCompetitiveness());
 		product.setTargetCustomerDescription(request.getTargetCustomerDescription());
 		product.setEstimatedPurchaseRate(request.getEstimatedPurchaseRate());
+
+		// Gate 判定用的商品層屬性：若APPROVED，上面assertCoreDataUnchanged()
+		// 已經保證這裡的值跟目前值相同（否則已經丟例外），直接寫入不會改變
+		// 實質內容；若非APPROVED，直接以Request內容整份覆蓋，語意與上面
+		// 選品核心資料那段完全一致（見 createProduct() 同段落註解）。
+		product.setTemperatureZone(nameOrNull(request.getTemperatureZone()));
+		product.setShelfLifeTier(nameOrNull(request.getShelfLifeTier()));
+		product.setSupplierLeadTimeTier(nameOrNull(request.getSupplierLeadTimeTier()));
+		product.setPackageSizeTier(nameOrNull(request.getPackageSizeTier()));
+		product.setPackingType(nameOrNull(request.getPackingType()));
+		product.setHandlingFlags(request.getHandlingFlags());
+		product.setCertificationFlags(request.getCertificationFlags());
+		product.setSupplierMaxCapacity(request.getSupplierMaxCapacity());
 
 		// pricing_status自動轉換規則（四-2備註）：僅NEW商品才有意義，
 		// RESALE商品pricing_status固定為null，不受這段邏輯影響。
@@ -740,7 +795,19 @@ public class ProductService {
 				&& Objects.equals(current.getSupplyStability(), request.getSupplyStability())
 				&& Objects.equals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())
 				&& Objects.equals(current.getTargetCustomerDescription(), request.getTargetCustomerDescription())
-				&& bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate());
+				&& bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate())
+				// Gate 判定用的商品層屬性這次併入選品核心資料群組：這批欄位一樣會
+				// 進入 ProductSnapshot（見 ReviewService.buildProductSnapshot()）
+				// 寫入審核快照，核准後被改掉會讓稽核記錄失真，鎖定規則要跟其他
+				// 核心欄位一致，不宜單獨放行。
+				&& Objects.equals(current.getTemperatureZone(), nameOrNull(request.getTemperatureZone()))
+				&& Objects.equals(current.getShelfLifeTier(), nameOrNull(request.getShelfLifeTier()))
+				&& Objects.equals(current.getSupplierLeadTimeTier(), nameOrNull(request.getSupplierLeadTimeTier()))
+				&& Objects.equals(current.getPackageSizeTier(), nameOrNull(request.getPackageSizeTier()))
+				&& Objects.equals(current.getPackingType(), nameOrNull(request.getPackingType()))
+				&& Objects.equals(current.getHandlingFlags(), request.getHandlingFlags())
+				&& Objects.equals(current.getCertificationFlags(), request.getCertificationFlags())
+				&& Objects.equals(current.getSupplierMaxCapacity(), request.getSupplierMaxCapacity());
 
 		if (!unchanged) {
 			throw new IllegalStateException("商品已審核通過，選品核心資料禁止修改");
@@ -753,5 +820,16 @@ public class ProductService {
 			return a == b;
 		}
 		return a.compareTo(b) == 0;
+	}
+
+	/**
+	 * Gate 屬性列舉 → Entity 的 String 欄位。Product Entity 這批欄位刻意宣告成
+	 * String（見 ProductResponse 類別註解，GateEvaluationService.parseEnum()
+	 * 寬鬆解析，不因髒資料中斷判定），Request DTO 則用列舉型別做輸入驗證，
+	 * 兩邊型別不同，寫入時要轉換——集中在這裡，createProduct()／updateProduct()
+	 * 各呼叫 5 次，避免同一段 null 檢查重複 10 遍。
+	 */
+	private static String nameOrNull(Enum<?> value) {
+		return value == null ? null : value.name();
 	}
 }
