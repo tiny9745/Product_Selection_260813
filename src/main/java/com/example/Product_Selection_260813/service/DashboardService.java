@@ -72,6 +72,10 @@ public class DashboardService {
 		response.setPendingCount(productRepository.countByReviewStatus(ProductReviewStatus.PENDING));
 		response.setApprovedCount(productRepository.countByReviewStatus(ProductReviewStatus.APPROVED));
 		response.setRejectedCount(productRepository.countByReviewStatus(ProductReviewStatus.REJECTED));
+		// pendingCount 的子集：AI建議尚未轉正候選、但已計入 pendingCount 的商品數，
+		// 見 DashboardStatisticsResponse／ProductRepository 的欄位註解。
+		response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
+				ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING));
 		return response;
 	}
 

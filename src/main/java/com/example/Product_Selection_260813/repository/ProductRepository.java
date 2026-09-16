@@ -71,6 +71,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     long countByReviewStatus(ProductReviewStatus reviewStatus);
 
     /**
+     * Dashboard「AI建議待確認」統計（GET /api/dashboard/statistics）：
+     * candidate_status=AI_SUGGESTED 且 review_status=PENDING 的商品數。
+     *
+     * 這批商品會被 countByReviewStatus(PENDING) 算進「待人工審核」總數，
+     * 但因為 candidate_status 還是 AI_SUGGESTED（尚未經操作人員「加入候選」
+     * 轉正為 CANDIDATE），不會出現在 /api/products（品項管理主清單）預設
+     * 查詢裡——兩邊清單的候選狀態範圍本來就不同。獨立算出這個子集，
+     * 讓 Dashboard 可以在「待人工審核」卡片旁揭露這個差異的來源，
+     * 不用讓使用者自己去猜兩個數字為什麼對不起來。
+     */
+    long countByCandidateStatusAndReviewStatus(
+            ProductCandidateStatus candidateStatus, ProductReviewStatus reviewStatus);
+
+    /**
      * 依品類分組計數，供設定頁「使用品項」欄位使用。
      *
      * 原本這個統計恆為 null（前端註解明確寫著「後端沒有這個統計」），
