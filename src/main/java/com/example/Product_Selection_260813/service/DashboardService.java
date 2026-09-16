@@ -69,11 +69,17 @@ public class DashboardService {
 	public DashboardStatisticsResponse getStatistics() {
 		DashboardStatisticsResponse response = new DashboardStatisticsResponse();
 		response.setTotalProducts(productRepository.count());
-		response.setPendingCount(productRepository.countByReviewStatus(ProductReviewStatus.PENDING));
+		// 2026-09-16修正：pendingCount改為排除AI_SUGGESTED（尚未轉正候選）的商品，
+		// 只算candidateStatus=CANDIDATE的部分。修正前用countByReviewStatus(PENDING)
+		// 不分candidateStatus，AI建議尚未轉正的商品會被一併算進「待人工審核」，
+		// 但那些商品其實還不該進入人工審核（見getPendingReviews()的說明），
+		// 混在一起計算會讓這個數字失真。現在pendingCount跟aiSuggestedPendingCount
+		// 是互斥的兩個集合，不再有「pendingCount含aiSuggestedPendingCount」的
+		// 子集關係，兩者相加才等於「review_status=PENDING」的全部商品數。
+		response.setPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
+				ProductCandidateStatus.CANDIDATE, ProductReviewStatus.PENDING));
 		response.setApprovedCount(productRepository.countByReviewStatus(ProductReviewStatus.APPROVED));
 		response.setRejectedCount(productRepository.countByReviewStatus(ProductReviewStatus.REJECTED));
-		// pendingCount 的子集：AI建議尚未轉正候選、但已計入 pendingCount 的商品數，
-		// 見 DashboardStatisticsResponse／ProductRepository 的欄位註解。
 		response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
 				ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING));
 		return response;

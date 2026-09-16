@@ -56,9 +56,27 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     /**
      * 選品審核待審清單（GET /api/reviews/pending）：預設「未審核＋使用中」。
+     *
+     * ⚠️ 2026-09-16修正（原設計漏洞）：這支原本沒有candidateStatus條件，
+     * 只要review_status=PENDING、item_status=ACTIVE就會出現在待審清單，
+     * 即使該商品candidate_status還是AI_SUGGESTED（尚未經人工「加入候選」
+     * 轉正）。實際後果：管理者可以直接審核一筆從未被轉正候選的AI建議商品，
+     * 跳過「AI建議→人工轉正候選→人工審核」中間那一步，這與AiSuggestions
+     * 頁面文件明確寫的規則矛盾（「只有人工轉為CANDIDATE後才可進入...審核；
+     * AI不會自行核准商品」）。改用下面這支多一個candidateStatus條件的版本，
+     * 舊的findByReviewStatusAndItemStatus()保留給其他仍需要「不分候選狀態」
+     * 語意的呼叫端（目前沒有其他呼叫端，保留是避免不必要的連鎖修改）。
      */
     Page<Product> findByReviewStatusAndItemStatus(
             ProductReviewStatus reviewStatus, ProductItemStatus itemStatus, Pageable pageable);
+
+    /**
+     * 選品審核待審清單（GET /api/reviews/pending）實際採用的版本：
+     * 多加candidateStatus=CANDIDATE，堵住上面說明的漏洞。
+     */
+    Page<Product> findByReviewStatusAndItemStatusAndCandidateStatus(
+            ProductReviewStatus reviewStatus, ProductItemStatus itemStatus,
+            ProductCandidateStatus candidateStatus, Pageable pageable);
 
     /**
      * 選品轉換率分母：submission_count>0（曾送審過）的不重複商品數。
@@ -71,15 +89,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     long countByReviewStatus(ProductReviewStatus reviewStatus);
 
     /**
-     * Dashboard「AI建議待確認」統計（GET /api/dashboard/statistics）：
-     * candidate_status=AI_SUGGESTED 且 review_status=PENDING 的商品數。
+     * Dashboard「待人工審核」／「AI建議待確認」統計（GET /api/dashboard/statistics）
+     * 共用的衍生查詢：candidate_status=X 且 review_status=Y 的商品數。
      *
-     * 這批商品會被 countByReviewStatus(PENDING) 算進「待人工審核」總數，
-     * 但因為 candidate_status 還是 AI_SUGGESTED（尚未經操作人員「加入候選」
-     * 轉正為 CANDIDATE），不會出現在 /api/products（品項管理主清單）預設
-     * 查詢裡——兩邊清單的候選狀態範圍本來就不同。獨立算出這個子集，
-     * 讓 Dashboard 可以在「待人工審核」卡片旁揭露這個差異的來源，
-     * 不用讓使用者自己去猜兩個數字為什麼對不起來。
+     * 2026-09-16修正：DashboardService.getStatistics() 現在用這支方法算
+     * pendingCount（candidateStatus=CANDIDATE）跟aiSuggestedPendingCount
+     * （candidateStatus=AI_SUGGESTED）——兩者互斥，不再是子集關係，
+     * AI建議尚未轉正候選的商品不會被算進「待人工審核」。
      */
     long countByCandidateStatusAndReviewStatus(
             ProductCandidateStatus candidateStatus, ProductReviewStatus reviewStatus);

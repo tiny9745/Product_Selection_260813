@@ -33,6 +33,7 @@ import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.entity.ReviewRisk;
 import com.example.Product_Selection_260813.entity.ReviewRiskId;
+import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.enums.ReviewRiskSource;
@@ -112,7 +113,8 @@ public class ReviewService {
 	@Transactional(readOnly = true)
 	public Page<ProductResponse> getPendingReviews(Pageable pageable) {
 		Page<Product> page = productRepository
-				.findByReviewStatusAndItemStatus(ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE, pageable);
+				.findByReviewStatusAndItemStatusAndCandidateStatus(ProductReviewStatus.PENDING,
+						ProductItemStatus.ACTIVE, ProductCandidateStatus.CANDIDATE, pageable);
 
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		// app_users 是使用者帳號本身的資料，不屬於評分／AI 網域，不算跨越
@@ -194,11 +196,18 @@ public class ReviewService {
 
 	/**
 	 * GET /api/reviews/decision-records：跨商品的審核紀錄彙總查詢頁。
+	 *
+	 * ⚠️ 2026-09-16修正：reviewResult為null時查全部（沿用ProductService.
+	 * searchProducts()「null=不篩選」的既有慣例）。修正前這支端點完全不接受
+	 * 篩選參數，前端的結果篩選只能對「已經抓回來的那一頁」做，資料量一多、
+	 * 篩選條件剛好不在那一頁時就會誤報「找不到」，即使資料庫裡其實有。
 	 */
 	@Transactional(readOnly = true)
-	public Page<ReviewRecordResponse> getDecisionRecords(Pageable pageable) {
-		return reviewRecordRepository.findAllByOrderByReviewedAtDesc(pageable)
-				.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())));
+	public Page<ReviewRecordResponse> getDecisionRecords(ReviewRecordReviewStatus reviewResult, Pageable pageable) {
+		Page<ReviewRecord> page = reviewResult != null
+				? reviewRecordRepository.findByReviewStatusOrderByReviewedAtDesc(reviewResult, pageable)
+				: reviewRecordRepository.findAllByOrderByReviewedAtDesc(pageable);
+		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())));
 	}
 
 	// ========================= 提交審核 =========================
@@ -222,6 +231,15 @@ public class ReviewService {
 
 		if (product.getReviewStatus() != ProductReviewStatus.PENDING) {
 			throw new IllegalStateException("僅未審核商品可提交審核結果");
+		}
+		// 2026-09-16修正：補上候選狀態檢查，堵住「AI建議商品未經人工轉正候選
+		// 就被直接審核」的漏洞（見 getPendingReviews() 的修正說明）。理論上
+		// 待審清單查詢已經排除了AI_SUGGESTED，這裡不該有機會走到，但
+		// submitReview() 是獨立的公開API（POST /api/reviews），前端傳的
+		// productId不保證一定來自待審清單畫面，這裡的檢查是真正的防線，
+		// 不能只靠上游清單過濾就假設安全。
+		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
+			throw new IllegalStateException("AI建議商品須先加入正式候選才能送審核決策");
 		}
 
 		validateRejectionReason(request);

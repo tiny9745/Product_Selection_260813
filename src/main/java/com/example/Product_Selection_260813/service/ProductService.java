@@ -497,6 +497,13 @@ public class ProductService {
 		if (product.getItemStatus() != ProductItemStatus.ACTIVE) {
 			throw new IllegalStateException("商品目前已封存，請先復用後再重新送審");
 		}
+		// 2026-09-16修正：與submitReview()的candidateStatus檢查對稱——避免
+		// 一筆candidateStatus仍是AI_SUGGESTED的商品（理論上不該存在，但
+		// 資料修復或未來其他路徑可能造成）被重新送審後，又回到待審清單
+		// 被再審一次，重複同一個漏洞。
+		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
+			throw new IllegalStateException("AI建議商品須先加入正式候選才能重新送審");
+		}
 
 		int updated = productRepository.conditionalUpdateReviewStatus(id, ProductReviewStatus.REJECTED,
 				ProductReviewStatus.PENDING);

@@ -4,14 +4,16 @@ package com.example.Product_Selection_260813.dto.response;
  * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數等統計。
  *
  * totalProducts為products表全部筆數（不分審核/品項/候選狀態），
- * pendingCount/approvedCount/rejectedCount三項分別對應
- * review_status=PENDING/APPROVED/REJECTED的不重複商品數，不分candidate_status。
+ * approvedCount/rejectedCount分別對應review_status=APPROVED/REJECTED的
+ * 不重複商品數，不分candidate_status。
  *
- * aiSuggestedPendingCount：pendingCount的子集，candidate_status=AI_SUGGESTED
- * 且review_status=PENDING的商品數。這批商品計入pendingCount，但不會出現在
- * 品項管理主清單（該清單預設只查candidate_status=CANDIDATE），是兩邊清單
- * 「候選品項數」與「待人工審核數」對不起來的主要原因之一，獨立揭露方便前端
- * 在卡片上說明差異來源。
+ * pendingCount／aiSuggestedPendingCount：兩者互斥（2026-09-16修正），
+ * pendingCount只算candidate_status=CANDIDATE且review_status=PENDING，
+ * aiSuggestedPendingCount只算candidate_status=AI_SUGGESTED且
+ * review_status=PENDING，兩者相加才等於「全部review_status=PENDING」的
+ * 商品數。AI建議尚未轉正候選的商品不該被視為「待人工審核」（見
+ * DashboardService.getStatistics()／ReviewService.getPendingReviews()
+ * 的說明），因此獨立成一個不重疊的欄位。
  */
 public class DashboardStatisticsResponse {
 

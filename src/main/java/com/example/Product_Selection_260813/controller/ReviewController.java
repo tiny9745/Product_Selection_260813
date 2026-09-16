@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
@@ -84,12 +85,15 @@ public class ReviewController {
 
 	/**
 	 * GET /api/reviews/decision-records：跨商品的審核紀錄彙總查詢頁。
+	 * reviewResult 可選，不帶代表查全部（APPROVED／REJECTED）。
 	 */
 	@PreAuthorize("hasRole('MANAGER')")
 	@GetMapping("/api/reviews/decision-records")
 	public ResponseEntity<ApiResponse<Page<ReviewRecordResponse>>> getDecisionRecords(
+			@RequestParam(value = "reviewResult", required = false)
+			com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus reviewResult,
 			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ReviewRecordResponse> result = reviewService.getDecisionRecords(pageable);
+		Page<ReviewRecordResponse> result = reviewService.getDecisionRecords(reviewResult, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
