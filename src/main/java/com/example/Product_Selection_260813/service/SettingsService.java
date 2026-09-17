@@ -45,6 +45,7 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCrea
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
+import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.ScoreBandSourceMode;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeScoreBandRepository;
@@ -701,6 +702,16 @@ public class SettingsService {
 	 * 少量的操作，人眼就看得出是否重複，由管理層自行判斷，系統不代為阻擋。
 	 */
 	@Transactional
+	/**
+	 * POST /api/settings/product-types：新增自訂商品分類（isSystemDefault固定為false）。
+	 *
+	 * ⚠️ 2026-09-17補上大類／小類支援：
+	 * - request.parentId為null → 新增大類，level沿用entity預設值1，
+	 *   parentId維持null，直接生成，不需要額外檢查。
+	 * - request.parentId有值 → 新增小類：先確認這個id存在、而且本身是
+	 *   大類（level=1）——不允許小類底下再掛小類，這個體系只有兩層；
+	 *   通過檢查後level設為2、parentId設為指定的大類id。
+	 */
 	public ProductTypeResponse createProductType(ProductTypeCreateRequest request, String username) {
 		Long userId = resolveUserId(username);
 
@@ -709,6 +720,17 @@ public class SettingsService {
 		type.setDescription(request.getDescription());
 		type.setIsSystemDefault(false);
 		type.setCreatedBy(userId);
+
+		Long parentId = request.getParentId();
+		if (parentId != null) {
+			ProductType parent = productTypeRepository.findById(parentId)
+					.orElseThrow(() -> new IllegalArgumentException("指定的大類不存在"));
+			if (parent.getLevel() != null && parent.getLevel() != 1) {
+				throw new IllegalArgumentException("只能選擇大類作為小類的上層分類，不能掛在另一個小類底下");
+			}
+			type.setParentId(parentId);
+			type.setLevel(2);
+		}
 
 		ProductType saved = productTypeRepository.save(type);
 		return ProductTypeResponse.from(saved);
@@ -740,6 +762,18 @@ public class SettingsService {
 	 *
 	 * 重複停用已停用的分類不視為錯誤（冪等），與UserService.disableUser()同一套
 	 * 判斷原則：結果狀態與呼叫端的意圖一致，沒有理由回報失敗。
+	 *
+	 * ⚠️ 2026-09-17補上大類→小類的連動停用：原本這裡不管大類小類，一律只
+	 * 改這一筆自己的isActive，停用一個大類時，底下的小類完全不受影響、
+	 * 繼續維持啟用——一個「已停用」的大類，底下卻掛著看似正常可用的小類，
+	 * 對操作人員來說是矛盾的畫面（大類都說不能用了，小類憑什麼還能選）。
+	 * 只在停用「大類」（level=1）時才觸發這個連動，停用小類本身不會影響
+	 * 任何其他分類。
+	 *
+	 * 只單向連動（大類→小類），不做反向：enableProductType()重新啟用大類
+	 * 時，不會跟著重新啟用小類（見該方法註解）——因為沒辦法區分「這個
+	 * 小類是因為大類被停用才跟著停用」還是「這個小類本來就是獨立被停用
+	 * 的」，貿然復用可能把使用者原本刻意停用的小類意外復活。
 	 */
 	@Transactional
 	public ProductTypeResponse disableProductType(Long id) {
@@ -747,6 +781,16 @@ public class SettingsService {
 				.orElseThrow(() -> new IllegalArgumentException("商品類型不存在"));
 		type.setIsActive(false);
 		ProductType saved = productTypeRepository.save(type);
+
+		if (saved.getLevel() != null && saved.getLevel() == 1) {
+			List<ProductType> activeChildren = productTypeRepository
+					.findByParentIdAndIsActiveTrueOrderBySortOrderAsc(id);
+			for (ProductType child : activeChildren) {
+				child.setIsActive(false);
+			}
+			productTypeRepository.saveAll(activeChildren);
+		}
+
 		return ProductTypeResponse.from(saved);
 	}
 
@@ -865,15 +909,77 @@ public class SettingsService {
 	 * POST /api/settings/festive-campaigns/{id}/manual-status：手動切換檔期狀態
 	 * （熔斷清單②備援機制）。status切換campaign_status目標值，overrideEnabled
 	 * 切換is_manual_override開關，兩者分開表達（企劃書API總表原文備註）。
+	 *
+	 * ⚠️ 2026-09-17修正：全專案搜過一輪，找不到任何地方會依日期自動計算
+	 * campaign_status——沒有排程工作、沒有其他 setCampaignStatus() 呼叫點，
+	 * 「自動判斷」這個概念從頭到尾沒有真正的計算邏輯對應。原本這個方法
+	 * 不管 overrideEnabled 是 true 還是 false，一律直接把 request.getStatus()
+	 * （前端傳來的、通常就是畫面上當下顯示的舊值）存回去——選「恢復自動
+	 * 判斷」时，實際存進去的還是那個舊的手動狀態，只有 is_manual_override
+	 * 這個旗標變成 false，狀態文字本身完全沒有跟著重新計算，這就是「恢復
+	 * 自動判斷後仍維持手動狀態」的根本原因。
+	 *
+	 * 這裡補上 resolveAutomaticStatus()：overrideEnabled=false 時，狀態改
+	 * 依目前日期、開始/結束日、準備天數即時算一次，不看前端傳來的
+	 * status（那個值在這個模式下沒有意義，因為不該由人指定）；
+	 * overrideEnabled=true 時才使用 request.getStatus() 這個人工指定值，
+	 * 維持原本的手動指定行為。
+	 *
+	 * ⚠️ 這只解決「這次呼叫當下」重新計算一次——非手動覆蓋的檔期，日期
+	 * 過境之後狀態依然不會自動往前推進（例如準備期結束、進入進行中），
+	 * 除非又有人手動點一次「恢復自動判斷」或編輯檔期。要做到「每天自動
+	 * 更新」需要額外的排程工作（@Scheduled），這是本次沒有做的部分，
+	 * 需要先確認是否要新增這個排程，再評估「是否需要手動功能」——如果
+	 * 之後真的補上每日排程，手動覆蓋才有明確的存在理由：讓管理者暫時
+	 * 蓋過排程的自動判斷結果；如果不打算做排程，這個「自動判斷」目前
+	 * 就只等於「這次先幫你算一次，之後不會再變」，需要團隊確認這樣是否
+	 * 足夠。
 	 */
 	@Transactional
 	public FestiveCampaignResponse switchManualStatus(Long id, FestiveCampaignManualStatusRequest request) {
 		FestiveCampaign campaign = festiveCampaignRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("檔期不存在"));
-		campaign.setCampaignStatus(request.getStatus());
-		campaign.setIsManualOverride(request.getOverrideEnabled());
+		boolean overrideEnabled = Boolean.TRUE.equals(request.getOverrideEnabled());
+		campaign.setCampaignStatus(overrideEnabled ? request.getStatus() : resolveAutomaticStatus(campaign));
+		campaign.setIsManualOverride(overrideEnabled);
 		FestiveCampaign saved = festiveCampaignRepository.save(campaign);
 		return toFestiveCampaignResponse(saved);
+	}
+
+	/**
+	 * 依目前日期、檔期起訖日、準備天數計算「應該」是哪個狀態，給
+	 * switchManualStatus() 在「恢復自動判斷」時使用。
+	 *
+	 * 邊界規則（沿用 ScoringService 對 PREPARING 期間的既有定義：
+	 * 「準備期＝開始日往前推 preparationLeadDays 天」）：
+	 * - 今天 &lt; 開始日 - 準備天數 → UPCOMING（即將開始）
+	 * - 開始日 - 準備天數 &lt;= 今天 &lt; 開始日 → PREPARING（準備期）
+	 * - 開始日 &lt;= 今天 &lt;= 結束日 → ACTIVE（進行中）
+	 * - 今天 &gt; 結束日 → EXPIRED（已結束）
+	 *
+	 * 準備天數為 null 或 <= 0 時視為 0（沒有準備期，開始日當天直接從
+	 * UPCOMING 跳到 ACTIVE），跟 ScoringService.calculateFestivalUrgency()
+	 * 對 leadDays 的防禦性處理一致，不要求呼叫端保證這個欄位一定有值。
+	 */
+	private FestiveCampaignStatus resolveAutomaticStatus(FestiveCampaign campaign) {
+		LocalDate today = LocalDate.now();
+		LocalDate startDate = campaign.getStartDate();
+		LocalDate endDate = campaign.getEndDate();
+		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
+				? campaign.getPreparationLeadDays()
+				: 0;
+		LocalDate preparationStart = startDate.minusDays(leadDays);
+
+		if (today.isAfter(endDate)) {
+			return FestiveCampaignStatus.EXPIRED;
+		}
+		if (!today.isBefore(startDate)) {
+			return FestiveCampaignStatus.ACTIVE;
+		}
+		if (!today.isBefore(preparationStart)) {
+			return FestiveCampaignStatus.PREPARING;
+		}
+		return FestiveCampaignStatus.UPCOMING;
 	}
 
 	/**

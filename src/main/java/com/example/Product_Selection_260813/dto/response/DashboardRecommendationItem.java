@@ -10,9 +10,15 @@ import java.math.BigDecimal;
  * 留言摘要」——reentryLabel／lastRejectionComment在submissionCount>1時才有值，
  * 首次送審（submissionCount=1）時皆為null。
  *
- * 「動態建議文案」（企劃書原文提及但未給出具體內容範例／規則）本次不實作，
- * 避免虛構未定案的文案內容——待團隊確認實際文案規則後再補上，不在此處自行
- * 編造行銷用語。
+ * ⚠️ 2026-09-17補上recommendationReason：先前這裡完全沒有推薦理由文字，
+ * 前端固定寫死顯示「—」。原本的顧慮（見git歷史／舊註解）是企劃書提到的
+ * 「動態建議文案」沒有具體規則，怕自己虛構行銷文案。但AiAnalysis實體
+ * （ai_analyses表）本來就有真實的、AI分析當下產生的recommendation欄位
+ * （見AiSelectionService.getLatestAnalysis()，審核詳情頁「AI推薦摘要」用的
+ * 就是同一份資料）——這不是要虛構新文案，是把已經存在、已經算好的AI推薦
+ * 理由接進這支API而已，跟原本顧慮的情境不一樣。沒有分析紀錄時仍是null，
+ * 前端一樣顯示「—」，但這次是「這件商品真的還沒做過AI分析」，不是「這個
+ * 功能沒做」。
  */
 public class DashboardRecommendationItem {
 
@@ -33,6 +39,8 @@ public class DashboardRecommendationItem {
 	private Integer submissionCount;
 	private String reentryLabel;
 	private String lastRejectionComment;
+	/** 見上方類別註解——來自 ai_analyses.recommendation，該商品尚無分析紀錄時為 null。 */
+	private String recommendationReason;
 
 	public Long getProductId() {
 		return productId;
@@ -96,5 +104,13 @@ public class DashboardRecommendationItem {
 
 	public void setLastRejectionComment(String lastRejectionComment) {
 		this.lastRejectionComment = lastRejectionComment;
+	}
+
+	public String getRecommendationReason() {
+		return recommendationReason;
+	}
+
+	public void setRecommendationReason(String recommendationReason) {
+		this.recommendationReason = recommendationReason;
 	}
 }

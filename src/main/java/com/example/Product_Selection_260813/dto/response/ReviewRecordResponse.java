@@ -55,6 +55,14 @@ public class ReviewRecordResponse {
 
 	private String reviewComment;
 	private List<Long> riskOptionIds;
+	/**
+	 * ⚠️ 2026-09-17補上：reviewerId 只是使用者編號，畫面上完全看不出「誰審的」
+	 * （見本檔案類別註解「reviewerId 顯示不了」）。改由 ReviewService 批次查
+	 * app_users 解出姓名後，用 withReviewerName() 補上，不在這個 DTO 自己
+	 * 查資料庫（維持 from() 只做欄位搬移、不做查詢的既有慣例）。找不到對應
+	 * 帳號（例如帳號已被刪除）時維持 null，前端顯示「—」。
+	 */
+	private String reviewerName;
 
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
@@ -129,6 +137,20 @@ public class ReviewRecordResponse {
 
 	public void setReviewerId(Long reviewerId) {
 		this.reviewerId = reviewerId;
+	}
+
+	public String getReviewerName() {
+		return reviewerName;
+	}
+
+	public void setReviewerName(String reviewerName) {
+		this.reviewerName = reviewerName;
+	}
+
+	/** 鏈式寫法，呼叫端批次查完姓名後直接補上，不需要另外呼叫 setter。 */
+	public ReviewRecordResponse withReviewerName(String reviewerName) {
+		this.reviewerName = reviewerName;
+		return this;
 	}
 
 	public Integer getSubmissionCount() {

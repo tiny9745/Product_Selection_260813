@@ -119,6 +119,12 @@ public class DashboardService {
 					item.setDataCompleteness(evaluation.getDataCompleteness());
 				});
 
+		// 見 DashboardRecommendationItem 類別註解：推薦理由來自 ai_analyses 既有的
+		// recommendation 欄位，不是虛構的行銷文案；該商品還沒做過 AI 分析時維持
+		// null，前端顯示「—」。
+		aiAnalysisRepository.findFirstByProductIdOrderByGeneratedAtDescIdDesc(product.getId())
+				.ifPresent(analysis -> item.setRecommendationReason(analysis.getRecommendation()));
+
 		// submissionCount>1代表曾經歷過「拒絕→重新送審」，才附加重新入榜標籤
 		if (product.getSubmissionCount() != null && product.getSubmissionCount() > 1) {
 			item.setReentryLabel("曾被拒絕．第" + product.getSubmissionCount() + "次送審");

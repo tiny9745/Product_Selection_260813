@@ -123,14 +123,7 @@ public class ReviewService {
 				.map(Product::getCreatedBy)
 				.filter(id -> id != null)
 				.collect(Collectors.toSet());
-		// ⚠️ 同 ProductService.resolveCreatedByNames() 的說明：
-		// Collectors.toMap 遇到 value 為 null 會直接拋 NullPointerException，
-		// 用 requireNonNullElse 擋掉，避免一筆髒資料（姓名為 null）拖垮整支清單 API。
-		Map<Long, String> createdByNameById = createdByIds.isEmpty() ? Map.of()
-				: appUserRepository.findAllById(createdByIds).stream()
-						.collect(Collectors.toMap(
-								AppUser::getId,
-								user -> Objects.requireNonNullElse(user.getName(), "")));
+		Map<Long, String> createdByNameById = resolveUserNames(createdByIds);
 
 		// ⚠️ 修正：原本這裡只呼叫 ProductResponse.from(product).withCreatedByName(...)，
 		// 完全沒有呼叫 withEvaluationSummary()。根據 ProductResponse 類別註解的
@@ -153,6 +146,25 @@ public class ReviewService {
 							evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
 		});
+	}
+
+	/**
+	 * 批次把使用者 id 解成姓名，避免在 .map() 裡逐筆查 app_users（N+1）。
+	 * getPendingReviews()／getDecisionRecords()／getProductReviewHistory()
+	 * 共用同一份邏輯，抽出來只維護一處。
+	 *
+	 * ⚠️ 同 ProductService.resolveCreatedByNames() 的說明：Collectors.toMap
+	 * 遇到 value 為 null 會直接拋 NullPointerException，用 requireNonNullElse
+	 * 擋掉，避免一筆髒資料（姓名為 null）拖垮整支清單 API。
+	 */
+	private Map<Long, String> resolveUserNames(Set<Long> userIds) {
+		if (userIds.isEmpty()) {
+			return Map.of();
+		}
+		return appUserRepository.findAllById(userIds).stream()
+				.collect(Collectors.toMap(
+						AppUser::getId,
+						user -> Objects.requireNonNullElse(user.getName(), "")));
 	}
 
 	/**
@@ -208,8 +220,15 @@ public class ReviewService {
 		if (!productRepository.existsById(productId)) {
 			throw new IllegalArgumentException("商品不存在");
 		}
-		return reviewRecordRepository.findByProductIdOrderByReviewedAtDesc(productId).stream()
-				.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))).toList();
+		List<ReviewRecord> records = reviewRecordRepository.findByProductIdOrderByReviewedAtDesc(productId);
+		// 同 getDecisionRecords() 的說明：reviewerId 要解成姓名才顯示得出來。
+		Map<Long, String> reviewerNameById = resolveUserNames(
+				records.stream().map(ReviewRecord::getReviewerId).filter(id -> id != null)
+						.collect(Collectors.toSet()));
+		return records.stream()
+				.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
+						.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())))
+				.toList();
 	}
 
 	/**
@@ -225,7 +244,15 @@ public class ReviewService {
 		Page<ReviewRecord> page = reviewResult != null
 				? reviewRecordRepository.findByReviewStatusOrderByReviewedAtDesc(reviewResult, pageable)
 				: reviewRecordRepository.findAllByOrderByReviewedAtDesc(pageable);
-		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())));
+		// ⚠️ 2026-09-17修正：reviewerId 只是編號，前端「決策紀錄」表格的
+		// 「審核人」欄位一直顯示「—」——不是查無資料，是這裡從來沒有把
+		// id 解成姓名（見 ReviewRecordResponse 類別註解「reviewerId
+		// 顯示不了」）。批次查一次，避免在 map() 裡逐筆查（N+1）。
+		Map<Long, String> reviewerNameById = resolveUserNames(
+				page.getContent().stream().map(ReviewRecord::getReviewerId).filter(id -> id != null)
+						.collect(Collectors.toSet()));
+		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
+				.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())));
 	}
 
 	// ========================= 提交審核 =========================
