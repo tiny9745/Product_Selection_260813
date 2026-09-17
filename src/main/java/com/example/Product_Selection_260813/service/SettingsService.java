@@ -774,6 +774,17 @@ public class SettingsService {
 	 * 仍視為「使用中」而拒絕刪除，避免刪除後歷史品項的分類欄位失去對應資料
 	 * （企劃書原文備註）。ProductRepository.existsByProductTypeId()本身就是
 	 * 依這個規則設計（不加item_status篩選），直接複用即可。
+	 *
+	 * 2026-09-17修正：商品只允許掛在小類（level=2，見ProductType.level欄位
+	 * 註解），所以大類（level=1）的existsByProductTypeId()恆為false——
+	 * 舊版本只檢查這一項，導致「刪除還有小類的大類」這個操作完全沒被擋下，
+	 * 一路走到productTypeRepository.deleteById()才被parent_id的DB層FK
+	 * 約束（V2 migration的fk_product_type_parent，沒有設定ON DELETE
+	 * CASCADE／SET NULL）擋下，拋出DataIntegrityViolationException，
+	 * 最終被GlobalExceptionHandler的保底規則包成500「伺服器發生錯誤，
+	 * 請稍後再試」，使用者完全看不出真正原因（其實是子類還在，不是伺服器
+	 * 壞了）。補上existsByParentId()檢查，主動擋在真正撞到FK之前，回報
+	 * 看得懂的原因。
 	 */
 	@Transactional
 	public void deleteProductType(Long id) {
@@ -782,6 +793,9 @@ public class SettingsService {
 		}
 		if (productRepository.existsByProductTypeId(id)) {
 			throw new IllegalStateException("此商品類型已有品項使用，無法刪除，請改用停用");
+		}
+		if (productTypeRepository.existsByParentId(id)) {
+			throw new IllegalStateException("此大類底下仍有小類，請先刪除或搬移小類，無法直接刪除");
 		}
 		productTypeRepository.deleteById(id);
 	}
@@ -862,15 +876,39 @@ public class SettingsService {
 		return toFestiveCampaignResponse(saved);
 	}
 
+	/**
+	 * ⚠️ 防呆：festive_campaign_tags 對 (campaign_id, tag) 有 UNIQUE 約束
+	 * （V2 migration 的 uk_festive_campaign_tags_campaign_tag），但這裡原本
+	 * 直接逐筆 save() 前端傳來的 tags，完全沒檢查同一份清單裡有沒有重複的
+	 * tag 字串。只要前端（不管是哪個原因——UI bug、使用者手速快連點兩次、
+	 * 或單純資料裡本來就帶了重複值）送來兩筆同名標籤，第二筆 insert 就會
+	 * 撞上 UNIQUE 約束，丟出 DataIntegrityViolationException，被
+	 * GlobalExceptionHandler 的保底規則包成 500「伺服器發生錯誤」，使用者
+	 * 完全看不出真正原因（其實是自己不小心存了兩個一樣的標籤，不是伺服器
+	 * 壞了）。這裡在寫入前用 LinkedHashMap 依 tag 文字（trim 後）去重，
+	 * 同名時保留第一筆出現的 matchTier、丟棄後面重複的——不要讓一個可以
+	 * 靜靜處理掉的重複值變成一次看不懂原因的存檔失敗。
+	 */
 	private void saveTags(Long campaignId, List<FestiveCampaignTagInput> tags) {
 		if (tags == null) {
 			return;
 		}
+		Map<String, FestiveCampaignTagInput> dedupedByTag = new LinkedHashMap<>();
 		for (FestiveCampaignTagInput tagInput : tags) {
+			if (tagInput == null || tagInput.getTag() == null) {
+				continue;
+			}
+			String trimmed = tagInput.getTag().trim();
+			if (trimmed.isEmpty()) {
+				continue;
+			}
+			dedupedByTag.putIfAbsent(trimmed, tagInput);
+		}
+		for (Map.Entry<String, FestiveCampaignTagInput> entry : dedupedByTag.entrySet()) {
 			FestiveCampaignTag tag = new FestiveCampaignTag();
 			tag.setCampaignId(campaignId);
-			tag.setTag(tagInput.getTag());
-			tag.setMatchTier(tagInput.getMatchTier());
+			tag.setTag(entry.getKey());
+			tag.setMatchTier(entry.getValue().getMatchTier());
 			festiveCampaignTagRepository.save(tag);
 		}
 	}

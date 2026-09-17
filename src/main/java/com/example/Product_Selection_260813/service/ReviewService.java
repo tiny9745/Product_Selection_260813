@@ -132,9 +132,27 @@ public class ReviewService {
 								AppUser::getId,
 								user -> Objects.requireNonNullElse(user.getName(), "")));
 
-		return page.map(product -> ProductResponse.from(product)
-				.withCreatedByName(
-						product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy())));
+		// ⚠️ 修正：原本這裡只呼叫 ProductResponse.from(product).withCreatedByName(...)，
+		// 完全沒有呼叫 withEvaluationSummary()。根據 ProductResponse 類別註解的
+		// 明文規則，finalScore／dataCompleteness 這兩欄「查完才填」，不透過
+		// withEvaluationSummary() 補上就永遠是 null——不是這些商品真的沒有評估
+		// 資料，是這支 API 從來沒有去查。前端 review.html 對 null 正確顯示「—」，
+		// 所以症狀是待審清單的最終分數／完整度全部顯示「—」，即使商品已經有
+		// 評分紀錄。比照 ProductService.searchProducts() 的批次查詢寫法補上，
+		// 透過 ScoringService.getCurrentEvaluations()（依分層決議走 ScoringService，
+		// 不直接注入 ProductEvaluationRepository）一次查完整頁筆數，不會變成 N+1。
+		Set<Long> productIds = page.getContent().stream().map(Product::getId).collect(Collectors.toSet());
+		Map<Long, ProductEvaluation> evaluationByProductId = scoringService.getCurrentEvaluations(productIds);
+
+		return page.map(product -> {
+			ProductEvaluation evaluation = evaluationByProductId.get(product.getId());
+			return ProductResponse.from(product)
+					.withCreatedByName(
+							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
+					.withEvaluationSummary(
+							evaluation != null ? evaluation.getFinalScore() : null,
+							evaluation != null ? evaluation.getDataCompleteness() : null);
+		});
 	}
 
 	/**

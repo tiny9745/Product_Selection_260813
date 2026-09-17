@@ -127,10 +127,24 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 手動比對，不引入JPA關聯物件圖（見FestiveCampaignTag.java等處的相同慣例）。
      * JPQL的FROM子句可直接以entity名稱參照ProductEvaluation，不需要在本檔案
      * import該類別（JPQL依persistence unit註冊的entity名稱解析，非Java型別引用）。
+     *
+     * ⚠️ 2026-09-17修正：join 條件原本只要求「有 ProductEvaluation 那筆列存在」
+     * （p.id = pe.productId），沒有排除 pe.finalScore 本身是 null 的情況。
+     * 資料完整度未達 60% 門檻的商品（見 ScoringService.DATA_COMPLETENESS_THRESHOLD）
+     * 不會進入固定模式計分，final_score 欄位會是 null，但仍然會有一筆
+     * ProductEvaluation（dataCompleteness 有值），一樣滿足這個 join 條件、
+     * 一樣符合 PENDING/CANDIDATE/ACTIVE 篩選，因此有機會被排進「AI 推薦
+     * Top 10」——而 MySQL 對 NULL 在 DESC 排序視為最小值，會被排到最後面，
+     * 在候選不足 10 筆時墊底湊數。結果就是「AI 推薦」清單裡出現一個根本
+     * 沒被完整評分過的商品，畫面上最終分數顯示「—」。這在語意上就是錯的：
+     * 一個資料完整度不夠、連分數都算不出來的商品，不該被 AI 推薦。
+     * 加上 pe.finalScore IS NOT NULL，從源頭排除這種商品，而不是讓前端
+     * 用「—」把這個問題蓋過去。
      */
     @Query("""
             SELECT p FROM Product p, ProductEvaluation pe
              WHERE p.id = pe.productId
+               AND pe.finalScore IS NOT NULL
                AND p.reviewStatus = :reviewStatus
                AND p.candidateStatus = :candidateStatus
                AND p.itemStatus = :itemStatus

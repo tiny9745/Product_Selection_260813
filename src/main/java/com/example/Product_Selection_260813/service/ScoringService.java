@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -157,6 +158,21 @@ public class ScoringService {
 	@Transactional(readOnly = true)
 	public Optional<ProductEvaluation> getCurrentEvaluation(Long productId) {
 		return productEvaluationRepository.findByProductId(productId);
+	}
+
+	/**
+	 * 批次版的 getCurrentEvaluation()：清單頁（例如 ReviewService.getPendingReviews()）
+	 * 一次要組裝 N 筆商品的 finalScore／dataCompleteness，逐筆呼叫
+	 * getCurrentEvaluation() 會是 N+1 查詢。比照 ProductService.resolveEvaluations()
+	 * 同一套批次查詢寫法，回傳 productId → ProductEvaluation 的對照表。
+	 */
+	@Transactional(readOnly = true)
+	public Map<Long, ProductEvaluation> getCurrentEvaluations(Collection<Long> productIds) {
+		if (productIds == null || productIds.isEmpty()) {
+			return Map.of();
+		}
+		return productEvaluationRepository.findByProductIdIn(productIds).stream()
+				.collect(Collectors.toMap(ProductEvaluation::getProductId, e -> e));
 	}
 
 	/** 依評估模式ID查詢完整模式資料（用於補上評估模式名稱／版本）。 */

@@ -27,4 +27,17 @@ public interface ProductTypeRepository extends JpaRepository<ProductType, Long> 
      * 小類（不同大類底下），Service 層依實際回傳筆數決定要不要視為錯誤。
      */
     List<ProductType> findByNameAndLevel(String name, Integer level);
+
+    /**
+     * 刪除大類（level=1）前用來檢查底下是否還有小類——parent_id 目前只有
+     * DB 層的 FK 約束（V2 migration 的 fk_product_type_parent），沒有
+     * ON DELETE CASCADE／SET NULL，直接刪除會被 FK 擋下丟出
+     * DataIntegrityViolationException，最終被 GlobalExceptionHandler
+     * 的保底 handler 包裝成 500「伺服器發生錯誤」，使用者完全看不出
+     * 真正原因（其實是子類還在，不是查無資料或商品在用）。
+     * 在 Service 層先用這個方法主動檢查，丟出語意正確的 IllegalStateException
+     * （對應 409），把「大類底下還有小類」這個看得懂的原因回報給前端，
+     * 不要讓它撞到 FK 約束才發現。
+     */
+    boolean existsByParentId(Long parentId);
 }
