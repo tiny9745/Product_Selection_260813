@@ -101,7 +101,12 @@ public class ProductUpdateRequest {
 	@Max(value = 5, message = ValidationMessage.PRODUCT_PRICE_COMPETITIVENESS_RANGE)
 	private Integer priceCompetitiveness;
 
-	// targetCustomerDescription對應TEXT欄位，不設長度上限
+	// targetCustomerDescription對應TEXT欄位，DB層不設長度上限，但直接餵給
+	// ScoringService.scoreAudienceMatch() 計算客群契合度分數（七大計分因子
+	// 之一），前端表單也是必填——後端加上對應驗證，避免繞過前端直接打 API
+	// 建出一筆這個必要計分輸入是 null 的商品。
+	@NotBlank(message = ValidationMessage.PRODUCT_TARGET_CUSTOMER_NULL)
+	@Size(max = 500, message = ValidationMessage.PRODUCT_TARGET_CUSTOMER_TOO_LONG)
 	private String targetCustomerDescription;
 
 	@DecimalMin(value = "0.0", message = ValidationMessage.PRODUCT_ESTIMATED_PURCHASE_RATE_RANGE)

@@ -57,6 +57,13 @@ dependencies {
 	// db flyway
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-mysql'
+	
+	// WebP 圖片解碼：javax.imageio 沒有內建 WebP 支援（JDK 只內建 JPEG/PNG/GIF/BMP/WBMP），
+	// ProductService.uploadImage() 的 ImageIO.read() 對真正的 WebP 檔案一律回傳 null，
+	// 被誤判成「檔案內容不是合法的圖片格式」而拒絕——即使前端 accept 清單、後端副檔名白名單
+	// 都寫著支援 webp。純 Java 實作（不需要額外的作業系統原生函式庫），透過
+	// META-INF/services 的 SPI 機制自動註冊給 ImageIO 用，不需要修改呼叫 ImageIO 的程式碼。
+	implementation 'org.sejda.imageio:webp-imageio:0.1.6'
 }
 
 tasks.named('test') {

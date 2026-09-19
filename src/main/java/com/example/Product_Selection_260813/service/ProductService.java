@@ -3,6 +3,9 @@ package com.example.Product_Selection_260813.service;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -791,34 +794,128 @@ public class ProductService {
 
 	/**
 	 * 已審核通過(APPROVED)商品的「選品核心資料」欄位群組比對： 只要有任一欄位與目前值不同就整批拒絕（見updateProduct()方法註解）。
+	 *
+	 * ⚠️ 2026-09-19修正：packingType／handlingFlags／certificationFlags／
+	 * supplierMaxCapacity 這四個原本也在這個比對清單裡，理由是「這批欄位
+	 * 會進入 ProductSnapshot，核准後改掉會讓稽核記錄失真」——這個理由本身
+	 * 沒有錯，但跟另一個更直接的問題衝突了：這四個欄位經全專案搜尋，
+	 * 找不到任何計分（ProductFactorScorer）或 Gate（GateEvaluationService）
+	 * 邏輯會讀取，純粹是記錄用途，其中 handlingFlags／certificationFlags
+	 * 欄位本身的說明文字也明寫「不影響任何判定或計分」。
+	 *
+	 * 鎖住它們的實際後果：使用者只是想換一張圖片，同一次 PUT 請求把表單
+	 * 現有值原封不動送回去，理論上「沒有改變」，卻可能因為 BigDecimal
+	 * scale、enum 序列化、null 與空字串等細節落差被誤判成「有改變」，
+	 * 導致完全不相關的圖片更新被這個檢查一起擋下，錯誤訊息卻只講「核心
+	 * 資料禁止修改」，使用者完全看不出真正是哪個欄位造成的，會誤以為是
+	 * 圖片本身的問題。
+	 *
+	 * 稽核記錄失真的疑慮改用另一個方式處理：ProductSnapshot 本來就是
+	 * 「審核當下」的凍結副本，不會因為商品之後被更新而跟著變——稽核記錄
+	 * 要看的是「審核當下長什麼樣子」，不是「現在長什麼樣子」，這四個欄位
+	 * 之後被改掉不影響已經寫進快照的舊資料正確性。真正需要鎖住、不能讓
+	 * 稽核記錄跟即時資料出現落差的，是會影響評分或 Gate 判定結果的欄位
+	 * （這批仍然保留在下面的比對清單）。
 	 */
 	private void assertCoreDataUnchanged(Product current, ProductUpdateRequest request) {
-		boolean unchanged = Objects.equals(current.getProductTypeId(), request.getProductTypeId())
-				&& current.getPricingType() == request.getPricingType()
-				&& bigDecimalEquals(current.getCostPrice(), request.getCostPrice())
-				&& bigDecimalEquals(current.getSalePrice(), request.getSalePrice())
-				&& Objects.equals(current.getCampaignTags(), request.getCampaignTags())
-				&& Objects.equals(current.getMoq(), request.getMoq())
-				&& Objects.equals(current.getSupplyStability(), request.getSupplyStability())
-				&& Objects.equals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())
-				&& Objects.equals(current.getTargetCustomerDescription(), request.getTargetCustomerDescription())
-				&& bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate())
-				// Gate 判定用的商品層屬性這次併入選品核心資料群組：這批欄位一樣會
-				// 進入 ProductSnapshot（見 ReviewService.buildProductSnapshot()）
-				// 寫入審核快照，核准後被改掉會讓稽核記錄失真，鎖定規則要跟其他
-				// 核心欄位一致，不宜單獨放行。
-				&& Objects.equals(current.getTemperatureZone(), nameOrNull(request.getTemperatureZone()))
-				&& Objects.equals(current.getShelfLifeTier(), nameOrNull(request.getShelfLifeTier()))
-				&& Objects.equals(current.getSupplierLeadTimeTier(), nameOrNull(request.getSupplierLeadTimeTier()))
-				&& Objects.equals(current.getPackageSizeTier(), nameOrNull(request.getPackageSizeTier()))
-				&& Objects.equals(current.getPackingType(), nameOrNull(request.getPackingType()))
-				&& Objects.equals(current.getHandlingFlags(), request.getHandlingFlags())
-				&& Objects.equals(current.getCertificationFlags(), request.getCertificationFlags())
-				&& Objects.equals(current.getSupplierMaxCapacity(), request.getSupplierMaxCapacity());
-
-		if (!unchanged) {
-			throw new IllegalStateException("商品已審核通過，選品核心資料禁止修改");
+		// ⚠️ 2026-09-20再修正：改用「逐欄比對、收集所有不同的欄位」取代
+		// 一整串 && 短路判斷——原本的寫法一旦某個欄位不同就整個 unchanged
+		// 直接變 false，完全看不出是哪一欄造成的，逼著每次都要來回猜測、
+		// 一輪一輪修正才找得到真正原因（campaignTags 的格式落差就是這樣
+		// 才找到的）。現在錯誤訊息會直接列出所有不同的欄位名稱，之後如果
+		// 再出現「明明沒改卻被擋下」的狀況，看訊息就知道是哪個欄位，不用
+		// 再靠 log 回報＋逐一排查。
+		//
+		// targetCustomerDescription 額外做 trim 再比對：這是使用者自由輸入
+		// 的長文字欄位，比 campaignTags 更容易帶有前後空白、換行符號這類
+		// 不影響語意的細節差異（例如資料庫存的舊資料結尾多一個換行），
+		// 用跟 campaignTags 同樣的道理處理，不比對字串的原始格式。
+		List<String> changedFields = new ArrayList<>();
+		if (!Objects.equals(current.getProductTypeId(), request.getProductTypeId())) {
+			changedFields.add("商品分類");
 		}
+		if (current.getPricingType() != request.getPricingType()) {
+			changedFields.add("訂價分流");
+		}
+		if (!bigDecimalEquals(current.getCostPrice(), request.getCostPrice())) {
+			changedFields.add("成本價");
+		}
+		if (!bigDecimalEquals(current.getSalePrice(), request.getSalePrice())) {
+			changedFields.add("預計售價");
+		}
+		if (!normalizedTagsEqual(current.getCampaignTags(), request.getCampaignTags())) {
+			changedFields.add("節慶標籤");
+		}
+		if (!Objects.equals(current.getMoq(), request.getMoq())) {
+			changedFields.add("最低訂購量");
+		}
+		if (!Objects.equals(current.getSupplyStability(), request.getSupplyStability())) {
+			changedFields.add("供貨穩定度");
+		}
+		if (!Objects.equals(current.getPriceCompetitiveness(), request.getPriceCompetitiveness())) {
+			changedFields.add("價格競爭力");
+		}
+		if (!trimmedEquals(current.getTargetCustomerDescription(), request.getTargetCustomerDescription())) {
+			changedFields.add("目標客群描述");
+		}
+		if (!bigDecimalEquals(current.getEstimatedPurchaseRate(), request.getEstimatedPurchaseRate())) {
+			changedFields.add("預估購買率");
+		}
+		// Gate 判定用的商品層屬性：這幾個會實際影響 Gate 判定結果或
+		// （packageSizeTier）計分因子本身，維持鎖定。
+		if (!Objects.equals(current.getTemperatureZone(), nameOrNull(request.getTemperatureZone()))) {
+			changedFields.add("溫層");
+		}
+		if (!Objects.equals(current.getShelfLifeTier(), nameOrNull(request.getShelfLifeTier()))) {
+			changedFields.add("效期級距");
+		}
+		if (!Objects.equals(current.getSupplierLeadTimeTier(), nameOrNull(request.getSupplierLeadTimeTier()))) {
+			changedFields.add("供應商前置期");
+		}
+		if (!Objects.equals(current.getPackageSizeTier(), nameOrNull(request.getPackageSizeTier()))) {
+			changedFields.add("材積級距");
+		}
+
+		if (!changedFields.isEmpty()) {
+			throw new IllegalStateException("商品已審核通過，選品核心資料禁止修改（" + String.join("、", changedFields) + "）");
+		}
+	}
+
+	/**
+	 * 長文字欄位用 trim 後再比對：使用者自由輸入的內容容易帶有不影響語意
+	 * 的前後空白／換行差異（例如資料庫裡的舊資料結尾多一個換行），這些
+	 * 差異不該被當成「核心資料被改了」。
+	 */
+	private boolean trimmedEquals(String current, String requested) {
+		String a = current == null ? "" : current.trim();
+		String b = requested == null ? "" : requested.trim();
+		return a.equals(b);
+	}
+
+	/**
+	 * ⚠️ 2026-09-19補上：campaignTags 原本用 Objects.equals() 直接比對整串
+	 * 逗號分隔的原始字串，這對「同一組標籤」並不安全——只要儲存的原始字串
+	 * 跟前端重新組出來送回來的字串，在**逗號後有沒有空格、標籤前後有沒有
+	 * 多餘空白、標籤排列順序**任何一點上有落差（語意上仍然是同一組標籤），
+	 * 就會被誤判成「核心資料被改了」而擋下整次儲存——即使使用者這次唯一
+	 * 想做的事只是換一張圖片，表單把現有值原封不動送回去，也可能因為
+	 * 儲存在資料庫裡的舊字串格式（例如較早期資料、手動修過的資料）帶著
+	 * 這類細節差異而觸發假陽性，且完全跟圖片無關。跟 ScoringService.
+	 * splitTags() 用同一套「逗號切開、trim、去重」規則，比對兩邊真正
+	 * 代表的標籤集合是否相同，不比對字串格式本身。
+	 */
+	private boolean normalizedTagsEqual(String current, String requested) {
+		return splitTags(current).equals(splitTags(requested));
+	}
+
+	private Set<String> splitTags(String tags) {
+		if (tags == null || tags.isBlank()) {
+			return Set.of();
+		}
+		return Arrays.stream(tags.split(","))
+				.map(String::trim)
+				.filter(s -> !s.isEmpty())
+				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
 	/** BigDecimal不能直接用equals比較（scale不同時會誤判不相等，例如25跟25.00），一律用compareTo。 */

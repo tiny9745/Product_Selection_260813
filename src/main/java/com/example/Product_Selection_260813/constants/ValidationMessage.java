@@ -10,6 +10,16 @@ public class ValidationMessage {
 	public static final String PRODUCT_PRICING_TYPE_NULL = "商品分流不可為空";
 	public static final String PRODUCT_NAME_NULL = "商品名稱不可為空";
 	public static final String PRODUCT_NAME_TOO_LONG = "商品名稱長度不可超過100字元";
+	/**
+	 * ⚠️ 2026-09-19補上：目標客群描述直接餵給 ScoringService.scoreAudienceMatch()
+	 * 計算客群契合度分數（七大計分因子之一），前端表單也標成必填（<em>*</em>）、
+	 * 限制 500 字。但後端 DTO 原本完全沒有 @NotBlank／@Size，只要繞過前端
+	 * 直接呼叫 API，就能建立一筆這個必要計分輸入是 null 的商品，讓客群契合度
+	 * 分數永遠算不出來，而且沒有任何錯誤訊息會告訴呼叫端問題出在哪。
+	 * @Size 上限用跟前端一致的 500 字，避免有人送一個沒有上限的超大字串。
+	 */
+	public static final String PRODUCT_TARGET_CUSTOMER_NULL = "目標客群描述不可為空";
+	public static final String PRODUCT_TARGET_CUSTOMER_TOO_LONG = "目標客群描述長度不可超過500字元";
 	public static final String PRODUCT_SUPPLIER_NAME_TOO_LONG = "供應商名稱長度不可超過100字元";
 	public static final String PRODUCT_IMAGE_URL_TOO_LONG = "商品圖片路徑長度不可超過500字元";
 	public static final String PRODUCT_CAMPAIGN_TAGS_TOO_LONG = "節慶標籤長度不可超過255字元";
