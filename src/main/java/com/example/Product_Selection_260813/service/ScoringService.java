@@ -246,7 +246,15 @@ public class ScoringService {
 			snapshot.setModeCode(mode.getModeCode());
 			snapshot.setModeName(mode.getModeName());
 			snapshot.setVersion(mode.getVersion());
-			snapshot.setFactors(factors.stream().map(this::toWeightFactorSnapshot).toList());
+			// 2026-09-20修正N+1：原本toWeightFactorSnapshot()對每個factor各自查一次
+			// factorDefinitionRepository.findByFactorCode()，一個模式7~11個因子就是
+			// 7~11次獨立查詢，且這支方法在Settings頁載入模式權重時每個模式都會呼叫一次。
+			// 改成先用findByFactorCodeIn()一次撈完這個模式所有因子代碼對應的定義，
+			// 组成Map後查表，整個buildWeightSnapshot()只多一次查詢，不受因子數量影響。
+			Map<String, FactorDefinition> definitionsByCode = factorDefinitionRepository
+					.findByFactorCodeIn(factors.stream().map(EvaluationFactor::getFactorCode).toList()).stream()
+					.collect(Collectors.toMap(FactorDefinition::getFactorCode, d -> d));
+			snapshot.setFactors(factors.stream().map(f -> toWeightFactorSnapshot(f, definitionsByCode)).toList());
 
 			// 演算法參數一併存進快照。只存權重不存參數，事後仍然無法重現當時的
 			// 計算——這些數字都放在 system_settings 且刻意設計成可調，而可調就
@@ -278,7 +286,8 @@ public class ScoringService {
 		}).orElse(null);
 	}
 
-	private WeightFactorSnapshot toWeightFactorSnapshot(EvaluationFactor factor) {
+	private WeightFactorSnapshot toWeightFactorSnapshot(EvaluationFactor factor,
+			Map<String, FactorDefinition> definitionsByCode) {
 		WeightFactorSnapshot dto = new WeightFactorSnapshot();
 		dto.setFactorCode(factor.getFactorCode());
 		dto.setFactorName(factor.getFactorName());
@@ -288,10 +297,11 @@ public class ScoringService {
 		// 這裡查不到是正常情況，strategyCode／strategyParams 維持 null；
 		// 只有自訂因子才會查到值。凍結這兩個欄位是為了可重現性——因子定義
 		// 之後可能被改策略或改參數，Snapshot 要留住「當時真正生效的是哪一版」。
-		factorDefinitionRepository.findByFactorCode(factor.getFactorCode()).ifPresent(definition -> {
+		FactorDefinition definition = definitionsByCode.get(factor.getFactorCode());
+		if (definition != null) {
 			dto.setStrategyCode(definition.getStrategyCode() == null ? null : definition.getStrategyCode().name());
 			dto.setStrategyParams(definition.getStrategyParams());
-		});
+		}
 		return dto;
 	}
 

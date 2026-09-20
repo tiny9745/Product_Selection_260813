@@ -124,16 +124,16 @@ public class SettingsController {
 	@PreAuthorize("hasRole('MANAGER')")
 	@PutMapping("/factor-definitions/{id}/disable")
 	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> disableFactorDefinition(
-			@PathVariable("id") Long id) {
-		FactorDefinitionResponse result = settingsService.disableFactorDefinition(id);
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		FactorDefinitionResponse result = settingsService.disableFactorDefinition(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已停用", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
 	@PutMapping("/factor-definitions/{id}/enable")
 	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> enableFactorDefinition(
-			@PathVariable("id") Long id) {
-		FactorDefinitionResponse result = settingsService.enableFactorDefinition(id);
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		FactorDefinitionResponse result = settingsService.enableFactorDefinition(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已啟用", result));
 	}
 

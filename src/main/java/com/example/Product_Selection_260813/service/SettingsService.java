@@ -559,31 +559,47 @@ public class SettingsService {
 	 * PUT /api/settings/factor-definitions/{id}/disable：停用自訂因子。
 	 *
 	 * 停用後 ProductFactorScorer 不再計算這個因子（scoreAll() 只查
-	 * findByIsActiveTrue()），任何模式裡它殘留的 evaluation_factors 權重列
-	 * 不會被刪除，但下次查 resolveFactorWeights() 時因子本身就沒有分數可乘，
-	 * 等同無效——比照既有風險選項停用的「不刪除、可復用」原則，不做級聯刪除。
+	 * findByIsActiveTrue()）。2026-09-20修正：原本只停用 factor_definitions
+	 * 這一列，任何模式裡殘留的 evaluation_factors 權重列完全沒有處理——數學上
+	 * 停用後這些權重確實不會再被計入分母（factorScores.get(code) 變成 null），
+	 * 但畫面上（見 settings.html 的權重編輯器勾選框，2026-09-20新增）
+	 * 「已勾選但實際上因子已被全域停用」會顯示成一種矛盾的中間狀態，容易誤導
+	 * 管理層以為這個因子還在生效。現在停用時一併把所有模式裡這個因子的權重
+	 * 歸零，讓畫面狀態（未勾選）跟實際計算行為（不生效）保持一致。
 	 *
 	 * 不影響過往已審核商品：review_records.weight_snapshot 是停用當下已經
-	 * 凍結的 JSON，跟這張表沒有外鍵關聯，這次異動不會讓任何歷史資料被動改變。
+	 * 凍結的 JSON，跟 evaluation_factors／factor_definitions 都沒有外鍵關聯，
+	 * 這裡的批次歸零不會讓任何歷史資料被動改變。
 	 */
 	@Transactional
-	public FactorDefinitionResponse disableFactorDefinition(Long id) {
+	public FactorDefinitionResponse disableFactorDefinition(Long id, String username) {
 		FactorDefinition definition = factorDefinitionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
 		definition.setIsActive(false);
+		definition.setUpdatedBy(resolveUserId(username));
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
+
+		List<EvaluationFactor> affected = evaluationFactorRepository.findByFactorCode(definition.getFactorCode());
+		affected.stream().filter(f -> f.getWeight() != null && f.getWeight().signum() > 0).forEach(f -> {
+			f.setWeight(BigDecimal.ZERO);
+			evaluationFactorRepository.save(f);
+		});
+
 		return FactorDefinitionResponse.from(saved);
 	}
 
 	/**
 	 * PUT /api/settings/factor-definitions/{id}/enable：復用已停用的自訂因子。
 	 * 與 disableFactorDefinition() 對稱，比照既有風險選項／商品類型的既定模式。
+	 * 不會恢復停用前各模式的權重——重新啟用後預設權重0（未生效），管理層要
+	 * 到各模式的權重編輯器裡重新勾選並分配權重，不自動假設要恢復到哪個數字。
 	 */
 	@Transactional
-	public FactorDefinitionResponse enableFactorDefinition(Long id) {
+	public FactorDefinitionResponse enableFactorDefinition(Long id, String username) {
 		FactorDefinition definition = factorDefinitionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
 		definition.setIsActive(true);
+		definition.setUpdatedBy(resolveUserId(username));
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
 		return FactorDefinitionResponse.from(saved);
 	}
