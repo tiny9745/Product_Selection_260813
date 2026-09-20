@@ -55,6 +55,14 @@ public class ReviewRisk {
 	@Column(name = "trigger_reason", length = 500)
 	private String triggerReason;
 
+	/**
+	 * 主管勾選「自由輸入文字」風險選項（目前僅「其他」，見 RiskOption.isFreeTextOption）
+	 * 時填寫的補充說明。與 triggerReason 語意相對：triggerReason 是系統帶入的原因，
+	 * 這欄是主管自己寫的內容，兩者不會同時有值——一般風險選項這欄恆為 null。
+	 */
+	@Column(name = "manual_note", length = 500)
+	private String manualNote;
+
 	public ReviewRisk() {
 	}
 
@@ -88,5 +96,13 @@ public class ReviewRisk {
 
 	public void setTriggerReason(String triggerReason) {
 		this.triggerReason = triggerReason;
+	}
+
+	public String getManualNote() {
+		return manualNote;
+	}
+
+	public void setManualNote(String manualNote) {
+		this.manualNote = manualNote;
 	}
 }

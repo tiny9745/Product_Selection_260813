@@ -57,6 +57,12 @@ public class ReviewRecordResponse {
 	private String reviewComment;
 	private List<Long> riskOptionIds;
 
+	/**
+	 * 勾選「其他」風險選項時的補充說明（review_risks.manual_note）。
+	 * 一般風險選項恆為 null，見 RiskOption.isFreeTextOption 的類別說明。
+	 */
+	private String otherRiskNote;
+
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 
@@ -153,6 +159,25 @@ public class ReviewRecordResponse {
 	 */
 	public ReviewRecordResponse withReviewerName(String reviewerName) {
 		this.reviewerName = reviewerName;
+		return this;
+	}
+
+	public String getOtherRiskNote() {
+		return otherRiskNote;
+	}
+
+	public void setOtherRiskNote(String otherRiskNote) {
+		this.otherRiskNote = otherRiskNote;
+	}
+
+	/**
+	 * 補上「其他」風險選項的補充說明，回傳 this 方便鏈式呼叫，用法同
+	 * withReviewerName()。submitReview() 送審當下可以直接用 request 裡的值
+	 * 補上；getDecisionRecords()／getProductReviewHistory() 這類清單型查詢
+	 * 則從 review_risks.manual_note 讀回（見 ReviewService.getOtherRiskNote()）。
+	 */
+	public ReviewRecordResponse withOtherRiskNote(String otherRiskNote) {
+		this.otherRiskNote = otherRiskNote;
 		return this;
 	}
 

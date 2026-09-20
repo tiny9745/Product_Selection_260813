@@ -26,6 +26,14 @@ public class RiskOptionSettingResponse {
 	private Boolean isSystemDefault;
 	private Boolean isActive;
 
+	/**
+	 * 此選項是否允許審核頁自由輸入補充文字（目前僅「其他」為 true）。
+	 * 設定頁本身不開放編輯這個欄位（見 RiskOptionCreateRequest／
+	 * RiskOptionUpdateRequest 類別註解），這裡回傳純粹是讓管理層在
+	 * 設定頁能看出「這筆是系統的自由文字選項，改名或停用前請三思」。
+	 */
+	private Boolean isFreeTextOption;
+
 	public static RiskOptionSettingResponse from(RiskOption option) {
 		RiskOptionSettingResponse dto = new RiskOptionSettingResponse();
 		dto.id = option.getId();
@@ -34,6 +42,7 @@ public class RiskOptionSettingResponse {
 		dto.alertKeywords = option.getAlertKeywords();
 		dto.isSystemDefault = option.getIsSystemDefault();
 		dto.isActive = option.getIsActive();
+		dto.isFreeTextOption = option.getIsFreeTextOption();
 		return dto;
 	}
 
@@ -83,5 +92,13 @@ public class RiskOptionSettingResponse {
 
 	public void setIsActive(Boolean isActive) {
 		this.isActive = isActive;
+	}
+
+	public Boolean getIsFreeTextOption() {
+		return isFreeTextOption;
+	}
+
+	public void setIsFreeTextOption(Boolean isFreeTextOption) {
+		this.isFreeTextOption = isFreeTextOption;
 	}
 }

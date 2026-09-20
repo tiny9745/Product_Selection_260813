@@ -66,10 +66,16 @@ public class ValidationMessage {
 	public static final String FACTOR_WEIGHT_RANGE = "單項權重須介於0至100之間";
 	public static final String FACTOR_WEIGHT_OVER_DIGITS = "權重整數位不可超過3位、小數不可超過2位";
 	public static final String FACTOR_MODE_NOT_EDITABLE = "此為系統固定模式，不允許調整權重；請改用自訂模式";
-	public static final String FACTOR_SUM_NOT_100 = "七項權重加總須為100，目前為：";
+	// 2026-09-20修正：原文寫死「七項」，自訂因子（factor_definitions）上線後
+	// 總項數不再固定是七項，訊息裡不再寫死具體數字，避免顯示錯誤的項數。
+	public static final String FACTOR_SUM_NOT_100 = "全部因子權重加總須為100，目前為：";
 	public static final String FACTOR_CODE_UNKNOWN = "無法辨識的因子代碼：";
 	public static final String FACTOR_CODE_DUPLICATE = "因子代碼重複：";
 	public static final String FACTOR_CODE_MISSING = "缺少必要的因子：";
+	public static final String FACTOR_DEFINITION_CODE_DUPLICATE = "因子代碼已存在（含既有七個固定因子）：";
+	public static final String FACTOR_DEFINITION_STRATEGY_NOT_IMPLEMENTED = "此運算邏輯尚未實作：";
+	public static final String FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE = "此資料源不支援所選的運算邏輯，請改選：";
+	public static final String FACTOR_DEFINITION_NOT_FOUND = "自訂因子不存在：";
 
 	// Review（商業邏輯驗證，於Service層攔截）
 	public static final String REVIEW_RISK_OPTION_INACTIVE = "風險選項已停用，無法選取：";

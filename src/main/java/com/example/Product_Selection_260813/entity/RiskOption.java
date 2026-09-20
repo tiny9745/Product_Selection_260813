@@ -43,6 +43,16 @@ public class RiskOption {
     @Column(name = "is_system_default", nullable = false)
     private Boolean isSystemDefault = false;
 
+    /**
+     * 此選項是否允許主管勾選時自由輸入補充文字（見 review_risks.manual_note）。
+     * 目前僅系統預設的「其他」選項會是 true。比照 isSystemDefault 的既有原則，
+     * 不開放透過 RiskOptionCreateRequest／RiskOptionUpdateRequest 外部指定，
+     * 一律由 V9 migration 建立，避免出現多筆「可自由輸入文字」的選項造成
+     * ReviewService 寫入 manual_note 時語意混淆。
+     */
+    @Column(name = "is_free_text_option", nullable = false)
+    private Boolean isFreeTextOption = false;
+
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 
@@ -135,5 +145,13 @@ public class RiskOption {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public Boolean getIsFreeTextOption() {
+        return isFreeTextOption;
+    }
+
+    public void setIsFreeTextOption(Boolean isFreeTextOption) {
+        this.isFreeTextOption = isFreeTextOption;
     }
 }

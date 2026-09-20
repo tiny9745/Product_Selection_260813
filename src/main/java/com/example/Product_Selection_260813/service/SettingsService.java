@@ -51,21 +51,26 @@ import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeScoreBandRepository;
 import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 
-import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
+import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
+import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.repository.RiskOptionRepository;
 import com.example.Product_Selection_260813.constants.SystemSettingRegistry;
+import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.repository.SystemSettingRepository;
+import com.example.Product_Selection_260813.service.scoring.FactorStrategyRegistry;
 
 /**
  * 對應企劃書十二-13分層決議：「統一承接四、資料表設計中所有『設定類』CRUD
@@ -127,6 +132,12 @@ public class SettingsService {
 
 	@Autowired
 	private ScoringService scoringService;
+
+	@Autowired
+	private FactorDefinitionRepository factorDefinitionRepository;
+
+	@Autowired
+	private FactorStrategyRegistry factorStrategyRegistry;
 
 	@Autowired
 	private AudienceProfileRepository audienceProfileRepository;
@@ -448,10 +459,14 @@ public class SettingsService {
 	}
 
 	private Map<String, BigDecimal> validateAndCollectFactors(EvaluationFactorUpdateRequest request) {
+		// 2026-09-20改用 scoringService.getAllActiveFactorCodes()：涵蓋既有七個
+		// 因子＋factor_definitions 裡目前生效中的自訂因子，不再是寫死的 FactorCode.ALL——
+		// 否則自訂因子建立後，永遠無法透過這支端點被送出權重（一律被當成「未知代碼」拒絕）。
+		List<String> allActiveFactorCodes = scoringService.getAllActiveFactorCodes();
 		Map<String, BigDecimal> collected = new LinkedHashMap<>();
 		for (EvaluationFactorUpdateRequest.FactorWeight fw : request.getFactors()) {
 			String code = fw.getFactorCode().trim().toUpperCase();
-			if (!FactorCode.ALL.contains(code)) {
+			if (!allActiveFactorCodes.contains(code)) {
 				throw new IllegalArgumentException(ValidationMessage.FACTOR_CODE_UNKNOWN + code);
 			}
 			if (collected.containsKey(code)) {
@@ -460,7 +475,7 @@ public class SettingsService {
 			collected.put(code, fw.getWeight());
 		}
 
-		List<String> missing = FactorCode.ALL.stream()
+		List<String> missing = allActiveFactorCodes.stream()
 				.filter(code -> !collected.containsKey(code))
 				.toList();
 		if (!missing.isEmpty()) {
@@ -468,6 +483,109 @@ public class SettingsService {
 					ValidationMessage.FACTOR_CODE_MISSING + String.join("、", missing));
 		}
 		return collected;
+	}
+
+	// ========================= 自訂計分因子 =========================
+
+	/**
+	 * GET /api/settings/factor-definitions：列出全部自訂因子（含已停用），
+	 * 供設定頁管理列表使用。既有七個固定因子不在這張表裡，不會出現在這份清單。
+	 */
+	@Transactional(readOnly = true)
+	public List<FactorDefinitionResponse> listFactorDefinitions() {
+		return factorDefinitionRepository.findAll().stream().map(FactorDefinitionResponse::from).toList();
+	}
+
+	/**
+	 * POST /api/settings/factor-definitions：新增自訂計分因子。
+	 *
+	 * 三件事一起檢查：
+	 * <ol>
+	 * <li>factorCode 不能跟既有七個固定因子（FactorCode.ALL）或其他自訂因子重複——
+	 *     這是 evaluation_factors／product_type_score_bands 等既有表用來對照因子的
+	 *     唯一鍵，重複會讓既有查詢分不出這筆權重／區間屬於哪一個因子。</li>
+	 * <li>strategyCode 必須是真的有實作的策略——目前僅 MANUAL_SCALE／MANUAL_PERCENT／
+	 *     TARGET_BAND_NORMALIZE 三種，FactorStrategyRegistry.isImplemented() 之外的
+	 *     一律拒絕，不留「建立了但永遠算不出分數」的半殘設定。</li>
+	 * <li>dataSourceCode 必須跟 strategyCode 相容——每個資料源在設計時就綁定了
+	 *     一種運算邏輯（見 FactorDataSource 類別註解），組錯會讓數值範圍失去意義
+	 *     （例如把 1~5 人工評分拿去套目標區間正規化），在建立當下就擋下來。</li>
+	 * </ol>
+	 *
+	 * 新增後這個因子預設<b>不影響任何評估模式的分數</b>：它會被 ProductFactorScorer
+	 * 算出分數、也會被 getAllActiveFactorCodes() 認得，但除非管理層另外呼叫
+	 * PUT /api/settings/evaluation-modes/{id}/factors 把它加進某個自訂模式的權重
+	 * 配置，否則沒有任何模式的 evaluation_factors 會有它的權重列，
+	 * resolveFactorWeights() 查不到值，weightedAverage() 視為未啟用，不影響總分。
+	 */
+	@Transactional
+	public FactorDefinitionResponse createFactorDefinition(FactorDefinitionCreateRequest request, String username) {
+		String factorCode = request.getFactorCode().trim().toUpperCase();
+
+		if (FactorCode.ALL.contains(factorCode)
+				|| factorDefinitionRepository.existsByFactorCode(factorCode)) {
+			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_CODE_DUPLICATE + factorCode);
+		}
+
+		if (!factorStrategyRegistry.isImplemented(request.getStrategyCode())) {
+			throw new IllegalArgumentException(
+					ValidationMessage.FACTOR_DEFINITION_STRATEGY_NOT_IMPLEMENTED + request.getStrategyCode());
+		}
+
+		if (request.getDataSourceCode().getCompatibleStrategy() != request.getStrategyCode()) {
+			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE
+					+ request.getDataSourceCode().getCompatibleStrategy());
+		}
+
+		Long userId = resolveUserId(username);
+
+		FactorDefinition definition = new FactorDefinition();
+		definition.setFactorCode(factorCode);
+		definition.setFactorName(request.getFactorName());
+		definition.setCategory(request.getCategory());
+		definition.setStrategyCode(request.getStrategyCode());
+		definition.setDataSourceCode(request.getDataSourceCode());
+		definition.setStrategyParams(request.getStrategyParams());
+		definition.setIsActive(true);
+		definition.setIsSystemDefault(false);
+		definition.setCreatedBy(userId);
+
+		FactorDefinition saved = factorDefinitionRepository.save(definition);
+		log.info("自訂因子已新增：{}，策略 {}，操作者 {}", factorCode, request.getStrategyCode(), username);
+		return FactorDefinitionResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/factor-definitions/{id}/disable：停用自訂因子。
+	 *
+	 * 停用後 ProductFactorScorer 不再計算這個因子（scoreAll() 只查
+	 * findByIsActiveTrue()），任何模式裡它殘留的 evaluation_factors 權重列
+	 * 不會被刪除，但下次查 resolveFactorWeights() 時因子本身就沒有分數可乘，
+	 * 等同無效——比照既有風險選項停用的「不刪除、可復用」原則，不做級聯刪除。
+	 *
+	 * 不影響過往已審核商品：review_records.weight_snapshot 是停用當下已經
+	 * 凍結的 JSON，跟這張表沒有外鍵關聯，這次異動不會讓任何歷史資料被動改變。
+	 */
+	@Transactional
+	public FactorDefinitionResponse disableFactorDefinition(Long id) {
+		FactorDefinition definition = factorDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
+		definition.setIsActive(false);
+		FactorDefinition saved = factorDefinitionRepository.save(definition);
+		return FactorDefinitionResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/factor-definitions/{id}/enable：復用已停用的自訂因子。
+	 * 與 disableFactorDefinition() 對稱，比照既有風險選項／商品類型的既定模式。
+	 */
+	@Transactional
+	public FactorDefinitionResponse enableFactorDefinition(Long id) {
+		FactorDefinition definition = factorDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
+		definition.setIsActive(true);
+		FactorDefinition saved = factorDefinitionRepository.save(definition);
+		return FactorDefinitionResponse.from(saved);
 	}
 
 	/**

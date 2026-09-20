@@ -17,17 +17,20 @@ import org.springframework.stereotype.Component;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
+import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.PackageSizeTier;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
+import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 
 /**
- * 逐一計算七個扁平因子的分數（0~100）。
+ * 逐一計算既有七個扁平因子，再加上 factor_definitions 裡目前生效中的自訂因子，
+ * 每個因子各自 0~100 分。
  *
  * 這個類別只負責「算出每個因子幾分」，不負責加權、不負責寫入資料庫——
  * 加權由 {@link ScoringAlgorithms#weightedAverage} 處理，寫入由 ScoringService 負責。
@@ -36,6 +39,14 @@ import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
  * <b>缺漏值一律回傳 null，不給中性值 50</b>：給中性值會讓「資料填齊但條件普通」
  * 和「什麼都沒填」拿到一樣的分數。回傳 null 讓加權階段把該因子從分母排除並
  * 重新正規化，「沒資料」這件事則由 GATE_DATA_COMPLETENESS 與 Signal 缺漏清單呈現。
+ *
+ * <b>2026-09-20新增自訂因子支援</b>：既有七個因子刻意維持原本寫死的七個方法，
+ * 不遷移進 factor_definitions——HISTORY_FULFILLMENT／TREND_HEAT 的運算邏輯
+ * （貝氏收縮、指數衰減）目前無法通用化，勉強遷移只會讓資料模型變得混亂
+ * （見 FactorDefinition 類別註解）。自訂因子透過 FactorStrategyRegistry 分派到
+ * ManualScaleStrategy／ManualPercentStrategy／TargetBandNormalizeStrategy，
+ * 跟既有七個因子在 scoreAll() 裡並列放進同一個 Map，對加權階段而言完全平等，
+ * 加權階段不需要知道某個因子是「舊的寫死七個之一」還是「新的自訂因子」。
  */
 @Component
 public class ProductFactorScorer {
@@ -47,22 +58,28 @@ public class ProductFactorScorer {
 	private final ScoreBandResolver scoreBandResolver;
 	private final AlgorithmSettings algorithmSettings;
 	private final HistoricalScoreCalculator historicalScoreCalculator;
+	private final FactorDefinitionRepository factorDefinitionRepository;
+	private final FactorStrategyRegistry factorStrategyRegistry;
 
 	@Autowired
 	public ProductFactorScorer(AudienceProfileRepository audienceProfileRepository,
 			TrendSignalRepository trendSignalRepository,
 			ScoreBandResolver scoreBandResolver,
 			AlgorithmSettings algorithmSettings,
-			HistoricalScoreCalculator historicalScoreCalculator) {
+			HistoricalScoreCalculator historicalScoreCalculator,
+			FactorDefinitionRepository factorDefinitionRepository,
+			FactorStrategyRegistry factorStrategyRegistry) {
 		this.audienceProfileRepository = audienceProfileRepository;
 		this.trendSignalRepository = trendSignalRepository;
 		this.scoreBandResolver = scoreBandResolver;
 		this.algorithmSettings = algorithmSettings;
 		this.historicalScoreCalculator = historicalScoreCalculator;
+		this.factorDefinitionRepository = factorDefinitionRepository;
+		this.factorStrategyRegistry = factorStrategyRegistry;
 	}
 
 	/**
-	 * 一次算出七個因子的分數。
+	 * 一次算出既有七個因子＋所有生效中自訂因子的分數。
 	 *
 	 * @return factorCode → 分數（0~100）；值為 null 代表該因子無資料，加權時應排除
 	 */
@@ -75,6 +92,10 @@ public class ProductFactorScorer {
 		scores.put(FactorCode.HISTORY_FULFILLMENT, historicalScoreCalculator.calculate(product).score());
 		scores.put(FactorCode.PURCHASE_RATE, scorePurchaseRate(product));
 		scores.put(FactorCode.TREND_HEAT, scoreTrendHeat(product));
+
+		for (FactorDefinition definition : factorDefinitionRepository.findByIsActiveTrue()) {
+			scores.put(definition.getFactorCode(), factorStrategyRegistry.calculate(product, definition));
+		}
 		return scores;
 	}
 

@@ -21,6 +21,8 @@ import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateReq
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
@@ -94,6 +96,45 @@ public class SettingsController {
 	public ResponseEntity<ApiResponse<WeightSnapshot>> getEvaluationModeFactors(@PathVariable("id") Long id) {
 		WeightSnapshot result = settingsService.getEvaluationModeFactors(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	// ========================= 自訂計分因子 =========================
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/factor-definitions")
+	public ResponseEntity<ApiResponse<List<FactorDefinitionResponse>>> getFactorDefinitions() {
+		List<FactorDefinitionResponse> result = settingsService.listFactorDefinitions();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * 新增自訂計分因子。新增後不會自動加進任何評估模式的權重配置——
+	 * 要讓某個自訂模式開始採計，還需要另外呼叫上面的
+	 * PUT /evaluation-modes/{id}/factors，見 FactorDefinitionCreateRequest 類別註解。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/factor-definitions")
+	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> createFactorDefinition(
+			@Valid @RequestBody FactorDefinitionCreateRequest request,
+			@AuthenticationPrincipal String username) {
+		FactorDefinitionResponse result = settingsService.createFactorDefinition(request, username);
+		return ResponseEntity.ok(ApiResponse.success("自訂因子已新增", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/factor-definitions/{id}/disable")
+	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> disableFactorDefinition(
+			@PathVariable("id") Long id) {
+		FactorDefinitionResponse result = settingsService.disableFactorDefinition(id);
+		return ResponseEntity.ok(ApiResponse.success("已停用", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/factor-definitions/{id}/enable")
+	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> enableFactorDefinition(
+			@PathVariable("id") Long id) {
+		FactorDefinitionResponse result = settingsService.enableFactorDefinition(id);
+		return ResponseEntity.ok(ApiResponse.success("已啟用", result));
 	}
 
 	// ========================= 目標區間 =========================

@@ -30,6 +30,14 @@ public class RiskOptionResponse {
 	/** 自動帶入時的判定原因，來自 Gate 的 reason。 */
 	private String triggerReason;
 
+	/**
+	 * 此選項是否允許自由輸入補充文字（目前僅「其他」為 true）。
+	 * 前端據此顯示補充說明輸入框並要求勾選時必填，取代原本用名稱字串
+	 * 比對 option.name === '其他' 的判斷方式——名稱只是顯示文字，改名
+	 * 就會讓比對失準，這個欄位才是穩定的識別依據。見 V9 migration 說明。
+	 */
+	private Boolean isFreeTextOption;
+
 
 	public static RiskOptionResponse from(RiskOption option) {
 		RiskOptionResponse dto = new RiskOptionResponse();
@@ -38,6 +46,7 @@ public class RiskOptionResponse {
 		dto.description = option.getDescription();
 		dto.isSystemDefault = option.getIsSystemDefault();
 		dto.category = option.getCategory();
+		dto.isFreeTextOption = option.getIsFreeTextOption();
 		return dto;
 	}
 
@@ -95,5 +104,13 @@ public class RiskOptionResponse {
 
 	public void setTriggerReason(String triggerReason) {
 		this.triggerReason = triggerReason;
+	}
+
+	public Boolean getIsFreeTextOption() {
+		return isFreeTextOption;
+	}
+
+	public void setIsFreeTextOption(Boolean isFreeTextOption) {
+		this.isFreeTextOption = isFreeTextOption;
 	}
 }

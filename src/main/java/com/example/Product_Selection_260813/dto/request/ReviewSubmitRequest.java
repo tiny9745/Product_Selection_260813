@@ -17,9 +17,13 @@ import jakarta.validation.constraints.NotNull;
  *
  * riskOptionIds／reviewComment刻意不加@NotEmpty／@NotBlank：
  * 人工風險評估是「複選」，核准商品可能一項風險都不勾；審核留言功能樹狀圖只寫
- * 「保存管理層本次審核意見」，未要求必填，故Service層也不做必填檢查
- * ——若日後確認「其他」風險選項需要強制搭配留言，屬於另一項待確認的業務規則，
- * 目前不在此處臆測。
+ * 「保存管理層本次審核意見」，未要求必填，故Service層也不做必填檢查。
+ *
+ * <b>2026-09-20新增otherRiskNote</b>：勾選「其他」風險選項（見RiskOption.
+ * isFreeTextOption）時的補充說明。同樣刻意不加@NotBlank——「勾選其他時必填」
+ * 這條規則完全由前端把關（見review.mapper.ts的validateReviewForm()），
+ * 後端只負責在Service層把這段文字寫進對應的review_risks.manual_note，
+ * 不重複驗證前端已經擋過的規則。
  */
 public class ReviewSubmitRequest {
 
@@ -46,6 +50,9 @@ public class ReviewSubmitRequest {
 
 
 	private String reviewComment;
+
+	/** 勾選「其他」風險選項時填寫的補充說明；未勾選「其他」時應為 null。 */
+	private String otherRiskNote;
 
 	public Long getProductId() {
 		return productId;
@@ -85,5 +92,13 @@ public class ReviewSubmitRequest {
 
 	public void setSystemSuggestedRiskOptionIds(List<Long> systemSuggestedRiskOptionIds) {
 		this.systemSuggestedRiskOptionIds = systemSuggestedRiskOptionIds;
+	}
+
+	public String getOtherRiskNote() {
+		return otherRiskNote;
+	}
+
+	public void setOtherRiskNote(String otherRiskNote) {
+		this.otherRiskNote = otherRiskNote;
 	}
 }

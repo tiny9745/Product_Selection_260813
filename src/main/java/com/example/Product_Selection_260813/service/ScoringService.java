@@ -33,6 +33,7 @@ import com.example.Product_Selection_260813.dto.response.FestivalBoostResponse;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
+import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.Product;
@@ -53,6 +54,7 @@ import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
+import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
@@ -148,12 +150,29 @@ public class ScoringService {
 	@Autowired
 	private SystemSettingRepository systemSettingRepository;
 
+	@Autowired
+	private FactorDefinitionRepository factorDefinitionRepository;
+
 	// system_settings的key，對應「目前生效評估模式」的id（見SystemSettingRepository
 	// 類別註解裡的使用範例，本方法沿用同一把key，不重新發明）。
 	private static final String CURRENT_EVALUATION_MODE_KEY = "current_evaluation_mode_id";
 
 	// 資料完整度門檻（規格書QA3）：未達60%不進入固定評估模式計分。
 	private static final BigDecimal DATA_COMPLETENESS_THRESHOLD = new BigDecimal("60");
+
+	/**
+	 * 全部目前生效中的因子代碼：既有寫死的七個＋factor_definitions 裡 is_active
+	 * 的自訂因子。取代原本直接用 FactorCode.ALL（固定七個）的地方——
+	 * 加權計算與「因子代碼必須認得、必須齊全」的驗證都要涵蓋自訂因子，
+	 * 否則自訂因子永遠不會被算進總分，或者永遠無法通過權重驗證。
+	 */
+	@Transactional(readOnly = true)
+	public List<String> getAllActiveFactorCodes() {
+		List<String> codes = new ArrayList<>(FactorCode.ALL);
+		factorDefinitionRepository.findByIsActiveTrue().stream().map(FactorDefinition::getFactorCode)
+				.forEach(codes::add);
+		return codes;
+	}
 
 	/** 商品目前的即時評估結果（product_evaluations，唯讀）。可能為空——見類別註解。 */
 	@Transactional(readOnly = true)
@@ -265,6 +284,14 @@ public class ScoringService {
 		dto.setFactorName(factor.getFactorName());
 		dto.setCategory(factor.getCategory());
 		dto.setWeight(factor.getWeight());
+		// 既有七個因子沒有對應的 FactorDefinition（刻意不遷移，見該類別註解），
+		// 這裡查不到是正常情況，strategyCode／strategyParams 維持 null；
+		// 只有自訂因子才會查到值。凍結這兩個欄位是為了可重現性——因子定義
+		// 之後可能被改策略或改參數，Snapshot 要留住「當時真正生效的是哪一版」。
+		factorDefinitionRepository.findByFactorCode(factor.getFactorCode()).ifPresent(definition -> {
+			dto.setStrategyCode(definition.getStrategyCode() == null ? null : definition.getStrategyCode().name());
+			dto.setStrategyParams(definition.getStrategyParams());
+		});
 		return dto;
 	}
 
@@ -639,8 +666,11 @@ public class ScoringService {
 		// 加權總和。weightedAverage() 內部已除以「有值因子的權重總和」，
 		// 因此不需要再除以 100——舊版的 divide(100) 是因為當時把權重當成
 		// 固定加總 100 的除數，改用有效權重當分母後這個假設不再成立。
+		// 2026-09-20改用 getAllActiveFactorCodes()：涵蓋既有七個因子＋
+		// factor_definitions 裡目前生效中的自訂因子，缺一個都會讓自訂因子
+		// 永遠算不進總分。
 		BigDecimal totalScore = ScoringAlgorithms.weightedAverage(
-				FactorCode.ALL.stream()
+				getAllActiveFactorCodes().stream()
 						.map(code -> new ScoringAlgorithms.WeightedScore(
 								code, factorScores.get(code), weights.get(code)))
 						.toList());

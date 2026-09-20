@@ -218,7 +218,8 @@ public class ReviewService {
 		Map<Long, String> reviewerNameById = resolveUserNames(
 				records.stream().map(ReviewRecord::getReviewerId).filter(id -> id != null).collect(Collectors.toSet()));
 		return records.stream().map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
-				.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())))
+				.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId()))
+				.withOtherRiskNote(getOtherRiskNote(record.getId())))
 				.toList();
 	}
 
@@ -241,7 +242,8 @@ public class ReviewService {
 		Map<Long, String> reviewerNameById = resolveUserNames(page.getContent().stream()
 				.map(ReviewRecord::getReviewerId).filter(id -> id != null).collect(Collectors.toSet()));
 		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())).withReviewerName(
-				record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())));
+				record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId()))
+				.withOtherRiskNote(getOtherRiskNote(record.getId())));
 	}
 
 	// ========================= 提交審核 =========================
@@ -342,9 +344,13 @@ public class ReviewService {
 
 		ReviewRecord saved = reviewRecordRepository.save(record);
 		List<Long> riskOptionIds = saveReviewRisks(saved.getId(), request.getRiskOptionIds(),
-				request.getSystemSuggestedRiskOptionIds(), gateTriggerReasons);
+				request.getSystemSuggestedRiskOptionIds(), gateTriggerReasons, request.getOtherRiskNote());
 
-		return ReviewRecordResponse.from(saved, riskOptionIds);
+		// 從 review_risks 讀回實際寫入的值，而不是直接回顯 request.getOtherRiskNote()：
+		// 兩者理論上該一致，但這樣寫可以保證回應內容永遠反映「真正被存進去的東西」，
+		// 不受前端多送一個沒被選中的 otherRiskNote 影響（saveReviewRisks() 只在
+		// 「其他」實際被勾選時才寫入，見該方法說明）。
+		return ReviewRecordResponse.from(saved, riskOptionIds).withOtherRiskNote(getOtherRiskNote(saved.getId()));
 	}
 
 	// ========================= 內部輔助方法 =========================
@@ -496,10 +502,14 @@ public class ReviewService {
 	 * @param selectedIds     主管最終勾選的（含他保留下來的系統建議項）
 	 * @param systemSuggested 系統原本建議的（Gate 判定不通過而預先勾選的）
 	 * @param triggerReasons  riskOptionId -&gt; Gate 判定原因，供系統帶入項留存說明
+	 * @param otherRiskNote   勾選「其他」風險選項（isFreeTextOption=true）時的補充說明，
+	 *                        只會寫入該筆 review_risks 的 manual_note；其餘一般風險選項
+	 *                        這欄位不會被觸碰。前端沒勾「其他」時應為 null，即使不是
+	 *                        null 這裡也只在真的有對應選項被選中時才會被用到。
 	 * @return 主管最終勾選的 id 清單，供回應使用
 	 */
 	private List<Long> saveReviewRisks(Long reviewId, List<Long> selectedIds, List<Long> systemSuggested,
-			Map<Long, String> triggerReasons) {
+			Map<Long, String> triggerReasons, String otherRiskNote) {
 		List<Long> selected = selectedIds == null ? List.of() : selectedIds.stream().distinct().toList();
 		List<Long> suggested = systemSuggested == null ? List.of() : systemSuggested.stream().distinct().toList();
 
@@ -532,6 +542,12 @@ public class ReviewService {
 			if (isSystemSuggested && triggerReasons != null) {
 				reviewRisk.setTriggerReason(triggerReasons.get(riskOptionId));
 			}
+			// 只有「主管實際勾選」且該選項本身允許自由輸入文字（目前僅「其他」）
+			// 才寫入 manualNote。跟上面 isActive 檢查同樣的理由：這是主管當下的
+			// 決定，不該套用在被推翻的系統建議項上。
+			if (isSelected && Boolean.TRUE.equals(riskOption.getIsFreeTextOption())) {
+				reviewRisk.setManualNote(otherRiskNote);
+			}
 			reviewRiskRepository.save(reviewRisk);
 		}
 		return selected;
@@ -547,5 +563,19 @@ public class ReviewService {
 		return reviewRiskRepository.findById_ReviewId(reviewId).stream()
 				.filter(risk -> Boolean.TRUE.equals(risk.getIsSelected())).map(risk -> risk.getId().getRiskOptionId())
 				.toList();
+	}
+
+	/**
+	 * 查詢這次審核「其他」風險選項的補充說明。
+	 *
+	 * 不用另外查 risk_options 表確認哪一筆是 isFreeTextOption=true 再回頭找對應
+	 * 的 review_risks 列——saveReviewRisks() 已保證只有自由輸入型選項的列才可能
+	 * 有 manual_note，一般選項這欄位恆為 null，直接找非 null 的那一筆即可。
+	 * 目前系統設計只會有一筆自由輸入型選項（「其他」），理論上最多只會有一筆
+	 * 非 null，用 findFirst() 足夠；找不到（沒勾「其他」）回傳 null。
+	 */
+	private String getOtherRiskNote(Long reviewId) {
+		return reviewRiskRepository.findById_ReviewId(reviewId).stream().map(ReviewRisk::getManualNote)
+				.filter(note -> note != null).findFirst().orElse(null);
 	}
 }
