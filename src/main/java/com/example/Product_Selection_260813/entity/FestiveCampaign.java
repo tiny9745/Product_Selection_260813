@@ -8,6 +8,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
+import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -45,6 +46,14 @@ public class FestiveCampaign {
 
     @Column(name = "preparation_lead_days", nullable = false)
     private Integer preparationLeadDays = 30;
+
+    /**
+     * 僅 category=WEATHER 時有值，見 V8 migration 的欄位註解與
+     * ScoringService.calculateUrgencyFactor() 的 WEATHER 分支。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "weather_confidence")
+    private WeatherForecastConfidence weatherConfidence;
 
     // target_tags(VARCHAR)欄位已移除：無法記錄「這個標籤屬於核心/一般/弱命中」的分級，
     // 改由festive_campaign_tags表承接（一檔期對多標籤、每個標籤各自帶match_tier），
@@ -119,6 +128,14 @@ public class FestiveCampaign {
 
 	public void setPreparationLeadDays(Integer preparationLeadDays) {
 		this.preparationLeadDays = preparationLeadDays;
+	}
+
+	public WeatherForecastConfidence getWeatherConfidence() {
+		return weatherConfidence;
+	}
+
+	public void setWeatherConfidence(WeatherForecastConfidence weatherConfidence) {
+		this.weatherConfidence = weatherConfidence;
 	}
 
 	public FestiveCampaignStatus getCampaignStatus() {

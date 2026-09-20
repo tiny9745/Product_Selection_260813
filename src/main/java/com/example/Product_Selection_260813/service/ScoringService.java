@@ -7,7 +7,6 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +44,7 @@ import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
@@ -158,21 +158,6 @@ public class ScoringService {
 	@Transactional(readOnly = true)
 	public Optional<ProductEvaluation> getCurrentEvaluation(Long productId) {
 		return productEvaluationRepository.findByProductId(productId);
-	}
-
-	/**
-	 * 批次版的 getCurrentEvaluation()：清單頁（例如 ReviewService.getPendingReviews()）
-	 * 一次要組裝 N 筆商品的 finalScore／dataCompleteness，逐筆呼叫
-	 * getCurrentEvaluation() 會是 N+1 查詢。比照 ProductService.resolveEvaluations()
-	 * 同一套批次查詢寫法，回傳 productId → ProductEvaluation 的對照表。
-	 */
-	@Transactional(readOnly = true)
-	public Map<Long, ProductEvaluation> getCurrentEvaluations(Collection<Long> productIds) {
-		if (productIds == null || productIds.isEmpty()) {
-			return Map.of();
-		}
-		return productEvaluationRepository.findByProductIdIn(productIds).stream()
-				.collect(Collectors.toMap(ProductEvaluation::getProductId, e -> e));
 	}
 
 	/** 依評估模式ID查詢完整模式資料（用於補上評估模式名稱／版本）。 */
@@ -418,6 +403,9 @@ public class ScoringService {
 		if (campaign.getCategory() == FestiveCategory.SEASON) {
 			return SEASON_PREPARING_URGENCY_FACTOR;
 		}
+		if (campaign.getCategory() == FestiveCategory.WEATHER) {
+			return calculateWeatherUrgencyFactor(campaign);
+		}
 
 		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
 				? campaign.getPreparationLeadDays()
@@ -435,6 +423,39 @@ public class ScoringService {
 			factor = BigDecimal.ONE;
 		}
 		return factor.setScale(2, RoundingMode.HALF_UP);
+	}
+
+	/**
+	 * WEATHER 類別的 urgencyFactor：跟 FESTIVAL 一樣採線性遞增（距開始日越近、
+	 * 基礎值越高），但額外乘上 weatherConfidence 係數——這是 FESTIVAL／SEASON
+	 * 結構上不存在的維度，節慶日期是確定的，天氣預報離現在越遠越不可信，
+	 * 不能用同一條公式直接套用（見規劃討論的差異說明）。
+	 *
+	 * weatherConfidence 為 null（理論上不該發生：WeatherCampaignSyncService
+	 * upsert WEATHER 檔期時一定會帶這個值）時，保守處理成 LOW，不讓一筆
+	 * 資料異常的天氣檔期意外拿到滿額加成。
+	 */
+	private BigDecimal calculateWeatherUrgencyFactor(FestiveCampaign campaign) {
+		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
+				? campaign.getPreparationLeadDays()
+				: 1;
+		long remainingDays = Math.max(ChronoUnit.DAYS.between(LocalDate.now(), campaign.getStartDate()), 0);
+
+		BigDecimal ratio = BigDecimal.valueOf(remainingDays).divide(BigDecimal.valueOf(leadDays), 4,
+				RoundingMode.HALF_UP);
+		BigDecimal baseFactor = BigDecimal.ONE.subtract(ratio);
+		if (baseFactor.compareTo(BigDecimal.ZERO) < 0) {
+			baseFactor = BigDecimal.ZERO;
+		}
+		if (baseFactor.compareTo(BigDecimal.ONE) > 0) {
+			baseFactor = BigDecimal.ONE;
+		}
+
+		WeatherForecastConfidence confidence = campaign.getWeatherConfidence() != null
+				? campaign.getWeatherConfidence()
+				: WeatherForecastConfidence.LOW;
+
+		return baseFactor.multiply(confidence.getConfidenceFactor()).setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
