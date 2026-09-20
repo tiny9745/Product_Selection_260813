@@ -52,11 +52,11 @@ import com.example.Product_Selection_260813.repository.RiskOptionRepository;
 /**
  * 對應 API總表 五、選品審核 與 六、審核歷史／版本追蹤：
  *
- * GET  /api/reviews/pending           -&gt; getPendingReviews()<br>
- * GET  /api/reviews/{productId}       -&gt; getReviewDetail()<br>
- * POST /api/reviews                   -&gt; submitReview()<br>
- * GET  /api/reviews/decision-records  -&gt; getDecisionRecords()<br>
- * GET  /api/products/{id}/reviews     -&gt; getProductReviewHistory()
+ * GET /api/reviews/pending -&gt; getPendingReviews()<br>
+ * GET /api/reviews/{productId} -&gt; getReviewDetail()<br>
+ * POST /api/reviews -&gt; submitReview()<br>
+ * GET /api/reviews/decision-records -&gt; getDecisionRecords()<br>
+ * GET /api/products/{id}/reviews -&gt; getProductReviewHistory()
  *
  * 依十二-13分層決議，本類別只管審核流程本身（狀態機、風險勾選、留存快照），
  * 快照的組裝細節（weight_snapshot／trend_snapshot／matched_campaign_snapshot／
@@ -64,9 +64,9 @@ import com.example.Product_Selection_260813.repository.RiskOptionRepository;
  * 不直接注入六、七個Repository。product_snapshot例外——這是Product自身核心資料，
  * 不屬於評分或AI網域，本類別已持有完整Product entity，直接組裝。
  *
- * 例外處理沿用專案既有GlobalExceptionHandler慣例，與ProductService一致：
- * 資源不存在 -&gt; IllegalArgumentException（400）；目前狀態不允許此操作
- * （狀態機不合法轉換、併發衝突）-&gt; IllegalStateException（409）。
+ * 例外處理沿用專案既有GlobalExceptionHandler慣例，與ProductService一致： 資源不存在 -&gt;
+ * IllegalArgumentException（400）；目前狀態不允許此操作 （狀態機不合法轉換、併發衝突）-&gt;
+ * IllegalStateException（409）。
  */
 @Service
 public class ReviewService {
@@ -112,16 +112,13 @@ public class ReviewService {
 	 */
 	@Transactional(readOnly = true)
 	public Page<ProductResponse> getPendingReviews(Pageable pageable) {
-		Page<Product> page = productRepository
-				.findByReviewStatusAndItemStatusAndCandidateStatus(ProductReviewStatus.PENDING,
-						ProductItemStatus.ACTIVE, ProductCandidateStatus.CANDIDATE, pageable);
+		Page<Product> page = productRepository.findByReviewStatusAndItemStatusAndCandidateStatus(
+				ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE, ProductCandidateStatus.CANDIDATE, pageable);
 
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		// app_users 是使用者帳號本身的資料，不屬於評分／AI 網域，不算跨越
 		// 類別 Java Doc 講的十二-13分層邊界（該邊界只規範 Scoring／Trend／AiSelection）。
-		Set<Long> createdByIds = page.getContent().stream()
-				.map(Product::getCreatedBy)
-				.filter(id -> id != null)
+		Set<Long> createdByIds = page.getContent().stream().map(Product::getCreatedBy).filter(id -> id != null)
 				.collect(Collectors.toSet());
 		Map<Long, String> createdByNameById = resolveUserNames(createdByIds);
 
@@ -142,8 +139,7 @@ public class ReviewService {
 			return ProductResponse.from(product)
 					.withCreatedByName(
 							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
-					.withEvaluationSummary(
-							evaluation != null ? evaluation.getFinalScore() : null,
+					.withEvaluationSummary(evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
 		});
 	}
@@ -153,18 +149,16 @@ public class ReviewService {
 	 * getPendingReviews()／getDecisionRecords()／getProductReviewHistory()
 	 * 共用同一份邏輯，抽出來只維護一處。
 	 *
-	 * ⚠️ 同 ProductService.resolveCreatedByNames() 的說明：Collectors.toMap
-	 * 遇到 value 為 null 會直接拋 NullPointerException，用 requireNonNullElse
-	 * 擋掉，避免一筆髒資料（姓名為 null）拖垮整支清單 API。
+	 * ⚠️ 同 ProductService.resolveCreatedByNames() 的說明：Collectors.toMap 遇到 value 為
+	 * null 會直接拋 NullPointerException，用 requireNonNullElse 擋掉，避免一筆髒資料（姓名為
+	 * null）拖垮整支清單 API。
 	 */
 	private Map<Long, String> resolveUserNames(Set<Long> userIds) {
 		if (userIds.isEmpty()) {
 			return Map.of();
 		}
 		return appUserRepository.findAllById(userIds).stream()
-				.collect(Collectors.toMap(
-						AppUser::getId,
-						user -> Objects.requireNonNullElse(user.getName(), "")));
+				.collect(Collectors.toMap(AppUser::getId, user -> Objects.requireNonNullElse(user.getName(), "")));
 	}
 
 	/**
@@ -208,8 +202,7 @@ public class ReviewService {
 		return ReviewDetailResponse.build(ProductResponse.from(product), product.getSubmissionCount(),
 				evaluationOpt.orElse(null), evaluationModeOpt.orElse(null),
 				scoringService.buildWeightSnapshot(evaluationModeId), matchedCampaign,
-				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions,
-				gateSummary);
+				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions, gateSummary);
 	}
 
 	/**
@@ -223,11 +216,9 @@ public class ReviewService {
 		List<ReviewRecord> records = reviewRecordRepository.findByProductIdOrderByReviewedAtDesc(productId);
 		// 同 getDecisionRecords() 的說明：reviewerId 要解成姓名才顯示得出來。
 		Map<Long, String> reviewerNameById = resolveUserNames(
-				records.stream().map(ReviewRecord::getReviewerId).filter(id -> id != null)
-						.collect(Collectors.toSet()));
-		return records.stream()
-				.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
-						.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())))
+				records.stream().map(ReviewRecord::getReviewerId).filter(id -> id != null).collect(Collectors.toSet()));
+		return records.stream().map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
+				.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())))
 				.toList();
 	}
 
@@ -236,8 +227,7 @@ public class ReviewService {
 	 *
 	 * ⚠️ 2026-09-16修正：reviewResult為null時查全部（沿用ProductService.
 	 * searchProducts()「null=不篩選」的既有慣例）。修正前這支端點完全不接受
-	 * 篩選參數，前端的結果篩選只能對「已經抓回來的那一頁」做，資料量一多、
-	 * 篩選條件剛好不在那一頁時就會誤報「找不到」，即使資料庫裡其實有。
+	 * 篩選參數，前端的結果篩選只能對「已經抓回來的那一頁」做，資料量一多、 篩選條件剛好不在那一頁時就會誤報「找不到」，即使資料庫裡其實有。
 	 */
 	@Transactional(readOnly = true)
 	public Page<ReviewRecordResponse> getDecisionRecords(ReviewRecordReviewStatus reviewResult, Pageable pageable) {
@@ -248,11 +238,10 @@ public class ReviewService {
 		// 「審核人」欄位一直顯示「—」——不是查無資料，是這裡從來沒有把
 		// id 解成姓名（見 ReviewRecordResponse 類別註解「reviewerId
 		// 顯示不了」）。批次查一次，避免在 map() 裡逐筆查（N+1）。
-		Map<Long, String> reviewerNameById = resolveUserNames(
-				page.getContent().stream().map(ReviewRecord::getReviewerId).filter(id -> id != null)
-						.collect(Collectors.toSet()));
-		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId()))
-				.withReviewerName(record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())));
+		Map<Long, String> reviewerNameById = resolveUserNames(page.getContent().stream()
+				.map(ReviewRecord::getReviewerId).filter(id -> id != null).collect(Collectors.toSet()));
+		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())).withReviewerName(
+				record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId())));
 	}
 
 	// ========================= 提交審核 =========================
@@ -260,11 +249,11 @@ public class ReviewService {
 	/**
 	 * POST /api/reviews：管理提交人工風險評估、審核留言及核准／拒絕結果。
 	 *
-	 * 執行順序刻意如下，確保review_records只保留「真正生效」的審核結果：
-	 * 1. 讀取快照來源資料（唯讀查詢，不影響併發正確性，即使之後衝突了也只是白算一次）
-	 * 2. 條件式UPDATE products.review_status（WHERE review_status='PENDING'）
-	 *    ——影響筆數0代表已被他人審核過，直接409、不寫入任何審核紀錄
-	 * 3. 條件式UPDATE成功後，才寫入review_records與review_risks
+	 * 執行順序刻意如下，確保review_records只保留「真正生效」的審核結果： 1.
+	 * 讀取快照來源資料（唯讀查詢，不影響併發正確性，即使之後衝突了也只是白算一次） 2. 條件式UPDATE
+	 * products.review_status（WHERE review_status='PENDING'）
+	 * ——影響筆數0代表已被他人審核過，直接409、不寫入任何審核紀錄 3.
+	 * 條件式UPDATE成功後，才寫入review_records與review_risks
 	 *
 	 * 若先寫入review_records、最後才做條件式UPDATE，一旦UPDATE失敗（409），
 	 * 就會留下一筆「與products.review_status實際狀態對不上」的孤兒審核紀錄，
@@ -360,12 +349,10 @@ public class ReviewService {
 
 	// ========================= 內部輔助方法 =========================
 
-
 	/**
 	 * 把 Gate 判定不通過的項目對應到 risk_options，取得「風險選項 id -&gt; 判定原因」。
 	 *
-	 * 只處理 FAILED——資料不足與不適用都不代表確定有風險，不該自動勾選風險選項。
-	 * 尤其是資料不足：把它自動勾成風險，等於因為採購沒填欄位就替商品扣了一筆
+	 * 只處理 FAILED——資料不足與不適用都不代表確定有風險，不該自動勾選風險選項。 尤其是資料不足：把它自動勾成風險，等於因為採購沒填欄位就替商品扣了一筆
 	 * 風險紀錄，這對商品不公平，也會讓風險清單失去意義。
 	 *
 	 * 找不到對應 risk_option 的 Gate 會被略過（不拋錯）——auto_trigger_code 是
@@ -406,18 +393,15 @@ public class ReviewService {
 	/**
 	 * 組出審核當下的商品快照。
 	 *
-	 * <b>這是整套設計裡唯一「現在不做、之後補不回來」的地方。</b>
-	 * 審核紀錄不可覆蓋，漏掉的欄位無法回頭補齊——三個月後想查「當初為什麼
-	 * 這個 Gate 不通過」，如果快照裡沒有溫層、效期這些欄位，就只能撈到商品
-	 * 今天的值，而那可能已經被編輯過了。
+	 * <b>這是整套設計裡唯一「現在不做、之後補不回來」的地方。</b> 審核紀錄不可覆蓋，漏掉的欄位無法回頭補齊——三個月後想查「當初為什麼 這個 Gate
+	 * 不通過」，如果快照裡沒有溫層、效期這些欄位，就只能撈到商品 今天的值，而那可能已經被編輯過了。
 	 *
 	 * 因此除了商品自己的欄位，還要存兩類「解析後的結果」：
 	 * <ul>
-	 * <li>resolvedMoq / moqSource：三層解析後實際生效的值與來源。品類預設
-	 *     之後可能被改，只存商品層原始值（可能是 null）無法還原當時判斷。</li>
+	 * <li>resolvedMoq / moqSource：三層解析後實際生效的值與來源。品類預設 之後可能被改，只存商品層原始值（可能是
+	 * null）無法還原當時判斷。</li>
 	 * <li>freightCostEstimate：毛利率是扣掉運費後才正規化的，而運費來自
-	 *     system_settings，之後會被調整。不存的話，事後拿成本價與售價重算
-	 *     會對不上快照裡的分數。</li>
+	 * system_settings，之後會被調整。不存的話，事後拿成本價與售價重算 會對不上快照裡的分數。</li>
 	 * </ul>
 	 */
 	private ProductSnapshot buildProductSnapshot(Product product) {
@@ -488,23 +472,34 @@ public class ReviewService {
 	 *
 	 * 四種組合都必須被記錄：
 	 * <table>
-	 * <tr><td>SYSTEM_AUTO + isSelected=true </td><td>系統判定，主管保留</td></tr>
-	 * <tr><td>SYSTEM_AUTO + isSelected=false</td><td><b>系統判定，主管推翻</b></td></tr>
-	 * <tr><td>MANUAL + isSelected=true      </td><td>主管自行勾選</td></tr>
-	 * <tr><td>MANUAL + isSelected=false     </td><td>不寫入（無此風險）</td></tr>
+	 * <tr>
+	 * <td>SYSTEM_AUTO + isSelected=true</td>
+	 * <td>系統判定，主管保留</td>
+	 * </tr>
+	 * <tr>
+	 * <td>SYSTEM_AUTO + isSelected=false</td>
+	 * <td><b>系統判定，主管推翻</b></td>
+	 * </tr>
+	 * <tr>
+	 * <td>MANUAL + isSelected=true</td>
+	 * <td>主管自行勾選</td>
+	 * </tr>
+	 * <tr>
+	 * <td>MANUAL + isSelected=false</td>
+	 * <td>不寫入（無此風險）</td>
+	 * </tr>
 	 * </table>
 	 *
-	 * 第二種是稽核價值最高的一筆——「系統說有問題，但主管認為可以」。
-	 * 如果只寫入主管最終勾選的清單，這筆資訊會完全消失，事後就分不出
+	 * 第二種是稽核價值最高的一筆——「系統說有問題，但主管認為可以」。 如果只寫入主管最終勾選的清單，這筆資訊會完全消失，事後就分不出
 	 * 「系統沒建議」和「系統建議了但被推翻」。
 	 *
-	 * @param selectedIds 主管最終勾選的（含他保留下來的系統建議項）
+	 * @param selectedIds     主管最終勾選的（含他保留下來的系統建議項）
 	 * @param systemSuggested 系統原本建議的（Gate 判定不通過而預先勾選的）
-	 * @param triggerReasons riskOptionId -&gt; Gate 判定原因，供系統帶入項留存說明
+	 * @param triggerReasons  riskOptionId -&gt; Gate 判定原因，供系統帶入項留存說明
 	 * @return 主管最終勾選的 id 清單，供回應使用
 	 */
-	private List<Long> saveReviewRisks(Long reviewId, List<Long> selectedIds,
-			List<Long> systemSuggested, Map<Long, String> triggerReasons) {
+	private List<Long> saveReviewRisks(Long reviewId, List<Long> selectedIds, List<Long> systemSuggested,
+			Map<Long, String> triggerReasons) {
 		List<Long> selected = selectedIds == null ? List.of() : selectedIds.stream().distinct().toList();
 		List<Long> suggested = systemSuggested == null ? List.of() : systemSuggested.stream().distinct().toList();
 
@@ -545,14 +540,12 @@ public class ReviewService {
 	/**
 	 * 查詢審核紀錄實際成立的風險項目。
 	 *
-	 * 只回傳 isSelected = true 的——被主管推翻的系統建議項雖然留在資料庫，
-	 * 但它不是「這次審核認定的風險」，不該出現在風險清單裡。
+	 * 只回傳 isSelected = true 的——被主管推翻的系統建議項雖然留在資料庫， 但它不是「這次審核認定的風險」，不該出現在風險清單裡。
 	 * 要看完整軌跡（含被推翻的項目）請另外查 review_risks。
 	 */
 	private List<Long> getRiskOptionIds(Long reviewId) {
 		return reviewRiskRepository.findById_ReviewId(reviewId).stream()
-				.filter(risk -> Boolean.TRUE.equals(risk.getIsSelected()))
-				.map(risk -> risk.getId().getRiskOptionId())
+				.filter(risk -> Boolean.TRUE.equals(risk.getIsSelected())).map(risk -> risk.getId().getRiskOptionId())
 				.toList();
 	}
 }

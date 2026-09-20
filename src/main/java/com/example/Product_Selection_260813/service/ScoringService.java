@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -158,6 +159,29 @@ public class ScoringService {
 	@Transactional(readOnly = true)
 	public Optional<ProductEvaluation> getCurrentEvaluation(Long productId) {
 		return productEvaluationRepository.findByProductId(productId);
+	}
+
+	/**
+	 * 批次版本：一次查多個商品的即時評估結果，回傳 productId -&gt; evaluation。
+	 *
+	 * 給 ReviewService.getPendingReviews() 這類「查一頁商品，順便帶出每筆的
+	 * finalScore／dataCompleteness」的清單型 API 用，比照
+	 * ProductService.resolveEvaluations() 同樣的批次查詢寫法，避免在
+	 * .map() 裡對每筆商品各自呼叫 getCurrentEvaluation()（N+1）。依
+	 * 十二-13分層決議，ReviewService 不直接注入 ProductEvaluationRepository，
+	 * 透過這裡取得。
+	 *
+	 * 查無評估紀錄的商品 id 不會出現在回傳的 Map 裡（不是塞 null 值），
+	 * 呼叫端用 Map.get(id) 取值時自然會拿到 null，寫法與
+	 * ProductService.resolveEvaluations() 的既有慣例一致。
+	 */
+	@Transactional(readOnly = true)
+	public Map<Long, ProductEvaluation> getCurrentEvaluations(Collection<Long> productIds) {
+		if (productIds == null || productIds.isEmpty()) {
+			return Map.of();
+		}
+		return productEvaluationRepository.findByProductIdIn(productIds).stream()
+				.collect(Collectors.toMap(ProductEvaluation::getProductId, evaluation -> evaluation));
 	}
 
 	/** 依評估模式ID查詢完整模式資料（用於補上評估模式名稱／版本）。 */

@@ -27,6 +27,7 @@ public class ReviewRecordResponse {
 	private Long productId;
 	private String productName;
 	private Long reviewerId;
+	private String reviewerName;
 	private Integer submissionCount;
 	private ReviewRecordReviewStatus reviewStatus;
 	private LocalDateTime reviewedAt;
@@ -55,14 +56,6 @@ public class ReviewRecordResponse {
 
 	private String reviewComment;
 	private List<Long> riskOptionIds;
-	/**
-	 * ⚠️ 2026-09-17補上：reviewerId 只是使用者編號，畫面上完全看不出「誰審的」
-	 * （見本檔案類別註解「reviewerId 顯示不了」）。改由 ReviewService 批次查
-	 * app_users 解出姓名後，用 withReviewerName() 補上，不在這個 DTO 自己
-	 * 查資料庫（維持 from() 只做欄位搬移、不做查詢的既有慣例）。找不到對應
-	 * 帳號（例如帳號已被刪除）時維持 null，前端顯示「—」。
-	 */
-	private String reviewerName;
 
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
@@ -147,7 +140,17 @@ public class ReviewRecordResponse {
 		this.reviewerName = reviewerName;
 	}
 
-	/** 鏈式寫法，呼叫端批次查完姓名後直接補上，不需要另外呼叫 setter。 */
+	/**
+	 * 補上批次解析好的審核人姓名，回傳 this 方便鏈式呼叫，用法同
+	 * ProductResponse.withEvaluationSummary()：
+	 * ReviewRecordResponse.from(record, riskIds).withReviewerName(
+	 *     record.getReviewerId() == null ? null : nameById.get(record.getReviewerId()))
+	 *
+	 * reviewerId 只是使用者編號，ReviewRecord 本身沒有存姓名（正確──姓名屬於
+	 * app_users，不是審核紀錄該存的欄位），解析姓名要批次查 app_users，
+	 * 因此跟 finalScore／dataCompleteness 一樣是「查完才填」，不透過
+	 * from() 直接組出來，避免在 from() 裡面藏一次額外的資料庫查詢。
+	 */
 	public ReviewRecordResponse withReviewerName(String reviewerName) {
 		this.reviewerName = reviewerName;
 		return this;
