@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.dto.response;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
@@ -82,6 +83,15 @@ public class ProductResponse {
 	 * 為 optional，樣板不應假設清單頁每一筆都有值。
 	 */
 	private GateResult.Summary gateResults;
+
+	/**
+	 * 第三個「查完才填」例外，語意同上：商品的自訂屬性答案（fieldCode →
+	 * value），只有 ProductService.getProduct()（單筆詳情）才會透過
+	 * withCustomFieldValues() 補上，清單／搜尋端點恆為 null——理由同
+	 * gateResults：清單頁一次列出 N 筆，每筆都額外查一次答案表的成本
+	 * 不划算，且清單頁目前也沒有畫面需要顯示這些答案。
+	 */
+	private Map<String, Object> customFieldValues;
 
 	private ProductReviewStatus reviewStatus;
 	private ProductCandidateStatus candidateStatus;
@@ -204,6 +214,12 @@ public class ProductResponse {
 	 */
 	public ProductResponse withGateResults(GateResult.Summary gateResults) {
 		this.gateResults = gateResults;
+		return this;
+	}
+
+	/** 補上自訂屬性答案，鏈式呼叫，用法同 withGateResults()。 */
+	public ProductResponse withCustomFieldValues(Map<String, Object> customFieldValues) {
+		this.customFieldValues = customFieldValues;
 		return this;
 	}
 
@@ -413,6 +429,14 @@ public class ProductResponse {
 
 	public void setGateResults(GateResult.Summary gateResults) {
 		this.gateResults = gateResults;
+	}
+
+	public Map<String, Object> getCustomFieldValues() {
+		return customFieldValues;
+	}
+
+	public void setCustomFieldValues(Map<String, Object> customFieldValues) {
+		this.customFieldValues = customFieldValues;
 	}
 
 	public ProductReviewStatus getReviewStatus() {

@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.service.scoring;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
@@ -13,10 +14,13 @@ import com.example.Product_Selection_260813.enums.FactorStrategyCode;
  * 人工估值（0~1 小數）× 固定倍率，clamp 到 0~100。
  *
  * 邏輯比照既有 ProductFactorScorer.scorePurchaseRate()：預設倍率 100，
- * 可透過 strategyParams 的 "scale" 覆寫。目前系統沒有第二個「0~1 小數人工估值」
- * 欄位可以綁定這個策略（唯一現成的 estimated_purchase_rate 已經被 PURCHASE_RATE
- * 用掉），FactorDataSource 裡也還沒有對應的候選值——這個策略先實作好、
- * 等真的新增這種欄位時直接掛上去即可，不需要再動這個類別。
+ * 可透過 strategyParams 的 "scale" 覆寫。
+ *
+ * 2026-09-20更新：固定的 Product 欄位裡仍然沒有第二個「0~1 小數人工估值」
+ * 可以綁定（唯一現成的 estimated_purchase_rate 已經被 PURCHASE_RATE 用掉），
+ * 但「開新計分因子資料源」最後一階段上線後，管理層可以在設定頁新增一個
+ * `PERCENT_0_1` 型態的自訂商品屬性題目，這個策略就能綁定它——見
+ * FactorRawValueResolver，資料源不再限定 FactorDataSource 這個固定 enum。
  */
 @Component
 public class ManualPercentStrategy implements FactorCalculationStrategy {
@@ -29,8 +33,8 @@ public class ManualPercentStrategy implements FactorCalculationStrategy {
 	}
 
 	@Override
-	public BigDecimal calculate(Product product, FactorDefinition definition) {
-		BigDecimal raw = definition.getDataSourceCode().extractRawValue(product);
+	public BigDecimal calculate(Product product, FactorDefinition definition, Map<Long, BigDecimal> customFieldValues) {
+		BigDecimal raw = FactorRawValueResolver.resolve(product, definition, customFieldValues);
 		if (raw == null) {
 			return null;
 		}

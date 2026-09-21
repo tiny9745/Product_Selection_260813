@@ -7,18 +7,19 @@ import org.springframework.stereotype.Component;
 import com.example.Product_Selection_260813.dto.weather.WeatherSignal;
 
 /**
- * 佔位實作：回傳空清單，讓 WeatherCampaignSyncService 可以先完整寫出、
- * 先部署，天氣檔期同步邏輯先不會做任何事（不會建立任何 WEATHER 類別的
- * festive_campaigns），直到真正接上 Open-Meteo（或其他來源）的實作
- * 出現並取代這個 Bean 為止。
+ * 佔位／備援實作：一律回傳空清單，讓WeatherCampaignSyncService的天氣檔期
+ * 同步不會建立任何WEATHER類別的festive_campaigns。
  *
- * TODO：實作真正的 WeatherClient（呼叫 Open-Meteo Forecast API）＋
- * WeatherNormalizer（依規劃文件第11節的門檻規則，把 Temperature／
- * Humidity／Precipitation Probability 等原始數值轉成 WeatherSignalType），
- * 再依規劃文件第15節做區域聚合（例如南部＝台南＋高雄＋屏東取多數決
- * 或平均），最後才組成這裡要回傳的 List&lt;WeatherSignal&gt;。
- * 完成後把這個類別的 @Component 拿掉（或改標 @Component("stub") 並
- * 讓真正的實作標 @Primary），不用改動任何呼叫端。
+ * <b>現況（2026-09-21更新，取代舊版TODO註解）：</b>目前有兩個實作並存：本類別
+ * （模擬資料，不呼叫外部API）與{@link OpenMeteoWeatherSignalProvider}（正式
+ * 串接Open-Meteo Forecast API，標註{@code @Primary}，Spring預設會注入這
+ * 一個）——與LlmAnalysisService／GeminiAnalysisServiceImpl／
+ * MockLlmAnalysisService的既有慣例完全一致。
+ *
+ * 切換方式：拿掉OpenMeteoWeatherSignalProvider的{@code @Primary}（或改用
+ * {@code @Qualifier}指定注入本類別），即可暫時停用天氣功能（例如Open-Meteo
+ * 發生大規模異常、除錯、demo前想先確認天氣功能不會誤動到既有檔期），
+ * WeatherCampaignSyncService不需要任何更動。
  */
 @Component
 public class StubWeatherSignalProvider implements WeatherSignalProvider {

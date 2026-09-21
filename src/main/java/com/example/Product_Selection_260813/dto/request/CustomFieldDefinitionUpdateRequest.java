@@ -10,21 +10,23 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * POST /api/settings/custom-field-definitions 的 Request Body：新增自訂商品屬性題目。
+ * PUT /api/settings/custom-field-definitions/{id}：編輯自訂商品屬性題目。
  *
- * applicableRootProductTypeIds 省略或傳空陣列＝適用全部品類；有傳值時，每個
- * id 都必須是「大類」（product_types.level=1），Service 層會驗證，不是大類
- * 一律拒絕——避免不小心選到小類，导致這一題在商品表單上永遠不會依「大類」
- * 判斷邏輯正確顯示。
+ * 刻意不是就地更新既有列，而是「新增一列（內容是修改後的版本）＋把被取代的
+ * 舊列停用」，理由見 V14 migration 類別註解與 SettingsService.
+ * updateCustomFieldDefinition()。
  *
- * isActive／createdBy 不開放外部指定，比照 FactorDefinitionCreateRequest 的
- * 既有原則：新增的一律是啟用中的題目，操作者由後端從登入資訊解析。
+ * 沒有 fieldCode 欄位：代碼是跨表（product_custom_field_values、
+ * factor_definitions.custom_field_definition_id其實是存id不是存code，但
+ * WeightFactorSnapshot.customFieldCode是凍結字串）用來識別「這是同一題」
+ * 的穩定鍵，編輯不開放修改。如果真的要換代碼，語意上是「刪除這題、另外
+ * 新增一題全新的」，不是「編輯」，請改用刪除（停用）＋新增兩個既有端點。
+ *
+ * 其餘欄位都是完整覆蓋語意（比照 CustomFieldDefinitionCreateRequest）：
+ * applicableRootProductTypeIds省略或空陣列＝適用全部品類；scaleLabels
+ * 省略＝不設定文字說明。
  */
-public class CustomFieldDefinitionCreateRequest {
-
-	@NotBlank(message = "欄位代碼不可為空")
-	@Size(max = 50, message = "欄位代碼長度不可超過50")
-	private String fieldCode;
+public class CustomFieldDefinitionUpdateRequest {
 
 	@NotBlank(message = "欄位名稱不可為空")
 	@Size(max = 100, message = "欄位名稱長度不可超過100")
@@ -41,22 +43,8 @@ public class CustomFieldDefinitionCreateRequest {
 	/** 省略或空陣列＝適用全部品類。 */
 	private List<Long> applicableRootProductTypeIds;
 
-	/**
-	 * V14新增：僅fieldType=SCALE_1_5時可以提供，key為1~5分數、value為文字說明，
-	 * 例如 {1: "非常不穩定", 5: "非常穩定"}。其餘型態送這個欄位會被
-	 * SettingsService拒絕（見ValidationMessage.CUSTOM_FIELD_SCALE_LABEL_NOT_APPLICABLE），
-	 * 避免出現「有資料但永遠不會被讀取」的死資料。可省略；SCALE_1_5型態不強制
-	 * 每個分數都要有說明，只是有填的話key必須落在1~5之間。
-	 */
+	/** 僅fieldType=SCALE_1_5時可以提供，見CustomFieldDefinitionCreateRequest類別註解。 */
 	private Map<Integer, String> scaleLabels;
-
-	public String getFieldCode() {
-		return fieldCode;
-	}
-
-	public void setFieldCode(String fieldCode) {
-		this.fieldCode = fieldCode;
-	}
 
 	public String getFieldName() {
 		return fieldName;

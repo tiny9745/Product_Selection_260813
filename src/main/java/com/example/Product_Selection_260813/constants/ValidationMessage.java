@@ -75,11 +75,21 @@ public class ValidationMessage {
 	public static final String FACTOR_DEFINITION_CODE_DUPLICATE = "因子代碼已存在（含既有七個固定因子）：";
 	public static final String FACTOR_DEFINITION_STRATEGY_NOT_IMPLEMENTED = "此運算邏輯尚未實作：";
 	public static final String FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE = "此資料源不支援所選的運算邏輯，請改選：";
+	public static final String FACTOR_DEFINITION_SOURCE_XOR_VIOLATION = "dataSourceCode 與 customFieldDefinitionId 必須恰好擇一提供";
 	public static final String FACTOR_DEFINITION_NOT_FOUND = "自訂因子不存在：";
+	// V14新增：編輯／版本鏈相關驗證訊息
+	public static final String FACTOR_DEFINITION_SUPERSEDED_CANNOT_ENABLE = "此版本已被新版本取代，無法重新啟用，請直接編輯目前生效的版本：";
 
 	public static final String CUSTOM_FIELD_CODE_DUPLICATE = "欄位代碼已存在：";
 	public static final String CUSTOM_FIELD_NOT_FOUND = "自訂商品屬性不存在：";
 	public static final String CUSTOM_FIELD_ROOT_TYPE_INVALID = "品類範圍必須是大類（不可為小類）：";
+	public static final String CUSTOM_FIELD_REQUIRED_MISSING = "以下自訂屬性為必填，請填寫：";
+	public static final String CUSTOM_FIELD_NOT_APPLICABLE = "此欄位不存在，或已停用，或不適用這個商品的品類：";
+	public static final String CUSTOM_FIELD_VALUE_INVALID = "自訂屬性數值不合法：";
+	// V14新增：編輯／版本鏈／1~5分數說明相關驗證訊息
+	public static final String CUSTOM_FIELD_SUPERSEDED_CANNOT_ENABLE = "此題目已被新版本取代，無法重新啟用，請直接編輯目前生效的版本：";
+	public static final String CUSTOM_FIELD_SCALE_LABEL_NOT_APPLICABLE = "只有1~5分數型態（SCALE_1_5）可以設定分數說明";
+	public static final String CUSTOM_FIELD_SCALE_LABEL_KEY_INVALID = "分數說明的分數必須介於1至5之間：";
 
 	// Review（商業邏輯驗證，於Service層攔截）
 	public static final String REVIEW_RISK_OPTION_INACTIVE = "風險選項已停用，無法選取：";

@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.service.scoring;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,8 +40,8 @@ public class TargetBandNormalizeStrategy implements FactorCalculationStrategy {
 	}
 
 	@Override
-	public BigDecimal calculate(Product product, FactorDefinition definition) {
-		BigDecimal raw = definition.getDataSourceCode().extractRawValue(product);
+	public BigDecimal calculate(Product product, FactorDefinition definition, Map<Long, BigDecimal> customFieldValues) {
+		BigDecimal raw = FactorRawValueResolver.resolve(product, definition, customFieldValues);
 		if (raw == null) {
 			return null;
 		}

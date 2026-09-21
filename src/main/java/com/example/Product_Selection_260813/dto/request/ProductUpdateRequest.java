@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.dto.request;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
@@ -127,7 +128,15 @@ public class ProductUpdateRequest {
 	private String certificationFlags;
 
 	@PositiveOrZero(message = "供應商產能上限不可為負數")
-	private Integer supplierMaxCapacity;
+	private Integer supplierMaxCapacity;
+
+	/**
+	 * 自訂商品屬性（動態問卷）的答案：fieldCode → value。整份覆蓋語意
+	 * （見類別註解）——送出的這個 Map 會完全取代商品原本的所有答案，
+	 * 沒有出現在這次送出內容裡的既有答案會被清除，不是「只更新有出現的
+	 * 欄位、其餘保留」。前端如果要保留某個既有答案，必須把它一併帶回來。
+	 */
+	private Map<String, Object> customFieldValues;
 
 	public Long getProductTypeId() {
 		return productTypeId;
@@ -319,5 +328,13 @@ public class ProductUpdateRequest {
 
 	public void setEstimatedPurchaseRate(BigDecimal estimatedPurchaseRate) {
 		this.estimatedPurchaseRate = estimatedPurchaseRate;
+	}
+
+	public Map<String, Object> getCustomFieldValues() {
+		return customFieldValues;
+	}
+
+	public void setCustomFieldValues(Map<String, Object> customFieldValues) {
+		this.customFieldValues = customFieldValues;
 	}
 }

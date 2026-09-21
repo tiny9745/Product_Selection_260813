@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.dto.response.ResaleReferenceOptionResponse;
 import com.example.Product_Selection_260813.dto.response.SimilarProductCandidateResponse;
 import com.example.Product_Selection_260813.service.ProductSimilarityService;
+import com.example.Product_Selection_260813.service.SettingsService;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
@@ -55,6 +57,9 @@ public class ProductController {
 
 	@Autowired
 	private ProductSimilarityService productSimilarityService;
+
+	@Autowired
+	private SettingsService settingsService;
 
 	/**
 	 * GET /api/products：品項管理主清單。 支援關鍵字、審核狀態、品項狀態、候選狀態、商品類型篩選，以及分頁/排序參數。
@@ -158,6 +163,18 @@ public class ProductController {
 			@RequestParam(value = "excludeId", required = false) Long excludeId) {
 		List<ResaleReferenceOptionResponse> result = productSimilarityService
 				.listCandidateProducts(productTypeId, supplierName, excludeId);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * GET /api/products/custom-field-schema：商品新增/編輯表單依這個
+	 * productTypeId（商品實際掛的小類）動態渲染哪些自訂屬性題目——
+	 * 業務邏輯在 SettingsService，這裡沿用類別註解說的「薄 Controller」風格。
+	 */
+	@GetMapping("/custom-field-schema")
+	public ResponseEntity<ApiResponse<List<CustomFieldDefinitionResponse>>> getCustomFieldSchema(
+			@RequestParam("productTypeId") Long productTypeId) {
+		List<CustomFieldDefinitionResponse> result = settingsService.getApplicableCustomFields(productTypeId);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

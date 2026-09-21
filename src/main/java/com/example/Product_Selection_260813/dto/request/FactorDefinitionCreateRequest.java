@@ -23,6 +23,12 @@ import jakarta.validation.constraints.Size;
  *
  * isActive／isSystemDefault 不開放外部指定，比照 RiskOptionCreateRequest 的
  * 既有原則：新增的一律是自訂、啟用中的因子。
+ *
+ * <b>2026-09-20新增：資料源二選一</b>——dataSourceCode（綁定既有 Product
+ * 固定欄位）跟 customFieldDefinitionId（綁定自訂商品屬性動態問卷題目）
+ * 恰好擇一，兩者都不送或都送會被 SettingsService.createFactorDefinition()
+ * 拒絕。這裡都不加 @NotNull：靜態的 Bean Validation 沒辦法表達「兩者恰好
+ * 一個有值」這種條件關係，驗證放在 Service 層。
  */
 public class FactorDefinitionCreateRequest {
 
@@ -40,8 +46,11 @@ public class FactorDefinitionCreateRequest {
 	@NotNull(message = "必須指定運算邏輯")
 	private FactorStrategyCode strategyCode;
 
-	@NotNull(message = "必須指定資料源")
+	/** 跟 customFieldDefinitionId 二選一，見類別註解。 */
 	private FactorDataSource dataSourceCode;
+
+	/** 跟 dataSourceCode 二選一，見類別註解。綁定 custom_field_definitions.id。 */
+	private Long customFieldDefinitionId;
 
 	/**
 	 * 該策略自己的參數，例如 MANUAL_SCALE／MANUAL_PERCENT 的 "scale"。
@@ -87,6 +96,14 @@ public class FactorDefinitionCreateRequest {
 
 	public void setDataSourceCode(FactorDataSource dataSourceCode) {
 		this.dataSourceCode = dataSourceCode;
+	}
+
+	public Long getCustomFieldDefinitionId() {
+		return customFieldDefinitionId;
+	}
+
+	public void setCustomFieldDefinitionId(Long customFieldDefinitionId) {
+		this.customFieldDefinitionId = customFieldDefinitionId;
 	}
 
 	public Map<String, BigDecimal> getStrategyParams() {

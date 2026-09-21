@@ -15,19 +15,35 @@ package com.example.Product_Selection_260813.enums;
 public enum CustomFieldType {
 
 	/** 1~5 人工評分，商品表單畫成星等或 1~5 選擇器。 */
-	SCALE_1_5,
+	SCALE_1_5(FactorStrategyCode.MANUAL_SCALE),
 
 	/** 0~1 小數人工估值，商品表單畫成百分比輸入框。 */
-	PERCENT_0_1,
+	PERCENT_0_1(FactorStrategyCode.MANUAL_PERCENT),
 
 	/** 不限範圍的原始數字，商品表單畫成一般數字輸入框。 */
-	RAW_NUMBER,
+	RAW_NUMBER(FactorStrategyCode.TARGET_BAND_NORMALIZE),
 
 	/** 純文字，不參與計分，商品表單畫成文字輸入框。 */
-	TEXT;
+	TEXT(null);
+
+	private final FactorStrategyCode compatibleStrategy;
+
+	CustomFieldType(FactorStrategyCode compatibleStrategy) {
+		this.compatibleStrategy = compatibleStrategy;
+	}
 
 	/** 計分系統只認得數值類型態；TEXT 不該出現在資料源候選清單裡。 */
 	public boolean isNumeric() {
 		return this != TEXT;
+	}
+
+	/**
+	 * 這個欄位型態綁定自訂因子時，只能搭配哪一種運算邏輯——比照
+	 * FactorDataSource.getCompatibleStrategy() 同一套設計原則：建立因子時
+	 * SettingsService 會檢查兩者是否對得上，對不上直接拒絕。TEXT 回傳
+	 * null，代表這個型態完全不能拿來當計分資料源。
+	 */
+	public FactorStrategyCode getCompatibleStrategy() {
+		return compatibleStrategy;
 	}
 }

@@ -24,6 +24,22 @@ public class WeightFactorSnapshot {
     /** 這個因子當時的策略參數（例如 MANUAL_SCALE 的 "scale" 倍率）。同上，僅自訂因子有值。 */
     private Map<String, BigDecimal> strategyParams;
 
+    /**
+     * 這個因子當時綁定的既有 Product 固定欄位（FactorDataSource 的 name()）。
+     * 跟 customFieldCode 二選一，只會有一個非 null；兩者都是 null 代表這是
+     * 既有七個固定因子之一。2026-09-20新增，理由同 strategyCode——資料源
+     * 之後可能被改，Snapshot 要留住當時真正讀的是哪一個。
+     */
+    private String dataSourceCode;
+
+    /**
+     * 這個因子當時綁定的自訂商品屬性（動態問卷）題目代碼。跟 dataSourceCode
+     * 二選一。凍結字串代碼而非只存 id：就算這個題目之後被刪除，Snapshot
+     * 仍然清楚記著「當時讀的是哪個代碼」，不會因為外鍵對應的資料消失就
+     * 看不出來源。
+     */
+    private String customFieldCode;
+
     public WeightFactorSnapshot() {
     }
 
@@ -73,5 +89,21 @@ public class WeightFactorSnapshot {
 
     public void setStrategyParams(Map<String, BigDecimal> strategyParams) {
         this.strategyParams = strategyParams;
+    }
+
+    public String getDataSourceCode() {
+        return dataSourceCode;
+    }
+
+    public void setDataSourceCode(String dataSourceCode) {
+        this.dataSourceCode = dataSourceCode;
+    }
+
+    public String getCustomFieldCode() {
+        return customFieldCode;
+    }
+
+    public void setCustomFieldCode(String customFieldCode) {
+        this.customFieldCode = customFieldCode;
     }
 }

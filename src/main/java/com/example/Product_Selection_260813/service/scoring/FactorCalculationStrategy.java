@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.service.scoring;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.Product;
@@ -19,7 +20,10 @@ public interface FactorCalculationStrategy {
 	FactorStrategyCode getCode();
 
 	/**
+	 * @param customFieldValues 這個商品的自訂屬性答案（fieldDefinitionId →
+	 *                           數值），供 {@link FactorRawValueResolver}
+	 *                           取值用；見該類別註解。
 	 * @return 0~100 的分數；商品該因子沒有可用資料時回傳 null
 	 */
-	BigDecimal calculate(Product product, FactorDefinition definition);
+	BigDecimal calculate(Product product, FactorDefinition definition, Map<Long, BigDecimal> customFieldValues);
 }

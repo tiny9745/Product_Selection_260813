@@ -12,6 +12,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -33,6 +34,7 @@ import com.example.Product_Selection_260813.dto.response.FestivalBoostResponse;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
+import com.example.Product_Selection_260813.entity.CustomFieldDefinition;
 import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
@@ -54,6 +56,7 @@ import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
+import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
@@ -153,6 +156,9 @@ public class ScoringService {
 	@Autowired
 	private FactorDefinitionRepository factorDefinitionRepository;
 
+	@Autowired
+	private CustomFieldDefinitionRepository customFieldDefinitionRepository;
+
 	// system_settings的key，對應「目前生效評估模式」的id（見SystemSettingRepository
 	// 類別註解裡的使用範例，本方法沿用同一把key，不重新發明）。
 	private static final String CURRENT_EVALUATION_MODE_KEY = "current_evaluation_mode_id";
@@ -249,12 +255,29 @@ public class ScoringService {
 			// 2026-09-20修正N+1：原本toWeightFactorSnapshot()對每個factor各自查一次
 			// factorDefinitionRepository.findByFactorCode()，一個模式7~11個因子就是
 			// 7~11次獨立查詢，且這支方法在Settings頁載入模式權重時每個模式都會呼叫一次。
-			// 改成先用findByFactorCodeIn()一次撈完這個模式所有因子代碼對應的定義，
-			// 组成Map後查表，整個buildWeightSnapshot()只多一次查詢，不受因子數量影響。
+			// 改成先用findByFactorCodeInAndIsActiveTrue()一次撈完這個模式所有因子代碼
+			// 對應的定義，组成Map後查表，整個buildWeightSnapshot()只多一次查詢，
+			// 不受因子數量影響。V14修正：原本用findByFactorCodeIn()（不篩isActive），
+			// 版本鏈設計上線後，一個代碼可能同時存在舊版本（isActive=false）與新版本
+			// （isActive=true）兩列，若沿用原本的方法，Collectors.toMap()會因為同一個
+			// key出現兩次直接丟IllegalStateException（Duplicate key）。只查生效中的，
+			// 天生保證每個代碼最多一列。
 			Map<String, FactorDefinition> definitionsByCode = factorDefinitionRepository
-					.findByFactorCodeIn(factors.stream().map(EvaluationFactor::getFactorCode).toList()).stream()
+					.findByFactorCodeInAndIsActiveTrue(factors.stream().map(EvaluationFactor::getFactorCode).toList())
+					.stream()
 					.collect(Collectors.toMap(FactorDefinition::getFactorCode, d -> d));
-			snapshot.setFactors(factors.stream().map(f -> toWeightFactorSnapshot(f, definitionsByCode)).toList());
+			// 同一批次把可能用到的自訂商品屬性代碼也查出來，理由跟上面一致：
+			// 避免 toWeightFactorSnapshot() 對每個綁了自訂屬性的因子各自查一次
+			// custom_field_definitions。凍結 fieldCode 字串（不是只存 id）是為了
+			// 可重現性——就算這個自訂屬性題目之後被刪除，Snapshot 仍然清楚記著
+			// 「當時讀的是哪個代碼」，不會因為外鍵對應的資料消失就看不出來源。
+			List<Long> customFieldIds = definitionsByCode.values().stream()
+					.map(FactorDefinition::getCustomFieldDefinitionId).filter(Objects::nonNull).toList();
+			Map<Long, String> customFieldCodesById = customFieldIds.isEmpty() ? Map.of()
+					: customFieldDefinitionRepository.findAllById(customFieldIds).stream()
+							.collect(Collectors.toMap(CustomFieldDefinition::getId, CustomFieldDefinition::getFieldCode));
+			snapshot.setFactors(factors.stream()
+					.map(f -> toWeightFactorSnapshot(f, definitionsByCode, customFieldCodesById)).toList());
 
 			// 演算法參數一併存進快照。只存權重不存參數，事後仍然無法重現當時的
 			// 計算——這些數字都放在 system_settings 且刻意設計成可調，而可調就
@@ -287,7 +310,7 @@ public class ScoringService {
 	}
 
 	private WeightFactorSnapshot toWeightFactorSnapshot(EvaluationFactor factor,
-			Map<String, FactorDefinition> definitionsByCode) {
+			Map<String, FactorDefinition> definitionsByCode, Map<Long, String> customFieldCodesById) {
 		WeightFactorSnapshot dto = new WeightFactorSnapshot();
 		dto.setFactorCode(factor.getFactorCode());
 		dto.setFactorName(factor.getFactorName());
@@ -301,6 +324,14 @@ public class ScoringService {
 		if (definition != null) {
 			dto.setStrategyCode(definition.getStrategyCode() == null ? null : definition.getStrategyCode().name());
 			dto.setStrategyParams(definition.getStrategyParams());
+			// 2026-09-20新增：資料源同樣要凍結，理由跟 strategyCode 一致——
+			// 因子綁定的資料源之後可能被改（例如原本綁自訂屬性A，後來改綁B），
+			// Snapshot 要留住「當時真正讀的是哪一個」。二選一，只會有一個非null。
+			if (definition.getDataSourceCode() != null) {
+				dto.setDataSourceCode(definition.getDataSourceCode().name());
+			} else if (definition.getCustomFieldDefinitionId() != null) {
+				dto.setCustomFieldCode(customFieldCodesById.get(definition.getCustomFieldDefinitionId()));
+			}
 		}
 		return dto;
 	}

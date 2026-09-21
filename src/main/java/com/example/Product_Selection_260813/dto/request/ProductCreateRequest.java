@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.dto.request;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
@@ -141,7 +142,19 @@ public class ProductCreateRequest {
 	private String certificationFlags;
 
 	@PositiveOrZero(message = "供應商產能上限不可為負數")
-	private Integer supplierMaxCapacity;
+	private Integer supplierMaxCapacity;
+
+	/**
+	 * 自訂商品屬性（動態問卷）的答案：fieldCode → value。2026-09-20新增，
+	 * 「開新計分因子資料源」需求 Phase 2。省略或傳 null 等同「這次沒有填寫
+	 * 任何自訂屬性」——ProductService 會依 GET /api/products/custom-field-schema
+	 * 回傳的必填清單決定要不要因此擋下，不是這裡用 @NotNull 卡死，因為
+	 * 「這個品類完全沒有自訂屬性」跟「有自訂屬性但這次沒填」兩種情況都合法
+	 * 送出空/缺省的這個欄位，必填檢查要看當下品類實際適用哪些題目才能判斷，
+	 * 不是靜態的 Bean Validation 規則能表達的，因此驗證放在 Service 層
+	 * （見 ProductService.validateAndCollectCustomFieldValues()）。
+	 */
+	private Map<String, Object> customFieldValues;
 
 	public Long getProductTypeId() {
 		return productTypeId;
@@ -333,5 +346,13 @@ public class ProductCreateRequest {
 
 	public void setEstimatedPurchaseRate(BigDecimal estimatedPurchaseRate) {
 		this.estimatedPurchaseRate = estimatedPurchaseRate;
+	}
+
+	public Map<String, Object> getCustomFieldValues() {
+		return customFieldValues;
+	}
+
+	public void setCustomFieldValues(Map<String, Object> customFieldValues) {
+		this.customFieldValues = customFieldValues;
 	}
 }

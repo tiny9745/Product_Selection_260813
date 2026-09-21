@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -19,11 +20,13 @@ import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.entity.ProductCustomFieldValue;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.PackageSizeTier;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
+import com.example.Product_Selection_260813.repository.ProductCustomFieldValueRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
@@ -60,6 +63,7 @@ public class ProductFactorScorer {
 	private final HistoricalScoreCalculator historicalScoreCalculator;
 	private final FactorDefinitionRepository factorDefinitionRepository;
 	private final FactorStrategyRegistry factorStrategyRegistry;
+	private final ProductCustomFieldValueRepository productCustomFieldValueRepository;
 
 	@Autowired
 	public ProductFactorScorer(AudienceProfileRepository audienceProfileRepository,
@@ -68,7 +72,8 @@ public class ProductFactorScorer {
 			AlgorithmSettings algorithmSettings,
 			HistoricalScoreCalculator historicalScoreCalculator,
 			FactorDefinitionRepository factorDefinitionRepository,
-			FactorStrategyRegistry factorStrategyRegistry) {
+			FactorStrategyRegistry factorStrategyRegistry,
+			ProductCustomFieldValueRepository productCustomFieldValueRepository) {
 		this.audienceProfileRepository = audienceProfileRepository;
 		this.trendSignalRepository = trendSignalRepository;
 		this.scoreBandResolver = scoreBandResolver;
@@ -76,6 +81,7 @@ public class ProductFactorScorer {
 		this.historicalScoreCalculator = historicalScoreCalculator;
 		this.factorDefinitionRepository = factorDefinitionRepository;
 		this.factorStrategyRegistry = factorStrategyRegistry;
+		this.productCustomFieldValueRepository = productCustomFieldValueRepository;
 	}
 
 	/**
@@ -93,8 +99,20 @@ public class ProductFactorScorer {
 		scores.put(FactorCode.PURCHASE_RATE, scorePurchaseRate(product));
 		scores.put(FactorCode.TREND_HEAT, scoreTrendHeat(product));
 
+		// 2026-09-20新增：自訂因子可能綁定自訂商品屬性（動態問卷）答案而非
+		// Product entity 固定欄位（見 FactorDefinition／FactorRawValueResolver
+		// 的說明）。這裡一次查完這個商品所有數值類答案，組成 Map 後傳給每個
+		// 自訂因子共用，不要讓每個因子各自查一次 product_custom_field_values
+		// ——同一個商品可能同時有好幾個自訂因子綁不同的自訂屬性，重複查詢
+		// 沒有必要。
+		Map<Long, BigDecimal> customFieldValues = productCustomFieldValueRepository.findByProductId(product.getId())
+				.stream().filter(v -> v.getNumericValue() != null)
+				.collect(Collectors.toMap(ProductCustomFieldValue::getFieldDefinitionId,
+						ProductCustomFieldValue::getNumericValue));
+
 		for (FactorDefinition definition : factorDefinitionRepository.findByIsActiveTrue()) {
-			scores.put(definition.getFactorCode(), factorStrategyRegistry.calculate(product, definition));
+			scores.put(definition.getFactorCode(),
+					factorStrategyRegistry.calculate(product, definition, customFieldValues));
 		}
 		return scores;
 	}

@@ -32,14 +32,17 @@ public class FactorStrategyRegistry {
 	}
 
 	/**
+	 * @param customFieldValues 這個商品的自訂屬性答案，直接轉呼叫給策略——
+	 *                           見 FactorCalculationStrategy.calculate() 與
+	 *                           FactorRawValueResolver 的說明。
 	 * @return 計算結果；strategyCode 沒有對應實作時回傳 null 而非拋例外——
 	 *         理論上不會發生（建立 FactorDefinition 時已驗證過 strategyCode
 	 *         必須是已實作的策略），但計分流程不該因為一筆設定異常的自訂因子
 	 *         而整個中斷，寧可讓這一項從分母排除。
 	 */
-	public BigDecimal calculate(Product product, FactorDefinition definition) {
+	public BigDecimal calculate(Product product, FactorDefinition definition, Map<Long, BigDecimal> customFieldValues) {
 		FactorCalculationStrategy strategy = strategiesByCode.get(definition.getStrategyCode());
-		return strategy == null ? null : strategy.calculate(product, definition);
+		return strategy == null ? null : strategy.calculate(product, definition, customFieldValues);
 	}
 
 	/** 供 SettingsService 驗證用：建立自訂因子時，strategyCode 必須是這裡真的有實作的。 */

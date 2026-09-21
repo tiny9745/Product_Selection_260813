@@ -1,9 +1,12 @@
 package com.example.Product_Selection_260813.entity;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.example.Product_Selection_260813.enums.CustomFieldType;
 
@@ -62,6 +65,26 @@ public class CustomFieldDefinition {
 
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = true;
+
+	/**
+	 * 編輯產生新版本時，指向被取代的舊版本 id；null 代表這是最初版本，或這一列
+	 * 從未被編輯取代過（單純停用/啟用）。V14 新增，理由與用途同
+	 * FactorDefinition.previousVersionId——SettingsService.
+	 * enableCustomFieldDefinition() 用同一套邏輯擋下「重新啟用已被取代的舊題目」。
+	 */
+	@Column(name = "previous_version_id")
+	private Long previousVersionId;
+
+	/**
+	 * 僅 fieldType=SCALE_1_5 時可能有值：1~5 每個分數代表的文字說明，
+	 * 例如「供應穩定性」的 5 代表「非常穩定」。key 為分數（1~5），value 為
+	 * 說明文字。其餘型態這裡恆為 null，SettingsService 會在建立/編輯時驗證
+	 * （見 validateScaleLabels()），不允許非 SCALE_1_5 型態夾帶這個欄位，
+	 * 避免出現「有資料但永遠不會被讀取」的死資料。
+	 */
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "scale_labels")
+	private Map<Integer, String> scaleLabels;
 
 	@Column(name = "created_by")
 	private Long createdBy;
@@ -131,6 +154,22 @@ public class CustomFieldDefinition {
 
 	public void setIsActive(Boolean isActive) {
 		this.isActive = isActive;
+	}
+
+	public Long getPreviousVersionId() {
+		return previousVersionId;
+	}
+
+	public void setPreviousVersionId(Long previousVersionId) {
+		this.previousVersionId = previousVersionId;
+	}
+
+	public Map<Integer, String> getScaleLabels() {
+		return scaleLabels;
+	}
+
+	public void setScaleLabels(Map<Integer, String> scaleLabels) {
+		this.scaleLabels = scaleLabels;
 	}
 
 	public Long getCreatedBy() {

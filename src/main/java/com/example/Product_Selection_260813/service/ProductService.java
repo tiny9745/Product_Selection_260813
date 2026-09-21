@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,11 +35,17 @@ import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
+import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
+import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
+import com.example.Product_Selection_260813.repository.ProductCustomFieldValueRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
 import com.example.Product_Selection_260813.entity.AppUser;
+import com.example.Product_Selection_260813.entity.CustomFieldDefinition;
+import com.example.Product_Selection_260813.entity.ProductCustomFieldValue;
 import com.example.Product_Selection_260813.entity.Product;
+import com.example.Product_Selection_260813.enums.CustomFieldType;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
@@ -112,6 +119,15 @@ public class ProductService {
 
 	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
+
+	@Autowired
+	private SettingsService settingsService;
+
+	@Autowired
+	private ProductCustomFieldValueRepository productCustomFieldValueRepository;
+
+	@Autowired
+	private CustomFieldDefinitionRepository customFieldDefinitionRepository;
 
 	// ========================= 查詢 =========================
 
@@ -287,7 +303,37 @@ public class ProductService {
 
 		return ProductResponse.from(product)
 				.withCreatedByName(createdByName)
-				.withGateResults(gateResults);
+				.withGateResults(gateResults)
+				.withCustomFieldValues(loadCustomFieldValues(product.getId()));
+	}
+
+	/**
+	 * 把商品的自訂屬性答案組成 fieldCode → value 的 Map，供
+	 * ProductResponse.withCustomFieldValues() 使用。TEXT 型態回傳 textValue，
+	 * 其餘三種數值類回傳 numericValue；只組已經有填的答案，沒填的題目不會
+	 * 出現在這個 Map 裡（稀疏表天生行為，不補 null 佔位）。
+	 */
+	private Map<String, Object> loadCustomFieldValues(Long productId) {
+		List<ProductCustomFieldValue> values = productCustomFieldValueRepository.findByProductId(productId);
+		if (values.isEmpty()) {
+			return Map.of();
+		}
+		List<Long> fieldIds = values.stream().map(ProductCustomFieldValue::getFieldDefinitionId).toList();
+		Map<Long, CustomFieldDefinition> definitionsById = customFieldDefinitionRepository.findAllById(fieldIds)
+				.stream().collect(Collectors.toMap(CustomFieldDefinition::getId, d -> d));
+		Map<String, Object> result = new LinkedHashMap<>();
+		for (ProductCustomFieldValue value : values) {
+			CustomFieldDefinition definition = definitionsById.get(value.getFieldDefinitionId());
+			if (definition == null) {
+				// 理論上不會發生（field_definition_id 有FK約束），防禦性略過。
+				continue;
+			}
+			Object rawValue = definition.getFieldType() == CustomFieldType.TEXT
+					? value.getTextValue()
+					: value.getNumericValue();
+			result.put(definition.getFieldCode(), rawValue);
+		}
+		return result;
 	}
 
 	// ========================= 新增 =========================
@@ -372,6 +418,11 @@ public class ProductService {
 
 		Product saved = productRepository.save(product);
 
+		// 自訂商品屬性答案（動態問卷 Phase 2）：新增時直接寫入，不需要先刪舊的
+		// （isUpdate=false），必填檢查依這個商品品類實際適用哪些題目判斷，
+		// 見 validateAndSaveCustomFieldValues() 的類別註解。
+		validateAndSaveCustomFieldValues(saved, request.getCustomFieldValues(), false);
+
 		// Demo緊急補上的觸發點（見ScoringService類別Java Doc）：新增成功後立即
 		// 重算評估分數，讓品項詳情頁一建立就有分數可看，不用等使用者手動觸發其他動作。
 		scoringService.calculateEvaluation(saved.getId(), null);
@@ -452,6 +503,11 @@ public class ProductService {
 		product.setUpdatedBy(resolveUserId(username));
 
 		Product saved = productRepository.save(product);
+
+		// 自訂商品屬性答案：整份覆蓋（isUpdate=true）——先刪光這個商品的舊答案，
+		// 再依這次送來的內容重新寫入，見 ProductUpdateRequest.customFieldValues
+		// 類別註解的整份覆蓋語意說明。
+		validateAndSaveCustomFieldValues(saved, request.getCustomFieldValues(), true);
 
 		// Demo緊急補上的觸發點：編輯成功後重算，確保分數反映最新欄位內容
 		// （例如成本價/售價變動會影響BUSINESS分項）。
@@ -935,5 +991,99 @@ public class ProductService {
 	 */
 	private static String nameOrNull(Enum<?> value) {
 		return value == null ? null : value.name();
+	}
+
+
+	/**
+	 * 驗證並寫入自訂商品屬性答案（動態問卷 Phase 2）。
+	 *
+	 * 三項防呆，對應「開新計分因子資料源」討論時說好的「未合法時的防呆」：
+	 * <ol>
+	 * <li>必填檢查——只檢查「適用於這個商品品類」的必填題目（見
+	 *     SettingsService.getApplicableCustomFields()），不是全系統所有題目
+	 *     都要填，跟品類無關的題目不該擋住這個商品的送出。</li>
+	 * <li>欄位代碼必須合法——送來的 key 對不到「適用於這個商品品類的生效中
+	 *     題目」，一律拒絕，不悄悄忽略。這樣可以同時擋下三種情況：打錯代碼、
+	 *     題目已停用、題目雖然存在但品類不適用（例如送了一個限定「生鮮」
+	 *     的題目給日用品類商品）。</li>
+	 * <li>數值範圍檢查——SCALE_1_5 必須介於 1~5，PERCENT_0_1 必須介於 0~1，
+	 *     RAW_NUMBER 不限範圍；TEXT 型態不檢查數值範圍，直接存文字。</li>
+	 * </ol>
+	 *
+	 * @param isUpdate true 時先清空這個商品的舊答案再重新寫入（整份覆蓋，
+	 *                 見 ProductUpdateRequest.customFieldValues 類別註解）；
+	 *                 false（新增商品）不需要清空，因為不可能有舊答案。
+	 */
+	private void validateAndSaveCustomFieldValues(Product product, Map<String, Object> customFieldValues,
+			boolean isUpdate) {
+		List<CustomFieldDefinitionResponse> applicable = settingsService
+				.getApplicableCustomFields(product.getProductTypeId());
+		Map<String, CustomFieldDefinitionResponse> definitionsByCode = applicable.stream()
+				.collect(Collectors.toMap(CustomFieldDefinitionResponse::getFieldCode, d -> d));
+
+		Map<String, Object> input = customFieldValues == null ? Map.of() : customFieldValues;
+
+		List<String> missingRequired = applicable.stream().filter(CustomFieldDefinitionResponse::getIsRequired)
+				.map(CustomFieldDefinitionResponse::getFieldCode).filter(code -> input.get(code) == null).toList();
+		if (!missingRequired.isEmpty()) {
+			throw new IllegalArgumentException(
+					ValidationMessage.CUSTOM_FIELD_REQUIRED_MISSING + String.join("、", missingRequired));
+		}
+
+		if (isUpdate) {
+			productCustomFieldValueRepository.deleteByProductId(product.getId());
+		}
+
+		for (Map.Entry<String, Object> entry : input.entrySet()) {
+			String code = entry.getKey();
+			Object rawValue = entry.getValue();
+			// 空值視為「這次沒填」，不建立列——稀疏表天生行為，不用一筆
+			// numeric_value／text_value 皆為null的列去記錄「使用者填過但填空」。
+			if (rawValue == null) {
+				continue;
+			}
+
+			CustomFieldDefinitionResponse definition = definitionsByCode.get(code);
+			if (definition == null) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_NOT_APPLICABLE + code);
+			}
+
+			ProductCustomFieldValue value = new ProductCustomFieldValue();
+			value.setProductId(product.getId());
+			value.setFieldDefinitionId(definition.getId());
+
+			if ("TEXT".equals(definition.getFieldType())) {
+				value.setTextValue(String.valueOf(rawValue));
+			} else {
+				BigDecimal numeric = parseCustomFieldNumber(rawValue, code);
+				validateCustomFieldRange(definition.getFieldType(), numeric, code);
+				value.setNumericValue(numeric);
+			}
+			productCustomFieldValueRepository.save(value);
+		}
+	}
+
+	private BigDecimal parseCustomFieldNumber(Object rawValue, String code) {
+		try {
+			if (rawValue instanceof Number number) {
+				return new BigDecimal(number.toString());
+			}
+			return new BigDecimal(String.valueOf(rawValue).trim());
+		} catch (NumberFormatException e) {
+			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_VALUE_INVALID + code + "（必須是數字）");
+		}
+	}
+
+	private void validateCustomFieldRange(String fieldType, BigDecimal value, String code) {
+		if ("SCALE_1_5".equals(fieldType)) {
+			if (value.compareTo(BigDecimal.ONE) < 0 || value.compareTo(BigDecimal.valueOf(5)) > 0) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_VALUE_INVALID + code + "（必須介於1~5）");
+			}
+		} else if ("PERCENT_0_1".equals(fieldType)) {
+			if (value.compareTo(BigDecimal.ZERO) < 0 || value.compareTo(BigDecimal.ONE) > 0) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_VALUE_INVALID + code + "（必須介於0~1）");
+			}
+		}
+		// RAW_NUMBER 不限範圍，不需要處理。
 	}
 }

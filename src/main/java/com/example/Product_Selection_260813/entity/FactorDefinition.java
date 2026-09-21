@@ -54,9 +54,31 @@ public class FactorDefinition {
 	@Column(name = "strategy_code", nullable = false, length = 30)
 	private FactorStrategyCode strategyCode;
 
+	/**
+	 * 綁定的既有 Product 欄位，跟 customFieldDefinitionId 二選一——這兩個
+	 * 欄位不會同時有值，也不會同時是 null，由 SettingsService.
+	 * createFactorDefinition() 驗證。改成可為 null（V13 migration 之前是
+	 * NOT NULL）：本來假設每個自訂因子都一定綁定一個寫死的 Product 欄位，
+	 * 但自訂商品屬性（動態問卷）上線後，因子也可能改綁一個動態問卷題目，
+	 * 那種情況這裡就是 null，見 customFieldDefinitionId 的說明。
+	 */
 	@Enumerated(EnumType.STRING)
-	@Column(name = "data_source_code", nullable = false, length = 50)
+	@Column(name = "data_source_code", length = 50)
 	private FactorDataSource dataSourceCode;
+
+	/**
+	 * 綁定的自訂商品屬性題目（custom_field_definitions.id），跟
+	 * dataSourceCode 二選一。2026-09-20新增，「開新計分因子資料源」最後
+	 * 一階段——讓因子除了讀 Product entity 的固定欄位，也能讀管理層自己
+	 * 在設定頁新增的動態問卷答案（product_custom_field_values），不需要
+	 * 工程師每次都要盤點既有欄位、改 FactorDataSource enum。
+	 *
+	 * 這裡故意存 id 而非 fieldCode：id 是穩定的資料庫外鍵，fieldCode
+	 * 理論上不可變（目前沒有重新命名的 API），但存 id 讓關聯更明確、
+	 * 也讓之後如果真的開放改名時不用煩惱這裡的參照要不要跟著更新。
+	 */
+	@Column(name = "custom_field_definition_id")
+	private Long customFieldDefinitionId;
 
 	/**
 	 * 該策略自己的參數，例如 MANUAL_SCALE／MANUAL_PERCENT 的 "scale" 倍率。
@@ -73,6 +95,17 @@ public class FactorDefinition {
 	/** 既有七個因子固定為 false（它們根本不在這張表）；這張表目前每一筆都是自訂因子。 */
 	@Column(name = "is_system_default", nullable = false)
 	private Boolean isSystemDefault = false;
+
+	/**
+	 * 編輯產生新版本時，指向被取代的舊版本 id；null 代表這是最初版本，或這一列
+	 * 從未被編輯取代過（單純停用/啟用）。V14 新增，見 migration 類別註解。
+	 *
+	 * 用途只有一個：擋下「重新啟用一個已經被新版本取代的舊列」——
+	 * SettingsService.enableFactorDefinition() 會查「有沒有其他列的
+	 * previousVersionId 指向這一列」，有的話代表這一列已被取代，拒絕啟用。
+	 */
+	@Column(name = "previous_version_id")
+	private Long previousVersionId;
 
 	@Column(name = "created_by")
 	private Long createdBy;
@@ -136,6 +169,14 @@ public class FactorDefinition {
 		this.dataSourceCode = dataSourceCode;
 	}
 
+	public Long getCustomFieldDefinitionId() {
+		return customFieldDefinitionId;
+	}
+
+	public void setCustomFieldDefinitionId(Long customFieldDefinitionId) {
+		this.customFieldDefinitionId = customFieldDefinitionId;
+	}
+
 	public Map<String, BigDecimal> getStrategyParams() {
 		return strategyParams;
 	}
@@ -158,6 +199,14 @@ public class FactorDefinition {
 
 	public void setIsSystemDefault(Boolean isSystemDefault) {
 		this.isSystemDefault = isSystemDefault;
+	}
+
+	public Long getPreviousVersionId() {
+		return previousVersionId;
+	}
+
+	public void setPreviousVersionId(Long previousVersionId) {
+		this.previousVersionId = previousVersionId;
 	}
 
 	public Long getCreatedBy() {

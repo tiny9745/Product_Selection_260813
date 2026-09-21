@@ -2,6 +2,8 @@ package com.example.Product_Selection_260813.service;
 
 import java.util.Map;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -46,6 +48,9 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCrea
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductTypeScoreBandResponse;
 import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
+import com.example.Product_Selection_260813.enums.CustomFieldType;
+import com.example.Product_Selection_260813.enums.FactorDataSource;
+import com.example.Product_Selection_260813.enums.FactorStrategyCode;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.ScoreBandSourceMode;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
@@ -55,7 +60,9 @@ import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.FactorDefinitionUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.entity.CustomFieldApplicableType;
@@ -78,6 +85,7 @@ import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.repository.SystemSettingRepository;
 import com.example.Product_Selection_260813.service.scoring.FactorStrategyRegistry;
+import com.example.Product_Selection_260813.service.resolver.ProductTypeAttributeResolver;
 
 /**
  * 對應企劃書十二-13分層決議：「統一承接四、資料表設計中所有『設定類』CRUD
@@ -148,6 +156,9 @@ public class SettingsService {
 
 	@Autowired
 	private CustomFieldApplicableTypeRepository customFieldApplicableTypeRepository;
+
+	@Autowired
+	private ProductTypeAttributeResolver productTypeAttributeResolver;
 
 	@Autowired
 	private FactorStrategyRegistry factorStrategyRegistry;
@@ -501,29 +512,28 @@ public class SettingsService {
 	// ========================= 自訂計分因子 =========================
 
 	/**
-	 * GET /api/settings/factor-definitions：列出全部自訂因子（含已停用），
-	 * 供設定頁管理列表使用。既有七個固定因子不在這張表裡，不會出現在這份清單。
+	 * GET /api/settings/factor-definitions：列出全部自訂因子（含已停用／已被
+	 * 編輯取代的歷史版本），供設定頁管理列表使用。既有七個固定因子不在這張表
+	 * 裡，不會出現在這份清單。
+	 *
+	 * isSuperseded 的計算方式：同一批 findAll() 結果裡，凡是出現在其他列的
+	 * previousVersionId 裡的 id，就代表那一列已經被取代——這裡直接對記憶體中
+	 * 的清單做一次 stream 運算，不需要為此再多查一次資料庫。
 	 */
 	@Transactional(readOnly = true)
 	public List<FactorDefinitionResponse> listFactorDefinitions() {
-		return factorDefinitionRepository.findAll().stream().map(FactorDefinitionResponse::from).toList();
+		List<FactorDefinition> all = factorDefinitionRepository.findAll();
+		Set<Long> supersededIds = all.stream().map(FactorDefinition::getPreviousVersionId)
+				.filter(Objects::nonNull).collect(Collectors.toSet());
+		return all.stream().map(d -> FactorDefinitionResponse.from(d, supersededIds.contains(d.getId()))).toList();
 	}
 
 	/**
 	 * POST /api/settings/factor-definitions：新增自訂計分因子。
 	 *
-	 * 三件事一起檢查：
-	 * <ol>
-	 * <li>factorCode 不能跟既有七個固定因子（FactorCode.ALL）或其他自訂因子重複——
-	 *     這是 evaluation_factors／product_type_score_bands 等既有表用來對照因子的
-	 *     唯一鍵，重複會讓既有查詢分不出這筆權重／區間屬於哪一個因子。</li>
-	 * <li>strategyCode 必須是真的有實作的策略——目前僅 MANUAL_SCALE／MANUAL_PERCENT／
-	 *     TARGET_BAND_NORMALIZE 三種，FactorStrategyRegistry.isImplemented() 之外的
-	 *     一律拒絕，不留「建立了但永遠算不出分數」的半殘設定。</li>
-	 * <li>dataSourceCode 必須跟 strategyCode 相容——每個資料源在設計時就綁定了
-	 *     一種運算邏輯（見 FactorDataSource 類別註解），組錯會讓數值範圍失去意義
-	 *     （例如把 1~5 人工評分拿去套目標區間正規化），在建立當下就擋下來。</li>
-	 * </ol>
+	 * 三件事一起檢查（見 validateFactorStrategyAndSource()）：策略是否已實作、
+	 * 資料源二選一、資料源與策略是否相容。這段驗證邏輯與 updateFactorDefinition()
+	 * 共用，不重複寫一次。
 	 *
 	 * 新增後這個因子預設<b>不影響任何評估模式的分數</b>：它會被 ProductFactorScorer
 	 * 算出分數、也會被 getAllActiveFactorCodes() 認得，但除非管理層另外呼叫
@@ -536,19 +546,12 @@ public class SettingsService {
 		String factorCode = request.getFactorCode().trim().toUpperCase();
 
 		if (FactorCode.ALL.contains(factorCode)
-				|| factorDefinitionRepository.existsByFactorCode(factorCode)) {
+				|| factorDefinitionRepository.existsByFactorCodeAndIsActiveTrue(factorCode)) {
 			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_CODE_DUPLICATE + factorCode);
 		}
 
-		if (!factorStrategyRegistry.isImplemented(request.getStrategyCode())) {
-			throw new IllegalArgumentException(
-					ValidationMessage.FACTOR_DEFINITION_STRATEGY_NOT_IMPLEMENTED + request.getStrategyCode());
-		}
-
-		if (request.getDataSourceCode().getCompatibleStrategy() != request.getStrategyCode()) {
-			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE
-					+ request.getDataSourceCode().getCompatibleStrategy());
-		}
+		validateFactorStrategyAndSource(request.getStrategyCode(), request.getDataSourceCode(),
+				request.getCustomFieldDefinitionId());
 
 		Long userId = resolveUserId(username);
 
@@ -558,6 +561,7 @@ public class SettingsService {
 		definition.setCategory(request.getCategory());
 		definition.setStrategyCode(request.getStrategyCode());
 		definition.setDataSourceCode(request.getDataSourceCode());
+		definition.setCustomFieldDefinitionId(request.getCustomFieldDefinitionId());
 		definition.setStrategyParams(request.getStrategyParams());
 		definition.setIsActive(true);
 		definition.setIsSystemDefault(false);
@@ -569,7 +573,111 @@ public class SettingsService {
 	}
 
 	/**
+	 * PUT /api/settings/factor-definitions/{id}：編輯自訂計分因子。
+	 *
+	 * <b>版本鏈設計（V14新增）：</b>不是就地更新 id={id} 這一列，而是：
+	 * <ol>
+	 * <li>把 id={id} 這一列停用（isActive=false），並立刻flush，確保它在
+	 *     資料庫層真的變成非生效狀態，避免下一步插入新列時跟它在
+	 *     uk_factor_definitions_active_code 唯一索引上互撞（見V14 migration
+	 *     類別註解）。</li>
+	 * <li>新增一列，factorCode 沿用舊列（<b>編輯不開放修改代碼</b>，見
+	 *     FactorDefinitionUpdateRequest 類別註解），其餘欄位取自 request；
+	 *     isActive 沿用舊列被編輯前的狀態（舊列本來停用中，編輯後的新版本
+	 *     也維持停用，不會因為編輯而被動變成生效中）；previousVersionId
+	 *     指向舊列 id。</li>
+	 * </ol>
+	 * 這樣 evaluation_factors／product_type_score_bands 等既有表因為代碼不變，
+	 * 完全不需要跟著搬移；review_records.weight_snapshot 是編輯當下已經凍結的
+	 * 歷史資料，不會被這裡的變動影響。
+	 *
+	 * 舊列被停用後無法再被 enableFactorDefinition() 重新啟用——見該方法內的
+	 * existsByPreviousVersionId() 防呆。
+	 */
+	@Transactional
+	public FactorDefinitionResponse updateFactorDefinition(Long id, FactorDefinitionUpdateRequest request,
+			String username) {
+		FactorDefinition old = factorDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
+		if (factorDefinitionRepository.existsByPreviousVersionId(id)) {
+			throw new IllegalArgumentException(
+					ValidationMessage.FACTOR_DEFINITION_SUPERSEDED_CANNOT_ENABLE + id);
+		}
+
+		validateFactorStrategyAndSource(request.getStrategyCode(), request.getDataSourceCode(),
+				request.getCustomFieldDefinitionId());
+
+		Long userId = resolveUserId(username);
+		boolean wasActive = Boolean.TRUE.equals(old.getIsActive());
+
+		old.setIsActive(false);
+		old.setUpdatedBy(userId);
+		factorDefinitionRepository.saveAndFlush(old);
+
+		FactorDefinition updated = new FactorDefinition();
+		updated.setFactorCode(old.getFactorCode());
+		updated.setFactorName(request.getFactorName());
+		updated.setCategory(request.getCategory());
+		updated.setStrategyCode(request.getStrategyCode());
+		updated.setDataSourceCode(request.getDataSourceCode());
+		updated.setCustomFieldDefinitionId(request.getCustomFieldDefinitionId());
+		updated.setStrategyParams(request.getStrategyParams());
+		updated.setIsActive(wasActive);
+		updated.setIsSystemDefault(false);
+		updated.setPreviousVersionId(old.getId());
+		updated.setCreatedBy(userId);
+
+		FactorDefinition saved = factorDefinitionRepository.save(updated);
+		log.info("自訂因子已編輯：{}（新版本id={}，取代舊版本id={}），操作者 {}", saved.getFactorCode(), saved.getId(),
+				old.getId(), username);
+		return FactorDefinitionResponse.from(saved);
+	}
+
+	/**
+	 * 共用驗證：strategyCode 是否已實作、dataSourceCode／customFieldDefinitionId
+	 * 是否恰好擇一、擇一後的資料源是否與策略相容。createFactorDefinition() 與
+	 * updateFactorDefinition() 共用，不重複寫一次（原本兩處各寫一次是這次新增
+	 * 編輯功能時順便修正的重複程式碼）。
+	 */
+	private void validateFactorStrategyAndSource(FactorStrategyCode strategyCode, FactorDataSource dataSourceCode,
+			Long customFieldDefinitionId) {
+		if (!factorStrategyRegistry.isImplemented(strategyCode)) {
+			throw new IllegalArgumentException(
+					ValidationMessage.FACTOR_DEFINITION_STRATEGY_NOT_IMPLEMENTED + strategyCode);
+		}
+
+		boolean hasDataSource = dataSourceCode != null;
+		boolean hasCustomField = customFieldDefinitionId != null;
+		if (hasDataSource == hasCustomField) {
+			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_SOURCE_XOR_VIOLATION);
+		}
+
+		if (hasDataSource) {
+			if (dataSourceCode.getCompatibleStrategy() != strategyCode) {
+				throw new IllegalArgumentException(
+						ValidationMessage.FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE
+								+ dataSourceCode.getCompatibleStrategy());
+			}
+		} else {
+			CustomFieldDefinition customField = customFieldDefinitionRepository.findById(customFieldDefinitionId)
+					.filter(f -> Boolean.TRUE.equals(f.getIsActive()))
+					.orElseThrow(() -> new IllegalArgumentException(
+							ValidationMessage.CUSTOM_FIELD_NOT_APPLICABLE + customFieldDefinitionId));
+			if (!customField.getFieldType().isNumeric()
+					|| customField.getFieldType().getCompatibleStrategy() != strategyCode) {
+				throw new IllegalArgumentException(
+						ValidationMessage.FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE
+								+ customField.getFieldType().getCompatibleStrategy());
+			}
+		}
+	}
+
+	/**
 	 * PUT /api/settings/factor-definitions/{id}/disable：停用自訂因子。
+	 * 這同時也是「刪除」自訂因子的方式——本專案沿用既有慣例（商品類型／
+	 * 人工風險選項等既有「設定類」資料皆是如此），不真的刪除資料列，一律
+	 * 用 is_active 表示是否生效，停用即等同於軟刪除，見企劃書「保留可追蹤的
+	 * 審核紀錄」原則與 SettingsService 類別註解「停用不刪除」的既定作法。
 	 *
 	 * 停用後 ProductFactorScorer 不再計算這個因子（scoreAll() 只查
 	 * findByIsActiveTrue()）。2026-09-20修正：原本只停用 factor_definitions
@@ -606,11 +714,19 @@ public class SettingsService {
 	 * 與 disableFactorDefinition() 對稱，比照既有風險選項／商品類型的既定模式。
 	 * 不會恢復停用前各模式的權重——重新啟用後預設權重0（未生效），管理層要
 	 * 到各模式的權重編輯器裡重新勾選並分配權重，不自動假設要恢復到哪個數字。
+	 *
+	 * V14新增防呆：如果這一列已經被 updateFactorDefinition() 產生的新版本取代
+	 * （existsByPreviousVersionId(id)==true），拒絕啟用——一旦放行，會讓同一個
+	 * factorCode 同時存在兩列 isActive=true，版本鏈語意矛盾，且會直接撞上
+	 * uk_factor_definitions_active_code 唯一索引在資料庫層丟例外。
 	 */
 	@Transactional
 	public FactorDefinitionResponse enableFactorDefinition(Long id, String username) {
 		FactorDefinition definition = factorDefinitionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_NOT_FOUND + id));
+		if (factorDefinitionRepository.existsByPreviousVersionId(id)) {
+			throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_SUPERSEDED_CANNOT_ENABLE + id);
+		}
 		definition.setIsActive(true);
 		definition.setUpdatedBy(resolveUserId(username));
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
@@ -624,13 +740,18 @@ public class SettingsService {
 	// 讀寫（product_custom_field_values）、以及計分系統把這裡的題目當成
 	// FactorDataSource 使用，都是後續階段，這裡先不做。
 
-	/** GET /api/settings/custom-field-definitions：列出全部題目（含已停用）。 */
+	/**
+	 * GET /api/settings/custom-field-definitions：列出全部題目（含已停用／已被
+	 * 編輯取代的歷史版本）。isSuperseded 計算方式同 listFactorDefinitions()。
+	 */
 	@Transactional(readOnly = true)
 	public List<CustomFieldDefinitionResponse> listCustomFieldDefinitions() {
 		List<CustomFieldDefinition> definitions = customFieldDefinitionRepository.findAll();
 		if (definitions.isEmpty()) {
 			return List.of();
 		}
+		Set<Long> supersededIds = definitions.stream().map(CustomFieldDefinition::getPreviousVersionId)
+				.filter(Objects::nonNull).collect(Collectors.toSet());
 		List<Long> ids = definitions.stream().map(CustomFieldDefinition::getId).toList();
 		// 批次撈品類限制，避免逐題各查一次（N+1）——比照 ScoringService
 		// 修過的 toWeightFactorSnapshot() N+1，這裡從一開始就用對的寫法。
@@ -640,6 +761,40 @@ public class SettingsService {
 						Collectors.mapping(CustomFieldApplicableType::getRootProductTypeId, Collectors.toList())));
 		return definitions.stream()
 				.map(d -> CustomFieldDefinitionResponse.from(d,
+						applicableTypesByFieldId.getOrDefault(d.getId(), List.of()), supersededIds.contains(d.getId())))
+				.toList();
+	}
+
+	/**
+	 * GET /api/products/custom-field-schema?productTypeId=X：商品新增/編輯表單
+	 * 依這個 productTypeId（商品實際掛的小類）用哪些自訂屬性題目。
+	 *
+	 * 只回傳「生效中」且「品類範圍涵蓋這個商品的大類（或沒有品類限制）」的
+	 * 題目——沿用既有 ScoreBandResolver 的既定作法，商品掛的是小類，但依
+	 * 品類判斷一律以大類為準（resolveRootTypeId()）。
+	 *
+	 * 這支方法同時也是 ProductService 寫入答案時用來驗證「這個欄位代碼
+	 * 對這個商品而言是否合法」的依據——見 ProductService.
+	 * validateAndCollectCustomFieldValues() 的說明。
+	 */
+	@Transactional(readOnly = true)
+	public List<CustomFieldDefinitionResponse> getApplicableCustomFields(Long productTypeId) {
+		Long rootTypeId = productTypeAttributeResolver.resolveRootTypeId(productTypeId);
+		List<CustomFieldDefinition> active = customFieldDefinitionRepository.findByIsActiveTrue();
+		if (active.isEmpty()) {
+			return List.of();
+		}
+		List<Long> ids = active.stream().map(CustomFieldDefinition::getId).toList();
+		Map<Long, List<Long>> applicableTypesByFieldId = customFieldApplicableTypeRepository
+				.findByFieldDefinitionIdIn(ids).stream()
+				.collect(Collectors.groupingBy(CustomFieldApplicableType::getFieldDefinitionId,
+						Collectors.mapping(CustomFieldApplicableType::getRootProductTypeId, Collectors.toList())));
+		return active.stream()
+				.filter(d -> {
+					List<Long> scope = applicableTypesByFieldId.getOrDefault(d.getId(), List.of());
+					return scope.isEmpty() || scope.contains(rootTypeId);
+				})
+				.map(d -> CustomFieldDefinitionResponse.from(d,
 						applicableTypesByFieldId.getOrDefault(d.getId(), List.of())))
 				.toList();
 	}
@@ -647,14 +802,18 @@ public class SettingsService {
 	/**
 	 * POST /api/settings/custom-field-definitions：新增自訂商品屬性題目。
 	 *
-	 * 兩件事要檢查：
+	 * 三件事要檢查：
 	 * <ol>
-	 * <li>fieldCode 不能跟其他題目重複——這是商品表單渲染與（未來）計分資料源
-	 *     用來對照題目的唯一鍵。</li>
+	 * <li>fieldCode 不能跟其他<b>生效中</b>的題目重複（V14修改：原本是跟
+	 *     「全部」題目比對，改成只比對生效中的——已經被編輯取代或刪除的舊
+	 *     版本不再佔用這個代碼，允許重新使用，見
+	 *     CustomFieldDefinitionRepository.existsByFieldCodeAndIsActiveTrue()）。</li>
 	 * <li>applicableRootProductTypeIds 裡每一個 id 都必須是「大類」
 	 *     （product_types.level=1）——選到小類會讓商品表單「依大類判斷」的
 	 *     邏輯永遠比對不到，這一題實質上永遠不會出現在任何商品表單上，
 	 *     寧可在建立當下就擋下來。</li>
+	 * <li>scaleLabels 只有 fieldType=SCALE_1_5 才能提供，且 key 必須落在
+	 *     1~5 之間（見 validateScaleLabels()，V14新增）。</li>
 	 * </ol>
 	 *
 	 * 省略或傳空陣列＝適用全部品類，不需要另外處理——沒有任何限制列本身就是
@@ -665,18 +824,12 @@ public class SettingsService {
 			String username) {
 		String fieldCode = request.getFieldCode().trim().toUpperCase();
 
-		if (customFieldDefinitionRepository.existsByFieldCode(fieldCode)) {
+		if (customFieldDefinitionRepository.existsByFieldCodeAndIsActiveTrue(fieldCode)) {
 			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_CODE_DUPLICATE + fieldCode);
 		}
 
-		List<Long> applicableIds = request.getApplicableRootProductTypeIds() == null ? List.of()
-				: request.getApplicableRootProductTypeIds();
-		for (Long typeId : applicableIds) {
-			ProductType type = productTypeRepository.findById(typeId).orElse(null);
-			if (type == null || !Integer.valueOf(1).equals(type.getLevel())) {
-				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_ROOT_TYPE_INVALID + typeId);
-			}
-		}
+		List<Long> applicableIds = validateApplicableRootTypes(request.getApplicableRootProductTypeIds());
+		validateScaleLabels(request.getFieldType(), request.getScaleLabels());
 
 		Long userId = resolveUserId(username);
 
@@ -687,6 +840,7 @@ public class SettingsService {
 		definition.setFieldType(request.getFieldType());
 		definition.setIsRequired(Boolean.TRUE.equals(request.getIsRequired()));
 		definition.setIsActive(true);
+		definition.setScaleLabels(request.getScaleLabels());
 		definition.setCreatedBy(userId);
 
 		CustomFieldDefinition saved = customFieldDefinitionRepository.save(definition);
@@ -703,7 +857,130 @@ public class SettingsService {
 	}
 
 	/**
+	 * PUT /api/settings/custom-field-definitions/{id}：編輯自訂商品屬性題目。
+	 *
+	 * <b>版本鏈設計與 updateFactorDefinition() 完全對稱</b>：停用舊列並flush、
+	 * 新增一列（fieldCode 沿用舊列，其餘欄位取自 request，previousVersionId
+	 * 指向舊列）。品類範圍是「整份覆蓋」語意，直接依 request 為新列新建，
+	 * 不去動舊列既有的品類限制列（歷史保留）。
+	 *
+	 * <b>與 updateFactorDefinition() 不同、需要額外處理的地方：</b>
+	 * custom_field_definitions 被 factor_definitions.custom_field_definition_id
+	 * 用 <b>id</b>（不是代碼）參照。編輯後舊列的 id 不變但已停用，任何原本綁定
+	 * 這個 id 的生效中因子若不重新綁到新 id，未來新商品填的答案會存在新 id
+	 * 底下，但因子還在讀舊 id，等於這個因子從此收不到任何新資料、卻不會有
+	 * 任何錯誤訊息（FactorRawValueResolver.resolve() 查無值時回傳null，
+	 * 因子安靜地從加權分母排除）。
+	 *
+	 * <b>因此這裡採用的做法（已與 Gary 確認的預設方案）：</b>編輯時自動把所有
+	 * 目前綁定這個題目、且生效中的因子，重新指向新版本的 id。這不算竄改
+	 * 歷史：每次審核凍結的 WeightFactorSnapshot.customFieldCode 存的是代碼
+	 * 字串（不是id），不受這裡的id搬移影響，可重現性不受影響。若新的
+	 * fieldType 導致與某個已綁定因子的 strategyCode 不相容（例如把
+	 * SCALE_1_5 改成 TEXT），則整個編輯動作失敗並回滾，要求管理層先處理
+	 * 該因子的綁定，不會留下「因子綁定壞掉」的半殘狀態。
+	 */
+	@Transactional
+	public CustomFieldDefinitionResponse updateCustomFieldDefinition(Long id,
+			CustomFieldDefinitionUpdateRequest request, String username) {
+		CustomFieldDefinition old = customFieldDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_NOT_FOUND + id));
+		if (customFieldDefinitionRepository.existsByPreviousVersionId(id)) {
+			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_SUPERSEDED_CANNOT_ENABLE + id);
+		}
+
+		List<Long> applicableIds = validateApplicableRootTypes(request.getApplicableRootProductTypeIds());
+		validateScaleLabels(request.getFieldType(), request.getScaleLabels());
+
+		// 先驗證所有綁定這個題目的生效中因子，跟新的fieldType是否還相容，
+		// 全部通過才動手改資料，避免中途失敗留下半殘狀態（雖然@Transactional
+		// 本身就會整筆回滾，這裡先驗證只是讓錯誤訊息更早、更明確）。
+		List<FactorDefinition> boundFactors = factorDefinitionRepository
+				.findByCustomFieldDefinitionIdAndIsActiveTrue(id);
+		for (FactorDefinition factor : boundFactors) {
+			if (!request.getFieldType().isNumeric()
+					|| request.getFieldType().getCompatibleStrategy() != factor.getStrategyCode()) {
+				throw new IllegalArgumentException(ValidationMessage.FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE
+						+ "此屬性目前被自訂因子「" + factor.getFactorCode() + "」使用中，新的欄位型態與該因子不相容，"
+						+ "請先調整該因子的設定：" + factor.getFactorCode());
+			}
+		}
+
+		Long userId = resolveUserId(username);
+		boolean wasActive = Boolean.TRUE.equals(old.getIsActive());
+
+		old.setIsActive(false);
+		old.setUpdatedBy(userId);
+		customFieldDefinitionRepository.saveAndFlush(old);
+
+		CustomFieldDefinition updated = new CustomFieldDefinition();
+		updated.setFieldCode(old.getFieldCode());
+		updated.setFieldName(request.getFieldName());
+		updated.setHelpText(request.getHelpText());
+		updated.setFieldType(request.getFieldType());
+		updated.setIsRequired(Boolean.TRUE.equals(request.getIsRequired()));
+		updated.setIsActive(wasActive);
+		updated.setScaleLabels(request.getScaleLabels());
+		updated.setPreviousVersionId(old.getId());
+		updated.setCreatedBy(userId);
+
+		CustomFieldDefinition saved = customFieldDefinitionRepository.save(updated);
+
+		for (Long typeId : applicableIds) {
+			CustomFieldApplicableType applicable = new CustomFieldApplicableType();
+			applicable.setFieldDefinitionId(saved.getId());
+			applicable.setRootProductTypeId(typeId);
+			customFieldApplicableTypeRepository.save(applicable);
+		}
+
+		for (FactorDefinition factor : boundFactors) {
+			factor.setCustomFieldDefinitionId(saved.getId());
+			factor.setUpdatedBy(userId);
+			factorDefinitionRepository.save(factor);
+		}
+
+		log.info("自訂商品屬性已編輯：{}（新版本id={}，取代舊版本id={}），連動改綁因子數={}，操作者 {}",
+				saved.getFieldCode(), saved.getId(), old.getId(), boundFactors.size(), username);
+		return CustomFieldDefinitionResponse.from(saved, applicableIds);
+	}
+
+	/** 共用驗證：品類範圍每一個id都必須是大類，省略或空陣列＝適用全部品類。 */
+	private List<Long> validateApplicableRootTypes(List<Long> applicableRootProductTypeIds) {
+		List<Long> applicableIds = applicableRootProductTypeIds == null ? List.of() : applicableRootProductTypeIds;
+		for (Long typeId : applicableIds) {
+			ProductType type = productTypeRepository.findById(typeId).orElse(null);
+			if (type == null || !Integer.valueOf(1).equals(type.getLevel())) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_ROOT_TYPE_INVALID + typeId);
+			}
+		}
+		return applicableIds;
+	}
+
+	/**
+	 * 共用驗證：scaleLabels 只有 fieldType=SCALE_1_5 才能提供（其餘型態送這個
+	 * 欄位視為設定錯誤，直接拒絕，避免產生永遠不會被讀取的死資料），且提供時
+	 * 每個 key 必須落在 1~5 之間。createCustomFieldDefinition() 與
+	 * updateCustomFieldDefinition() 共用。
+	 */
+	private void validateScaleLabels(CustomFieldType fieldType, Map<Integer, String> scaleLabels) {
+		if (scaleLabels == null || scaleLabels.isEmpty()) {
+			return;
+		}
+		if (fieldType != CustomFieldType.SCALE_1_5) {
+			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_SCALE_LABEL_NOT_APPLICABLE);
+		}
+		for (Integer key : scaleLabels.keySet()) {
+			if (key == null || key < 1 || key > 5) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_SCALE_LABEL_KEY_INVALID + key);
+			}
+		}
+	}
+
+	/**
 	 * PUT /api/settings/custom-field-definitions/{id}/disable：停用題目。
+	 * 這同時也是「刪除」自訂商品屬性的方式，理由同 disableFactorDefinition()
+	 * 類別註解——本專案的「設定類」資料一律用 is_active 表示是否生效，不真的
+	 * 刪除資料列。
 	 *
 	 * 停用後商品新增/編輯表單不會再顯示這一題，但商品身上已經填過的答案
 	 * 完全不受影響——product_custom_field_values 的既有列不會被刪除或修改，
@@ -722,11 +999,18 @@ public class SettingsService {
 		return CustomFieldDefinitionResponse.from(saved, applicableIds);
 	}
 
-	/** PUT /api/settings/custom-field-definitions/{id}/enable：復用已停用的題目，與 disable 對稱。 */
+	/**
+	 * PUT /api/settings/custom-field-definitions/{id}/enable：復用已停用的題目，
+	 * 與 disable 對稱。V14新增防呆：理由與 enableFactorDefinition() 完全對稱，
+	 * 擋下「重新啟用一個已被 updateCustomFieldDefinition() 取代的舊題目」。
+	 */
 	@Transactional
 	public CustomFieldDefinitionResponse enableCustomFieldDefinition(Long id, String username) {
 		CustomFieldDefinition definition = customFieldDefinitionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_NOT_FOUND + id));
+		if (customFieldDefinitionRepository.existsByPreviousVersionId(id)) {
+			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_SUPERSEDED_CANNOT_ENABLE + id);
+		}
 		definition.setIsActive(true);
 		definition.setUpdatedBy(resolveUserId(username));
 		CustomFieldDefinition saved = customFieldDefinitionRepository.save(definition);

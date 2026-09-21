@@ -14,4 +14,16 @@ public interface CustomFieldDefinitionRepository extends JpaRepository<CustomFie
 	Optional<CustomFieldDefinition> findByFieldCode(String fieldCode);
 
 	boolean existsByFieldCode(String fieldCode);
+
+	/**
+	 * V14新增：建立/編輯時的重複代碼檢查改用這個方法，理由同
+	 * FactorDefinitionRepository.existsByFactorCodeAndIsActiveTrue()。
+	 */
+	boolean existsByFieldCodeAndIsActiveTrue(String fieldCode);
+
+	/**
+	 * V14新增：擋下「重新啟用一個已被編輯取代的舊題目」，理由同
+	 * FactorDefinitionRepository.existsByPreviousVersionId()。
+	 */
+	boolean existsByPreviousVersionId(Long previousVersionId);
 }

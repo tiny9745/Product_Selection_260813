@@ -22,7 +22,9 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCrea
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.FactorDefinitionUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
@@ -123,6 +125,21 @@ public class SettingsController {
 		return ResponseEntity.ok(ApiResponse.success("自訂因子已新增", result));
 	}
 
+	/**
+	 * 編輯自訂計分因子。回傳的是新版本（新id）的資料，不是被取代的舊版本——
+	 * 前端應以回應內容取代畫面上原本這一列，見 SettingsService.
+	 * updateFactorDefinition() 類別註解的版本鏈設計說明。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/factor-definitions/{id}")
+	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> updateFactorDefinition(
+			@PathVariable("id") Long id,
+			@Valid @RequestBody FactorDefinitionUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		FactorDefinitionResponse result = settingsService.updateFactorDefinition(id, request, username);
+		return ResponseEntity.ok(ApiResponse.success("自訂因子已更新", result));
+	}
+
 	@PreAuthorize("hasRole('MANAGER')")
 	@PutMapping("/factor-definitions/{id}/disable")
 	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> disableFactorDefinition(
@@ -155,6 +172,22 @@ public class SettingsController {
 			@AuthenticationPrincipal String username) {
 		CustomFieldDefinitionResponse result = settingsService.createCustomFieldDefinition(request, username);
 		return ResponseEntity.ok(ApiResponse.success("自訂商品屬性已新增", result));
+	}
+
+	/**
+	 * 編輯自訂商品屬性題目。回傳的是新版本（新id）的資料。若這個題目正被某些
+	 * 生效中的因子綁定，服務層會一併把這些因子改綁到新版本；回應內容裡看不到
+	 * 「哪些因子被改綁」的清單，如需要可另外呼叫 GET /factor-definitions 確認
+	 * （因子清單的customFieldDefinitionId會反映最新綁定）。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/custom-field-definitions/{id}")
+	public ResponseEntity<ApiResponse<CustomFieldDefinitionResponse>> updateCustomFieldDefinition(
+			@PathVariable("id") Long id,
+			@Valid @RequestBody CustomFieldDefinitionUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		CustomFieldDefinitionResponse result = settingsService.updateCustomFieldDefinition(id, request, username);
+		return ResponseEntity.ok(ApiResponse.success("自訂商品屬性已更新", result));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
