@@ -21,7 +21,9 @@ import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateReq
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeScoreBandUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
@@ -134,6 +136,40 @@ public class SettingsController {
 	public ResponseEntity<ApiResponse<FactorDefinitionResponse>> enableFactorDefinition(
 			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
 		FactorDefinitionResponse result = settingsService.enableFactorDefinition(id, username);
+		return ResponseEntity.ok(ApiResponse.success("已啟用", result));
+	}
+
+	// ========================= 自訂商品屬性（動態問卷） =========================
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/custom-field-definitions")
+	public ResponseEntity<ApiResponse<List<CustomFieldDefinitionResponse>>> getCustomFieldDefinitions() {
+		List<CustomFieldDefinitionResponse> result = settingsService.listCustomFieldDefinitions();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/custom-field-definitions")
+	public ResponseEntity<ApiResponse<CustomFieldDefinitionResponse>> createCustomFieldDefinition(
+			@Valid @RequestBody CustomFieldDefinitionCreateRequest request,
+			@AuthenticationPrincipal String username) {
+		CustomFieldDefinitionResponse result = settingsService.createCustomFieldDefinition(request, username);
+		return ResponseEntity.ok(ApiResponse.success("自訂商品屬性已新增", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/custom-field-definitions/{id}/disable")
+	public ResponseEntity<ApiResponse<CustomFieldDefinitionResponse>> disableCustomFieldDefinition(
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		CustomFieldDefinitionResponse result = settingsService.disableCustomFieldDefinition(id, username);
+		return ResponseEntity.ok(ApiResponse.success("已停用", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/custom-field-definitions/{id}/enable")
+	public ResponseEntity<ApiResponse<CustomFieldDefinitionResponse>> enableCustomFieldDefinition(
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		CustomFieldDefinitionResponse result = settingsService.enableCustomFieldDefinition(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已啟用", result));
 	}
 

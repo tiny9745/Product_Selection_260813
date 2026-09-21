@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.service;
 
 import java.util.Map;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,11 +54,17 @@ import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.EvaluationFactorUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.CustomFieldDefinitionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FactorDefinitionCreateRequest;
+import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
+import com.example.Product_Selection_260813.entity.CustomFieldApplicableType;
+import com.example.Product_Selection_260813.entity.CustomFieldDefinition;
 import com.example.Product_Selection_260813.entity.EvaluationFactor;
 import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
+import com.example.Product_Selection_260813.repository.CustomFieldApplicableTypeRepository;
+import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
 import com.example.Product_Selection_260813.repository.EvaluationFactorRepository;
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
@@ -135,6 +142,12 @@ public class SettingsService {
 
 	@Autowired
 	private FactorDefinitionRepository factorDefinitionRepository;
+
+	@Autowired
+	private CustomFieldDefinitionRepository customFieldDefinitionRepository;
+
+	@Autowired
+	private CustomFieldApplicableTypeRepository customFieldApplicableTypeRepository;
 
 	@Autowired
 	private FactorStrategyRegistry factorStrategyRegistry;
@@ -602,6 +615,124 @@ public class SettingsService {
 		definition.setUpdatedBy(resolveUserId(username));
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
 		return FactorDefinitionResponse.from(saved);
+	}
+
+	// ========================= 自訂商品屬性（動態問卷） =========================
+	//
+	// 「開新計分因子資料源」需求的第一階段：讓管理層自己定義新的商品屬性題目，
+	// 不需要改資料庫欄位。這裡先只做題目本身的 CRUD；商品表單動態渲染、答案
+	// 讀寫（product_custom_field_values）、以及計分系統把這裡的題目當成
+	// FactorDataSource 使用，都是後續階段，這裡先不做。
+
+	/** GET /api/settings/custom-field-definitions：列出全部題目（含已停用）。 */
+	@Transactional(readOnly = true)
+	public List<CustomFieldDefinitionResponse> listCustomFieldDefinitions() {
+		List<CustomFieldDefinition> definitions = customFieldDefinitionRepository.findAll();
+		if (definitions.isEmpty()) {
+			return List.of();
+		}
+		List<Long> ids = definitions.stream().map(CustomFieldDefinition::getId).toList();
+		// 批次撈品類限制，避免逐題各查一次（N+1）——比照 ScoringService
+		// 修過的 toWeightFactorSnapshot() N+1，這裡從一開始就用對的寫法。
+		Map<Long, List<Long>> applicableTypesByFieldId = customFieldApplicableTypeRepository
+				.findByFieldDefinitionIdIn(ids).stream()
+				.collect(Collectors.groupingBy(CustomFieldApplicableType::getFieldDefinitionId,
+						Collectors.mapping(CustomFieldApplicableType::getRootProductTypeId, Collectors.toList())));
+		return definitions.stream()
+				.map(d -> CustomFieldDefinitionResponse.from(d,
+						applicableTypesByFieldId.getOrDefault(d.getId(), List.of())))
+				.toList();
+	}
+
+	/**
+	 * POST /api/settings/custom-field-definitions：新增自訂商品屬性題目。
+	 *
+	 * 兩件事要檢查：
+	 * <ol>
+	 * <li>fieldCode 不能跟其他題目重複——這是商品表單渲染與（未來）計分資料源
+	 *     用來對照題目的唯一鍵。</li>
+	 * <li>applicableRootProductTypeIds 裡每一個 id 都必須是「大類」
+	 *     （product_types.level=1）——選到小類會讓商品表單「依大類判斷」的
+	 *     邏輯永遠比對不到，這一題實質上永遠不會出現在任何商品表單上，
+	 *     寧可在建立當下就擋下來。</li>
+	 * </ol>
+	 *
+	 * 省略或傳空陣列＝適用全部品類，不需要另外處理——沒有任何限制列本身就是
+	 * 「無限制」的意思，見 CustomFieldApplicableType 類別註解。
+	 */
+	@Transactional
+	public CustomFieldDefinitionResponse createCustomFieldDefinition(CustomFieldDefinitionCreateRequest request,
+			String username) {
+		String fieldCode = request.getFieldCode().trim().toUpperCase();
+
+		if (customFieldDefinitionRepository.existsByFieldCode(fieldCode)) {
+			throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_CODE_DUPLICATE + fieldCode);
+		}
+
+		List<Long> applicableIds = request.getApplicableRootProductTypeIds() == null ? List.of()
+				: request.getApplicableRootProductTypeIds();
+		for (Long typeId : applicableIds) {
+			ProductType type = productTypeRepository.findById(typeId).orElse(null);
+			if (type == null || !Integer.valueOf(1).equals(type.getLevel())) {
+				throw new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_ROOT_TYPE_INVALID + typeId);
+			}
+		}
+
+		Long userId = resolveUserId(username);
+
+		CustomFieldDefinition definition = new CustomFieldDefinition();
+		definition.setFieldCode(fieldCode);
+		definition.setFieldName(request.getFieldName());
+		definition.setHelpText(request.getHelpText());
+		definition.setFieldType(request.getFieldType());
+		definition.setIsRequired(Boolean.TRUE.equals(request.getIsRequired()));
+		definition.setIsActive(true);
+		definition.setCreatedBy(userId);
+
+		CustomFieldDefinition saved = customFieldDefinitionRepository.save(definition);
+
+		for (Long typeId : applicableIds) {
+			CustomFieldApplicableType applicable = new CustomFieldApplicableType();
+			applicable.setFieldDefinitionId(saved.getId());
+			applicable.setRootProductTypeId(typeId);
+			customFieldApplicableTypeRepository.save(applicable);
+		}
+
+		log.info("自訂商品屬性已新增：{}，型態 {}，操作者 {}", fieldCode, request.getFieldType(), username);
+		return CustomFieldDefinitionResponse.from(saved, applicableIds);
+	}
+
+	/**
+	 * PUT /api/settings/custom-field-definitions/{id}/disable：停用題目。
+	 *
+	 * 停用後商品新增/編輯表單不會再顯示這一題，但商品身上已經填過的答案
+	 * 完全不受影響——product_custom_field_values 的既有列不會被刪除或修改，
+	 * 商品詳情頁仍會顯示（唯讀）。這是稀疏表 EAV 設計天生的特性：停用一個
+	 * 題目定義，不代表「刪除大家的答案」，兩件事本來就分開。
+	 */
+	@Transactional
+	public CustomFieldDefinitionResponse disableCustomFieldDefinition(Long id, String username) {
+		CustomFieldDefinition definition = customFieldDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_NOT_FOUND + id));
+		definition.setIsActive(false);
+		definition.setUpdatedBy(resolveUserId(username));
+		CustomFieldDefinition saved = customFieldDefinitionRepository.save(definition);
+		List<Long> applicableIds = customFieldApplicableTypeRepository.findByFieldDefinitionId(id).stream()
+				.map(CustomFieldApplicableType::getRootProductTypeId).toList();
+		return CustomFieldDefinitionResponse.from(saved, applicableIds);
+	}
+
+	/** PUT /api/settings/custom-field-definitions/{id}/enable：復用已停用的題目，與 disable 對稱。 */
+	@Transactional
+	public CustomFieldDefinitionResponse enableCustomFieldDefinition(Long id, String username) {
+		CustomFieldDefinition definition = customFieldDefinitionRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException(ValidationMessage.CUSTOM_FIELD_NOT_FOUND + id));
+		definition.setIsActive(true);
+		definition.setUpdatedBy(resolveUserId(username));
+		CustomFieldDefinition saved = customFieldDefinitionRepository.save(definition);
+		List<Long> applicableIds = customFieldApplicableTypeRepository.findByFieldDefinitionId(id).stream()
+				.map(CustomFieldApplicableType::getRootProductTypeId).toList();
+		return CustomFieldDefinitionResponse.from(saved, applicableIds);
 	}
 
 	/**

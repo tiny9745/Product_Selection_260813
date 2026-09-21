@@ -77,6 +77,10 @@ public class ValidationMessage {
 	public static final String FACTOR_DEFINITION_DATA_SOURCE_INCOMPATIBLE = "此資料源不支援所選的運算邏輯，請改選：";
 	public static final String FACTOR_DEFINITION_NOT_FOUND = "自訂因子不存在：";
 
+	public static final String CUSTOM_FIELD_CODE_DUPLICATE = "欄位代碼已存在：";
+	public static final String CUSTOM_FIELD_NOT_FOUND = "自訂商品屬性不存在：";
+	public static final String CUSTOM_FIELD_ROOT_TYPE_INVALID = "品類範圍必須是大類（不可為小類）：";
+
 	// Review（商業邏輯驗證，於Service層攔截）
 	public static final String REVIEW_RISK_OPTION_INACTIVE = "風險選項已停用，無法選取：";
 	public static final String REVIEW_REJECT_REASON_REQUIRED = "退件時請至少勾選一項風險或填寫審核備註";
