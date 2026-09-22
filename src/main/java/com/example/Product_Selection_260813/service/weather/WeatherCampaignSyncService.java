@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.dto.response.WeatherSyncResponse;
 import com.example.Product_Selection_260813.dto.weather.WeatherSignal;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
@@ -94,10 +95,16 @@ public class WeatherCampaignSyncService {
 	 * 每天清晨執行，在天氣資料來源當天更新之後（實際時間依
 	 * WeatherSignalProvider 的資料來源更新頻率調整，這裡先抓一個
 	 * 保守的時間點）。
+	 *
+	 * 回傳值刻意從void改成WeatherSyncResponse：{@code @Scheduled}的呼叫端
+	 * （Spring排程執行緒）本來就不理會回傳值，改成非void不影響每天05:00
+	 * 的自動排程行為；這裡改的目的是讓WeatherController的手動觸發端點
+	 * （POST /api/settings/weather/sync）能把這次同步做了什麼回報給呼叫端，
+	 * 不用另外再查一次festive_campaigns才知道結果。
 	 */
 	@Scheduled(cron = "0 0 5 * * *")
 	@Transactional
-	public void syncWeatherCampaigns() {
+	public WeatherSyncResponse syncWeatherCampaigns() {
 		List<WeatherSignal> signals = weatherSignalProvider.getActiveSignals();
 
 		Set<String> syncedCodes = signals.stream()
@@ -105,7 +112,9 @@ public class WeatherCampaignSyncService {
 				.map(this::syncOne)
 				.collect(Collectors.toSet());
 
-		expireStaleWeatherCampaigns(syncedCodes);
+		int expiredCount = expireStaleWeatherCampaigns(syncedCodes);
+
+		return new WeatherSyncResponse(signals.size(), syncedCodes.size(), expiredCount);
 	}
 
 	/** upsert 單一天氣訊號對應的檔期，回傳這筆檔期的 campaign_code。 */
@@ -164,18 +173,21 @@ public class WeatherCampaignSyncService {
 	 * 預報改成放晴），代表訊號已經不成立，設回 EXPIRED，不留在
 	 * PREPARING/ACTIVE 繼續影響 Festival Boost 計算。
 	 */
-	private void expireStaleWeatherCampaigns(Set<String> syncedCodes) {
+	private int expireStaleWeatherCampaigns(Set<String> syncedCodes) {
 		List<FestiveCampaign> activeWeatherCampaigns = festiveCampaignRepository
 				.findByCategoryAndCampaignStatusInAndIsManualOverrideFalse(
 						FestiveCategory.WEATHER,
 						List.of(FestiveCampaignStatus.PREPARING, FestiveCampaignStatus.ACTIVE));
 
+		int expiredCount = 0;
 		for (FestiveCampaign campaign : activeWeatherCampaigns) {
 			if (!syncedCodes.contains(campaign.getCampaignCode())) {
 				campaign.setCampaignStatus(FestiveCampaignStatus.EXPIRED);
 				festiveCampaignRepository.save(campaign);
+				expiredCount++;
 			}
 		}
+		return expiredCount;
 	}
 
 	private String buildCampaignCode(WeatherSignal signal) {
