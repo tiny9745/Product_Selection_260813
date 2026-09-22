@@ -32,8 +32,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.Product_Selection_260813.constants.ValidationMessage;
+import com.example.Product_Selection_260813.dto.request.ProductBatchItemRequest;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
+import com.example.Product_Selection_260813.dto.response.ProductBatchCreateResponse;
+import com.example.Product_Selection_260813.dto.response.ProductBatchItemResult;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
@@ -68,6 +71,7 @@ import com.example.Product_Selection_260813.service.gate.GateResult;
  * POST   /api/products/{id}/promote-to-candidate  -&gt; promoteToCandidate()<br>
  * GET    /api/products/{id}                       -&gt; getProduct()<br>
  * POST   /api/products                            -&gt; createProduct()<br>
+ * POST   /api/products/batch                      -&gt; createProductsBatch()<br>
  * PUT    /api/products/{id}                       -&gt; updateProduct()<br>
  * DELETE /api/products/{id}                       -&gt; deleteProduct()<br>
  * POST   /api/products/{id}/resubmit              -&gt; resubmit()<br>
@@ -128,6 +132,30 @@ public class ProductService {
 
 	@Autowired
 	private CustomFieldDefinitionRepository customFieldDefinitionRepository;
+
+	/**
+	 * 自我注入（self-injection），只給 createProductsBatch() 內部逐列呼叫
+	 * createProduct()／uploadImage() 用。
+	 *
+	 * 為什麼不直接寫 this.createProduct(...)：Spring 的 @Transactional 是靠
+	 * 動態代理（AOP proxy）實作，只有「從代理物件外部呼叫」才會經過代理、
+	 * 觸發交易邊界；同一個類別內部用 this 呼叫自己的另一個方法會繞過代理，
+	 * 等於那個方法上的 @Transactional 完全沒作用（Spring 官方文件明載的
+	 * self-invocation 限制）。單筆新增／上傳圖片各自從 Controller 呼叫時
+	 * 沒有這個問題（Controller 拿到的本來就是代理物件），但批次新增是在
+	 * ProductService 內部迴圈呼叫，若不透過這個 self 欄位，某一列在
+	 * repository.save() 之後、scoringService.calculateEvaluation() 之前
+	 * 失敗時，那一列已寫入的商品不會被回滾，會產生「這列回報失敗，但商品
+	 * 其實已經半殘留在資料庫」的不一致，跟批次新增「每列獨立成功或失敗，
+	 * 失敗的列不留痕跡」的設計前提衝突。
+	 *
+	 * 加 @Lazy 是必要的，不是可有可無的保守寫法：ProductService 建構時
+	 * Spring 容器裡還沒有「已完成初始化的 ProductService 代理」可以注入
+	 * 給自己，不加 @Lazy 會在應用啟動時直接拋出循環依賴例外。
+	 */
+	@Autowired
+	@org.springframework.context.annotation.Lazy
+	private ProductService self;
 
 	// ========================= 查詢 =========================
 
@@ -428,6 +456,73 @@ public class ProductService {
 		scoringService.calculateEvaluation(saved.getId(), null);
 
 		return ProductResponse.from(saved);
+	}
+
+	/**
+	 * POST /api/products/batch：批次新增品項，逐列各自獨立成功或失敗。
+	 *
+	 * 刻意不在這支方法本身加 @Transactional：如果整支方法包一層交易，
+	 * 任何一列丟出例外都會把「這支方法目前為止已經 save 成功的其他列」
+	 * 一起標記 rollback-only，整批只要有一列失敗，前面所有已成功的列
+	 * 最後也會被回滾、卻在回應裡顯示「成功」，這是最容易誤導使用者的
+	 * 不一致狀態。改成每列各自透過 self 呼叫既有的 @Transactional
+	 * createProduct()／uploadImage()，讓交易邊界縮小到「單一列」，
+	 * 這一列失敗只回滾這一列，不影響其他列——這跟單筆新增 API 的行為
+	 * 完全一致，批次只是「重複呼叫很多次單筆新增」的封裝，不是另一套
+	 * 語意不同的建立邏輯。
+	 *
+	 * 圖片比對用「原始檔名」而不是陣列序位：前端可能允許使用者調整列
+	 * 順序或圖片挑選順序，用序位配對一旦兩邊順序稍微不同就會兜錯圖片，
+	 * 檔名雖然理論上可能重複，但那是呼叫端（前端）要保證每次夾帶的檔名
+	 * 在同一批次內不重複，不是這裡要處理的問題——這裡只依 Map 的後蓋前
+	 * 語意，同檔名多檔時取最後一個。
+	 */
+	public ProductBatchCreateResponse createProductsBatch(List<ProductBatchItemRequest> items,
+			List<MultipartFile> images, String username) {
+		Map<String, MultipartFile> imagesByFilename = new LinkedHashMap<>();
+		if (images != null) {
+			for (MultipartFile file : images) {
+				if (file != null && file.getOriginalFilename() != null && !file.getOriginalFilename().isBlank()) {
+					imagesByFilename.put(file.getOriginalFilename(), file);
+				}
+			}
+		}
+
+		List<ProductBatchItemResult> results = new ArrayList<>();
+		int successCount = 0;
+
+		for (ProductBatchItemRequest item : items) {
+			ProductBatchItemResult result = new ProductBatchItemResult();
+			result.setRowNumber(item.getRowNumber());
+			try {
+				ProductResponse created = self.createProduct(item.getProduct(), username);
+
+				String imageFileName = item.getImageFileName();
+				if (imageFileName != null && !imageFileName.isBlank()) {
+					MultipartFile imageFile = imagesByFilename.get(imageFileName);
+					if (imageFile != null) {
+						created = self.uploadImage(created.getId(), imageFile);
+					} else {
+						result.setWarningMessage("商品已建立，但找不到對應的圖片檔案：" + imageFileName);
+					}
+				}
+
+				result.setSuccess(true);
+				result.setProduct(created);
+				successCount++;
+			} catch (Exception e) {
+				result.setSuccess(false);
+				result.setErrorMessage(e.getMessage() != null ? e.getMessage() : "建立失敗，請確認欄位內容");
+			}
+			results.add(result);
+		}
+
+		ProductBatchCreateResponse response = new ProductBatchCreateResponse();
+		response.setTotalCount(items.size());
+		response.setSuccessCount(successCount);
+		response.setFailCount(items.size() - successCount);
+		response.setResults(results);
+		return response;
 	}
 
 	// ========================= 修改 =========================

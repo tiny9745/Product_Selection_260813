@@ -10,11 +10,13 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,8 +26,10 @@ import com.example.Product_Selection_260813.dto.response.SimilarProductCandidate
 import com.example.Product_Selection_260813.service.ProductSimilarityService;
 import com.example.Product_Selection_260813.service.SettingsService;
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.dto.request.ProductBatchCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
+import com.example.Product_Selection_260813.dto.response.ProductBatchCreateResponse;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
@@ -187,6 +191,30 @@ public class ProductController {
 			@AuthenticationPrincipal String username) {
 		ProductResponse result = productService.createProduct(request, username);
 		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
+	}
+
+	/**
+	 * POST /api/products/batch：批次新增品項，供 CSV／Excel 匯入使用。
+	 *
+	 * multipart/form-data，兩個 part：
+	 * - items（必填，application/json）：{@link ProductBatchCreateRequest}，
+	 *   每一列的欄位規則與單筆 {@link #createProduct} 完全一致。
+	 * - images（選填，可重複這個 part 名稱夾帶多個檔案）：批次要一併配圖的
+	 *   圖片檔案，透過每列的 imageFileName 與檔案的原始檔名比對。
+	 *
+	 * 整批請求只要通過了 items 本身的 Bean Validation（陣列不可空、每列
+	 * 商品資料的必填/格式規則）就回 200；「這一列建立商品時失敗」是逐列
+	 * 結果的一部分，不會讓整支 API 回 4xx，理由與回傳格式見
+	 * {@link ProductService#createProductsBatch}／{@link ProductBatchCreateResponse}
+	 * 的類別註解。
+	 */
+	@PostMapping(value = "/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<ApiResponse<ProductBatchCreateResponse>> createProductsBatch(
+			@RequestPart("items") @Valid ProductBatchCreateRequest request,
+			@RequestPart(value = "images", required = false) List<MultipartFile> images,
+			@AuthenticationPrincipal String username) {
+		ProductBatchCreateResponse result = productService.createProductsBatch(request.getItems(), images, username);
+		return ResponseEntity.ok(ApiResponse.success("批次新增完成", result));
 	}
 
 	/**
