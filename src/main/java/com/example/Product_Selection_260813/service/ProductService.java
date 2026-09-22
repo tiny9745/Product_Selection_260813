@@ -261,7 +261,7 @@ public class ProductService {
 					.withEvaluationSummary(
 							evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
-			dto.setSuggestionReason(buildSuggestionReason(product.getId()));
+			applySuggestionInfo(dto, product.getId());
 			return dto;
 		});
 	}
@@ -269,7 +269,13 @@ public class ProductService {
 	/**
 	 * 用跟 AiSuggestionBatchService.shouldSuggest() 完全一樣的兩個判定條件
 	 * （門檻值、天數都刻意保持一致，避免兩處各自維護一份、日後改了一邊
-	 * 忘記改另一邊），重新算一次「為什麼」，組成人看得懂的一句話。
+	 * 忘記改另一邊），重新算一次「為什麼」，同時組成人看得懂的文字說明，
+	 * 以及給前端畫面直接顯示用的結構化趨勢數字（trendScore／trendDirection）。
+	 *
+	 * 原本這裡只組文字（buildSuggestionReason），數字沒有回傳過，前端
+	 * 「AI建議清單」畫面的趨勢欄位因此永遠是空的。這裡改成同一次查詢
+	 * （只查一次 recentSignals，不重複查兩次資料庫）同時填入 dto 的三個
+	 * 欄位，維持「不在批次當下存理由，查詢時重算」的原則不變。
 	 *
 	 * 不在批次當下把這句話存起來的原因：判定條件是固定、可重現的計算，
 	 * 每次查詢重算一次的成本很低，不需要為了省這點計算就多維護一個欄位、
@@ -278,32 +284,40 @@ public class ProductService {
 	private static final java.math.BigDecimal AI_SUGGEST_POPULARITY_THRESHOLD = java.math.BigDecimal.valueOf(70);
 	private static final int AI_SUGGEST_CONSECUTIVE_UP_DAYS = 3;
 
-	private String buildSuggestionReason(Long productId) {
+	private void applySuggestionInfo(ProductResponse dto, Long productId) {
 		List<com.example.Product_Selection_260813.entity.TrendSignal> recentSignals = trendSignalRepository
 				.findTop3ByProductIdOrderByCollectedAtDesc(productId);
 		if (recentSignals.isEmpty()) {
-			return null;
+			dto.setSuggestionReason(null);
+			return;
 		}
 
 		com.example.Product_Selection_260813.entity.TrendSignal latest = recentSignals.get(0);
+		// 不管符不符合建議門檻，只要有最新一筆資料就回傳結構化數字給畫面顯示；
+		// 「為什麼被建議」的文字說明才需要判斷門檻，兩者分開處理。
+		dto.setTrendScore(latest.getPopularityScore());
+		dto.setTrendDirection(latest.getTrendDirection());
+
 		if (latest.getPopularityScore() != null
 				&& latest.getPopularityScore().compareTo(AI_SUGGEST_POPULARITY_THRESHOLD) > 0) {
-			return String.format("最新熱度分數 %s 分，超過 %s 分門檻。", latest.getPopularityScore().toPlainString(),
-					AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString());
+			dto.setSuggestionReason(String.format("最新熱度分數 %s 分，超過 %s 分門檻。",
+					latest.getPopularityScore().toPlainString(), AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString()));
+			return;
 		}
 
 		if (recentSignals.size() >= AI_SUGGEST_CONSECUTIVE_UP_DAYS
 				&& recentSignals.stream()
 						.limit(AI_SUGGEST_CONSECUTIVE_UP_DAYS)
 						.allMatch(signal -> signal.getTrendDirection() == com.example.Product_Selection_260813.enums.TrendSignalTrendDirection.UP)) {
-			return String.format("連續 %d 天呈上升趨勢。", AI_SUGGEST_CONSECUTIVE_UP_DAYS);
+			dto.setSuggestionReason(String.format("連續 %d 天呈上升趨勢。", AI_SUGGEST_CONSECUTIVE_UP_DAYS));
+			return;
 		}
 
 		// 理論上不會走到這裡——商品會被標記 AI_SUGGESTED，代表批次當下
 		// 一定符合上述兩個條件之一。如果真的發生（例如條件後來被人為
 		// 改過但商品狀態沒有重新計算過），誠實顯示「無法重建理由」，
 		// 不要編造一個看似合理但其實是猜的說法。
-		return "（依當時的判定條件標記為建議，目前重新計算對不上任何條件，可能是判定邏輯之後有調整過）";
+		dto.setSuggestionReason("（依當時的判定條件標記為建議，目前重新計算對不上任何條件，可能是判定邏輯之後有調整過）");
 	}
 
 	/**

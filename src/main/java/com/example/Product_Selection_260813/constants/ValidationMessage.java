@@ -111,4 +111,9 @@ public class ValidationMessage {
 	// User（自身資料修改，團隊既有功能，非本次異動範圍）
 	public static final String USER_CURRENT_PASSWORD_BLANK = "目前密碼不可為空";
 	public static final String USER_NEW_PASSWORD_SAME_AS_OLD = "新密碼不可與目前密碼相同";
+
+	// WeatherSignalTagMapping（2026-09-22新增：天氣訊號標籤對照可調整化）
+	public static final String WEATHER_SIGNAL_TAG_TOO_LONG = "標籤長度不可超過50字元";
+	public static final String WEATHER_SIGNAL_TYPE_NORMAL_NOT_ALLOWED = "一般天氣（NORMAL）不會命中任何商品，不可建立對照";
+	public static final String WEATHER_SIGNAL_TAG_MAPPING_DUPLICATE = "此天氣訊號類型與標籤的組合已存在生效中的對照：";
 }

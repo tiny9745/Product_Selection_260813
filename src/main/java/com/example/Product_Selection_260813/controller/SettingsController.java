@@ -35,6 +35,8 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest
 //import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingCreateRequest;
+import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.request.SystemSettingUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
@@ -42,6 +44,7 @@ import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
+import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMappingResponse;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.service.SettingsService;
@@ -326,6 +329,55 @@ public class SettingsController {
 	@PutMapping("/risk-options/{id}/enable")
 	public ResponseEntity<ApiResponse<RiskOptionSettingResponse>> enableRiskOption(@PathVariable("id") Long id) {
 		RiskOptionSettingResponse result = settingsService.enableRiskOption(id);
+		return ResponseEntity.ok(ApiResponse.success("已復用", result));
+	}
+
+	// ========================= 天氣訊號標籤對照 =========================
+	// 2026-09-22新增：把原本寫死在WeatherCampaignSyncService裡的
+	// WEATHER_TAG_MAPPING改成可透過設定頁調整，權限比照風險選項／商品類型
+	// 等既有設定類端點一律[僅管理]。這裡刻意不放進WeatherController——
+	// WeatherController只負責「觸發同步／預覽」這類維運操作，對照表本身
+	// 的CRUD屬於一般設定資料管理，跟RiskOption／ProductType同一類，放在
+	// SettingsController/SettingsService維持既有分工一致。
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/weather-signal-tags")
+	public ResponseEntity<ApiResponse<List<WeatherSignalTagMappingResponse>>> getWeatherSignalTagMappings() {
+		List<WeatherSignalTagMappingResponse> result = settingsService.getAllWeatherSignalTagMappings();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/weather-signal-tags")
+	public ResponseEntity<ApiResponse<WeatherSignalTagMappingResponse>> createWeatherSignalTagMapping(
+			@Valid @RequestBody WeatherSignalTagMappingCreateRequest request,
+			@AuthenticationPrincipal String username) {
+		WeatherSignalTagMappingResponse result = settingsService.createWeatherSignalTagMapping(request, username);
+		return ResponseEntity.ok(ApiResponse.success("新增成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/weather-signal-tags/{id}")
+	public ResponseEntity<ApiResponse<WeatherSignalTagMappingResponse>> updateWeatherSignalTagMapping(
+			@PathVariable("id") Long id, @Valid @RequestBody WeatherSignalTagMappingUpdateRequest request,
+			@AuthenticationPrincipal String username) {
+		WeatherSignalTagMappingResponse result = settingsService.updateWeatherSignalTagMapping(id, request, username);
+		return ResponseEntity.ok(ApiResponse.success("修改成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/weather-signal-tags/{id}/disable")
+	public ResponseEntity<ApiResponse<WeatherSignalTagMappingResponse>> disableWeatherSignalTagMapping(
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		WeatherSignalTagMappingResponse result = settingsService.disableWeatherSignalTagMapping(id, username);
+		return ResponseEntity.ok(ApiResponse.success("已停用", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/weather-signal-tags/{id}/enable")
+	public ResponseEntity<ApiResponse<WeatherSignalTagMappingResponse>> enableWeatherSignalTagMapping(
+			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
+		WeatherSignalTagMappingResponse result = settingsService.enableWeatherSignalTagMapping(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已復用", result));
 	}
 

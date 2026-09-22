@@ -10,6 +10,7 @@ import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingStatus;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 import com.example.Product_Selection_260813.service.gate.GateResult;
 
 /**
@@ -133,12 +134,39 @@ public class ProductResponse {
 	 */
 	private String suggestionReason;
 
+	/**
+	 * 跟 suggestionReason 同一批、同一個判定來源
+	 * （AiSuggestionBatchService.shouldSuggest() 用的最新一筆 TrendSignal），
+	 * 只是這裡回傳結構化數字而不是文字，給前端「AI建議清單」畫面直接顯示
+	 * 趨勢分數與方向用，不用自己解析 suggestionReason 這句文字。
+	 * 語意同 suggestionReason：只有 GET /api/products/ai-suggested 會填值，
+	 * 其餘端點恆為 null。
+	 */
+	private BigDecimal trendScore;
+	private TrendSignalTrendDirection trendDirection;
+
 	public String getSuggestionReason() {
 		return suggestionReason;
 	}
 
 	public void setSuggestionReason(String suggestionReason) {
 		this.suggestionReason = suggestionReason;
+	}
+
+	public BigDecimal getTrendScore() {
+		return trendScore;
+	}
+
+	public void setTrendScore(BigDecimal trendScore) {
+		this.trendScore = trendScore;
+	}
+
+	public TrendSignalTrendDirection getTrendDirection() {
+		return trendDirection;
+	}
+
+	public void setTrendDirection(TrendSignalTrendDirection trendDirection) {
+		this.trendDirection = trendDirection;
 	}
 
 	public static ProductResponse from(Product product) {

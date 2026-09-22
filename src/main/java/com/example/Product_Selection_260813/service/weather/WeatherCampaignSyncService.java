@@ -22,6 +22,8 @@ import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.WeatherSignalType;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
+import com.example.Product_Selection_260813.entity.WeatherSignalTagMapping;
+import com.example.Product_Selection_260813.repository.WeatherSignalTagMappingRepository;
 
 /**
  * 把 WeatherSignalProvider 提供的天氣訊號，upsert 成 category=WEATHER 的
@@ -44,41 +46,19 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 public class WeatherCampaignSyncService {
 
 	/**
-	 * 天氣訊號類型 → 商品標籤（＋命中權重）對照表。
+	 * 天氣訊號類型 → 商品標籤（＋命中權重）對照，<b>2026-09-22 改為資料庫驅動
+	 * （weather_signal_tag_mappings，見 V19 migration）</b>，不再是寫死的
+	 * 靜態常數——節慶/季節檔期的標籤主管本來就能在設定頁自行調整
+	 * （festive_campaign_tags），天氣這端原本只能改程式碼重新部署才能調整，
+	 * 是不一致的落差，這次補齊。
 	 *
-	 * 這是「這個天氣訊號跟哪些商品標籤相關」的商業判斷，比照
-	 * AiSuggestionBatchService 把門檻常數直接寫在服務類別裡的既有慣例
-	 * （該類別的註解也說明了「初期用簡單規則，不需要額外設定表」的立場），
-	 * 先用靜態常數，不預先蓋一張設定表。
-	 *
-	 * 如果之後要開放主管自行調整標籤關聯（見規劃文件的「主管可調控範疇」
-	 * 討論），才需要升級成資料庫表，屆時只需要改這裡的查詢來源，
-	 * 不影響下游的 upsert 邏輯。
+	 * 每次同步只查一次全部生效中的對照、在記憶體依 weatherSignalType 分組
+	 * （見 syncWeatherCampaigns()），不對每個訊號類型各自查一次資料庫。
+	 * NORMAL 不會出現在查詢結果裡：SettingsService 建立/編輯對照時就擋下
+	 * NORMAL，資料庫裡本來就不會有這個類型的列，不需要在這裡再過濾一次。
 	 */
-	private static final Map<WeatherSignalType, Map<String, FestiveCampaignTagMatchTier>> WEATHER_TAG_MAPPING = Map.of(
-			WeatherSignalType.RAINY, Map.of(
-					"雨具", FestiveCampaignTagMatchTier.CORE,
-					"防水", FestiveCampaignTagMatchTier.GENERAL),
-			WeatherSignalType.HEAVY_RAIN, Map.of(
-					"雨具", FestiveCampaignTagMatchTier.CORE,
-					"防水", FestiveCampaignTagMatchTier.CORE),
-			WeatherSignalType.HOT, Map.of(
-					"涼感", FestiveCampaignTagMatchTier.CORE,
-					"消暑", FestiveCampaignTagMatchTier.GENERAL),
-			WeatherSignalType.HUMID_HOT, Map.of(
-					"涼感", FestiveCampaignTagMatchTier.CORE,
-					"除濕", FestiveCampaignTagMatchTier.GENERAL),
-			WeatherSignalType.HUMID, Map.of(
-					"除濕", FestiveCampaignTagMatchTier.CORE),
-			WeatherSignalType.STRONG_WIND, Map.of(
-					"防風", FestiveCampaignTagMatchTier.CORE),
-			WeatherSignalType.COLD, Map.of(
-					"保暖", FestiveCampaignTagMatchTier.CORE),
-			WeatherSignalType.COOL, Map.of(
-					"保暖", FestiveCampaignTagMatchTier.WEAK),
-			WeatherSignalType.DRY_COOL, Map.of(
-					"保暖", FestiveCampaignTagMatchTier.GENERAL));
-	// NORMAL 刻意不在表裡：一般天氣不該命中任何商品，見 syncOne() 的略過邏輯。
+	@Autowired
+	private WeatherSignalTagMappingRepository weatherSignalTagMappingRepository;
 
 	private static final DateTimeFormatter CODE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -107,9 +87,14 @@ public class WeatherCampaignSyncService {
 	public WeatherSyncResponse syncWeatherCampaigns() {
 		List<WeatherSignal> signals = weatherSignalProvider.getActiveSignals();
 
+		Map<WeatherSignalType, Map<String, FestiveCampaignTagMatchTier>> tagMappingsByType =
+				weatherSignalTagMappingRepository.findByIsActiveTrue().stream()
+						.collect(Collectors.groupingBy(WeatherSignalTagMapping::getWeatherSignalType,
+								Collectors.toMap(WeatherSignalTagMapping::getTag, WeatherSignalTagMapping::getMatchTier)));
+
 		Set<String> syncedCodes = signals.stream()
-				.filter(signal -> WEATHER_TAG_MAPPING.containsKey(signal.getType()))
-				.map(this::syncOne)
+				.filter(signal -> tagMappingsByType.containsKey(signal.getType()))
+				.map(signal -> syncOne(signal, tagMappingsByType.get(signal.getType())))
 				.collect(Collectors.toSet());
 
 		int expiredCount = expireStaleWeatherCampaigns(syncedCodes);
@@ -118,7 +103,7 @@ public class WeatherCampaignSyncService {
 	}
 
 	/** upsert 單一天氣訊號對應的檔期，回傳這筆檔期的 campaign_code。 */
-	private String syncOne(WeatherSignal signal) {
+	private String syncOne(WeatherSignal signal, Map<String, FestiveCampaignTagMatchTier> tagMappings) {
 		String code = buildCampaignCode(signal);
 
 		FestiveCampaign campaign = festiveCampaignRepository.findByCampaignCode(code).orElseGet(FestiveCampaign::new);
@@ -147,7 +132,7 @@ public class WeatherCampaignSyncService {
 		FestiveCampaign saved = festiveCampaignRepository.save(campaign);
 
 		festiveCampaignTagRepository.deleteByCampaignId(saved.getId());
-		saveTags(saved.getId(), WEATHER_TAG_MAPPING.get(signal.getType()));
+		saveTags(saved.getId(), tagMappings);
 
 		return code;
 	}

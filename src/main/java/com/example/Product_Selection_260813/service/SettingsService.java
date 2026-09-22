@@ -21,6 +21,8 @@ import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateReq
 import com.example.Product_Selection_260813.dto.request.ProductTypeCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
+import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingCreateRequest;
+import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
@@ -29,6 +31,7 @@ import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignTagView;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
+import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMappingResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
@@ -36,6 +39,8 @@ import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.entity.RiskOption;
+import com.example.Product_Selection_260813.entity.WeatherSignalTagMapping;
+import com.example.Product_Selection_260813.enums.WeatherSignalType;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
@@ -80,6 +85,7 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.repository.RiskOptionRepository;
+import com.example.Product_Selection_260813.repository.WeatherSignalTagMappingRepository;
 import com.example.Product_Selection_260813.constants.SystemSettingRegistry;
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
@@ -141,6 +147,9 @@ public class SettingsService {
 
 	@Autowired
 	private RiskOptionRepository riskOptionRepository;
+
+	@Autowired
+	private WeatherSignalTagMappingRepository weatherSignalTagMappingRepository;
 
 	@Autowired
 	private AppUserRepository appUserRepository;
@@ -1161,6 +1170,121 @@ public class SettingsService {
 		option.setIsActive(true);
 		RiskOption saved = riskOptionRepository.save(option);
 		return RiskOptionSettingResponse.from(saved);
+	}
+
+	// ========================= 天氣訊號標籤對照 =========================
+
+	/**
+	 * GET /api/settings/weather-signal-tags：取得全部天氣訊號標籤對照（含系統
+	 * 預設與自訂、含已停用）。管理視角，比照 getAllRiskOptions() 用 findAll()
+	 * 而非只查生效中的——WeatherCampaignSyncService 同步時才只讀生效中的列
+	 * （見 findByIsActiveTrue()），兩者用途不同。
+	 */
+	@Transactional(readOnly = true)
+	public List<WeatherSignalTagMappingResponse> getAllWeatherSignalTagMappings() {
+		return weatherSignalTagMappingRepository.findAll().stream()
+				.map(WeatherSignalTagMappingResponse::from).toList();
+	}
+
+	/**
+	 * POST /api/settings/weather-signal-tags：新增一筆天氣訊號 → 商品標籤對照。
+	 *
+	 * 新增後下一次天氣同步（排程或手動觸發）就會採計這筆對照，不需要另外
+	 * 啟用步驟——與 createRiskOption() 同樣的「新增就是要用」直覺。
+	 */
+	@Transactional
+	public WeatherSignalTagMappingResponse createWeatherSignalTagMapping(
+			WeatherSignalTagMappingCreateRequest request, String username) {
+		validateWeatherSignalTagMapping(request.getWeatherSignalType(), request.getTag());
+
+		Long userId = resolveUserId(username);
+
+		WeatherSignalTagMapping mapping = new WeatherSignalTagMapping();
+		mapping.setWeatherSignalType(request.getWeatherSignalType());
+		mapping.setTag(request.getTag());
+		mapping.setMatchTier(request.getMatchTier());
+		mapping.setIsActive(true);
+		mapping.setIsSystemDefault(false);
+		mapping.setCreatedBy(userId);
+
+		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		log.info("天氣訊號標籤對照已新增：{} -> {}（{}），操作者={}", request.getWeatherSignalType(), request.getTag(),
+				request.getMatchTier(), username);
+		return WeatherSignalTagMappingResponse.from(saved);
+	}
+
+	/**
+	 * 共用驗證：weatherSignalType 不可為 NORMAL（一般天氣不該命中任何商品，
+	 * 見 WeatherSignalTagMapping 類別註解），且同一組合不可有兩筆同時生效中
+	 * ——重複的話 WeatherCampaignSyncService 同步時會對同一個天氣類型套用
+	 * 兩筆權重不同的規則，語意上不知道該採哪一筆。
+	 */
+	private void validateWeatherSignalTagMapping(WeatherSignalType weatherSignalType, String tag) {
+		if (weatherSignalType == WeatherSignalType.NORMAL) {
+			throw new IllegalArgumentException(ValidationMessage.WEATHER_SIGNAL_TYPE_NORMAL_NOT_ALLOWED);
+		}
+		if (weatherSignalTagMappingRepository.existsByWeatherSignalTypeAndTagAndIsActiveTrue(weatherSignalType, tag)) {
+			throw new IllegalArgumentException(
+					ValidationMessage.WEATHER_SIGNAL_TAG_MAPPING_DUPLICATE + weatherSignalType + " -> " + tag);
+		}
+	}
+
+	/**
+	 * PUT /api/settings/weather-signal-tags/{id}：調整命中權重層級。不開放改
+	 * weatherSignalType／tag，見 WeatherSignalTagMappingUpdateRequest 類別註解。
+	 */
+	@Transactional
+	public WeatherSignalTagMappingResponse updateWeatherSignalTagMapping(Long id,
+			WeatherSignalTagMappingUpdateRequest request, String username) {
+		WeatherSignalTagMapping mapping = weatherSignalTagMappingRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("天氣訊號標籤對照不存在"));
+		Long userId = resolveUserId(username);
+
+		mapping.setMatchTier(request.getMatchTier());
+		mapping.setUpdatedBy(userId);
+		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		return WeatherSignalTagMappingResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/weather-signal-tags/{id}/disable：停用（含系統預設列，
+	 * 比照 risk_options「is_system_default 不可刪除，僅可停用」的既有原則，
+	 * 這裡沒有另外擋 isSystemDefault=true——管理層若判斷某筆系統預設對照
+	 * 已不合時宜，應該可以停用，只是不能刪除，兩者是不同的限制）。停用後
+	 * WeatherCampaignSyncService 下一次同步就不再採計；已經 upsert 過的
+	 * 天氣檔期／festive_campaign_tags 不會被回溯修改，跟既有檔期同步邏輯
+	 * 一致（見該服務類別註解）。冪等：重複停用不視為錯誤。
+	 */
+	@Transactional
+	public WeatherSignalTagMappingResponse disableWeatherSignalTagMapping(Long id, String username) {
+		WeatherSignalTagMapping mapping = weatherSignalTagMappingRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("天氣訊號標籤對照不存在"));
+		mapping.setIsActive(false);
+		mapping.setUpdatedBy(resolveUserId(username));
+		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		return WeatherSignalTagMappingResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/settings/weather-signal-tags/{id}/enable：復用。重新啟用前一樣
+	 * 要檢查會不會跟另一筆生效中的對照撞組合，避免復用後又立刻產生重複規則
+	 * ——這點 disable 不需要檢查（停用只會減少組合，不會製造重複）。
+	 */
+	@Transactional
+	public WeatherSignalTagMappingResponse enableWeatherSignalTagMapping(Long id, String username) {
+		WeatherSignalTagMapping mapping = weatherSignalTagMappingRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("天氣訊號標籤對照不存在"));
+		if (!Boolean.TRUE.equals(mapping.getIsActive())
+				&& weatherSignalTagMappingRepository.existsByWeatherSignalTypeAndTagAndIsActiveTrue(
+						mapping.getWeatherSignalType(), mapping.getTag())) {
+			throw new IllegalArgumentException(
+					ValidationMessage.WEATHER_SIGNAL_TAG_MAPPING_DUPLICATE
+							+ mapping.getWeatherSignalType() + " -> " + mapping.getTag());
+		}
+		mapping.setIsActive(true);
+		mapping.setUpdatedBy(resolveUserId(username));
+		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		return WeatherSignalTagMappingResponse.from(saved);
 	}
 
 	// ========================= 核心客群設定 =========================
