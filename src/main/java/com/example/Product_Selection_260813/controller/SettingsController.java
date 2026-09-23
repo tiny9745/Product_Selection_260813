@@ -37,6 +37,7 @@ import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingCreateRequest;
 import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.RegionWeightUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.request.SystemSettingUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
@@ -45,6 +46,8 @@ import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
 import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMappingResponse;
+import com.example.Product_Selection_260813.dto.response.WeatherSignalTagOptionResponse;
+import com.example.Product_Selection_260813.dto.response.RegionWeightResponse;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.service.SettingsService;
@@ -379,6 +382,39 @@ public class SettingsController {
 			@PathVariable("id") Long id, @AuthenticationPrincipal String username) {
 		WeatherSignalTagMappingResponse result = settingsService.enableWeatherSignalTagMapping(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已復用", result));
+	}
+
+	/**
+	 * GET /api/settings/weather-signal-tags/options：商品表單「可選標籤」用的
+	 * 查詢端點，刻意不加 @PreAuthorize——跟上面 5 支 CRUD 端點（設定頁管理用，
+	 * 一律[僅管理]）不同，這支是操作角色也要能打的查詢功能，比照
+	 * GET /api/settings/festive-campaigns 不限角色的既有慣例（見本類別最上方
+	 * Javadoc 的權限說明）。只回傳 isActive=true 且精簡過的欄位，不是把
+	 * getAllWeatherSignalTagMappings() 的權限拿掉。
+	 */
+	@GetMapping("/weather-signal-tags/options")
+	public ResponseEntity<ApiResponse<List<WeatherSignalTagOptionResponse>>> getWeatherSignalTagOptions() {
+		List<WeatherSignalTagOptionResponse> result = settingsService.getActiveWeatherSignalTagOptions();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	// ========================= 地域占比設定（region_weights） =========================
+	// 2026-09-23新增：地域性影響評分方案B+D決議。四區固定，只開放調整占比，
+	// 權限比照因子權重編輯一律[僅管理]（SettingsService類別註解有完整說明）。
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/region-weights")
+	public ResponseEntity<ApiResponse<List<RegionWeightResponse>>> getRegionWeights() {
+		List<RegionWeightResponse> result = settingsService.getRegionWeights();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/region-weights")
+	public ResponseEntity<ApiResponse<List<RegionWeightResponse>>> updateRegionWeights(
+			@Valid @RequestBody RegionWeightUpdateRequest request, @AuthenticationPrincipal String username) {
+		List<RegionWeightResponse> result = settingsService.updateRegionWeights(request, username);
+		return ResponseEntity.ok(ApiResponse.success("已更新", result));
 	}
 
 	// ========================= 核心客群設定 =========================

@@ -116,4 +116,14 @@ public class ValidationMessage {
 	public static final String WEATHER_SIGNAL_TAG_TOO_LONG = "標籤長度不可超過50字元";
 	public static final String WEATHER_SIGNAL_TYPE_NORMAL_NOT_ALLOWED = "一般天氣（NORMAL）不會命中任何商品，不可建立對照";
 	public static final String WEATHER_SIGNAL_TAG_MAPPING_DUPLICATE = "此天氣訊號類型與標籤的組合已存在生效中的對照：";
+
+	// RegionWeight（2026-09-23新增：地域性影響評分方案B+D）
+	public static final String REGION_WEIGHTS_EMPTY = "區域占比清單不可為空";
+	public static final String REGION_WEIGHT_REGION_BLANK = "區域代碼不可為空";
+	public static final String REGION_WEIGHT_NULL = "區域占比不可為空";
+	public static final String REGION_WEIGHT_RANGE = "區域占比須介於0~100之間";
+	public static final String REGION_WEIGHT_OVER_DIGITS = "區域占比最多3位整數、2位小數";
+	public static final String REGION_WEIGHT_SUM_NOT_100 = "四區占比加總須為100，目前為：";
+	public static final String REGION_WEIGHT_MISSING_REGION = "缺少區域，四區（NORTH/CENTRAL/SOUTH/EAST）須全部送出，缺少：";
+	public static final String REGION_WEIGHT_UNKNOWN_REGION = "不明區域代碼，僅接受NORTH/CENTRAL/SOUTH/EAST：";
 }

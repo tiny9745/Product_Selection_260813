@@ -1,5 +1,7 @@
 package com.example.Product_Selection_260813.service.weather;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -16,12 +18,14 @@ import com.example.Product_Selection_260813.dto.response.WeatherSyncResponse;
 import com.example.Product_Selection_260813.dto.weather.WeatherSignal;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
+import com.example.Product_Selection_260813.entity.RegionWeight;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCampaignTagMatchTier;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.WeatherSignalType;
 import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
+import com.example.Product_Selection_260813.repository.RegionWeightRepository;
 import com.example.Product_Selection_260813.entity.WeatherSignalTagMapping;
 import com.example.Product_Selection_260813.repository.WeatherSignalTagMappingRepository;
 
@@ -60,6 +64,15 @@ public class WeatherCampaignSyncService {
 	@Autowired
 	private WeatherSignalTagMappingRepository weatherSignalTagMappingRepository;
 
+	/**
+	 * 地域性影響評分（方案B+D，2026-09-23新增）：四區各自的業務占比設定，
+	 * 用來把「這次天氣訊號命中了幾個、哪幾個區域」換算成 region_coverage_ratio
+	 * （見 buildRegionCoverageRatios() 與 FestiveCampaign.regionCoverageRatio
+	 * 欄位註解）。每次同步只查一次，不對每個訊號類型各自查一次資料庫。
+	 */
+	@Autowired
+	private RegionWeightRepository regionWeightRepository;
+
 	private static final DateTimeFormatter CODE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
 	@Autowired
@@ -92,9 +105,12 @@ public class WeatherCampaignSyncService {
 						.collect(Collectors.groupingBy(WeatherSignalTagMapping::getWeatherSignalType,
 								Collectors.toMap(WeatherSignalTagMapping::getTag, WeatherSignalTagMapping::getMatchTier)));
 
+		Map<WeatherSignalType, BigDecimal> coverageRatioByType = buildRegionCoverageRatios(signals);
+
 		Set<String> syncedCodes = signals.stream()
 				.filter(signal -> tagMappingsByType.containsKey(signal.getType()))
-				.map(signal -> syncOne(signal, tagMappingsByType.get(signal.getType())))
+				.map(signal -> syncOne(signal, tagMappingsByType.get(signal.getType()),
+						coverageRatioByType.get(signal.getType())))
 				.collect(Collectors.toSet());
 
 		int expiredCount = expireStaleWeatherCampaigns(syncedCodes);
@@ -102,8 +118,41 @@ public class WeatherCampaignSyncService {
 		return new WeatherSyncResponse(signals.size(), syncedCodes.size(), expiredCount);
 	}
 
+	/**
+	 * 地域性影響評分（方案D）：同一種天氣訊號類型，這次同步命中的區域越多、
+	 * 且命中的區域業務占比越高，region_coverage_ratio 越接近 1；只有單一區域
+	 * 命中、且該區占比低時，比重就低——不是精確的「這個商品是否屬於這個
+	 * 地區」比對（那是方案C，需要 Product/AudienceProfile 補地域欄位，這次
+	 * 決議不做），而是讓「全國代表性不足」的局部訊號，加成力道自然打折。
+	 *
+	 * 每個訊號類型的比重，在整批 signals 範圍內只算一次（依 type 分組找出
+	 * 命中的 region 集合），不對每一筆訊號各自查一次 region_weights，避免
+	 * N+1。四區占比理論上加總為100（SettingsService.updateRegionWeights()
+	 * 保證），但仍用 min(1, ...) 夾住比例，防止資料異常時 boost 超出既有的
+	 * BOOST_CAP 設計上限。
+	 */
+	private Map<WeatherSignalType, BigDecimal> buildRegionCoverageRatios(List<WeatherSignal> signals) {
+		Map<String, BigDecimal> weightByRegion = regionWeightRepository.findAll().stream()
+				.collect(Collectors.toMap(RegionWeight::getRegion, RegionWeight::getWeightPercentage));
+
+		Map<WeatherSignalType, Set<String>> regionsByType = signals.stream()
+				.collect(Collectors.groupingBy(WeatherSignal::getType,
+						Collectors.mapping(WeatherSignal::getRegion, Collectors.toSet())));
+
+		return regionsByType.entrySet().stream().collect(Collectors.toMap(
+				Map.Entry::getKey,
+				entry -> {
+					BigDecimal sum = entry.getValue().stream()
+							.map(region -> weightByRegion.getOrDefault(region, BigDecimal.ZERO))
+							.reduce(BigDecimal.ZERO, BigDecimal::add);
+					BigDecimal ratio = sum.divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP);
+					return ratio.min(BigDecimal.ONE);
+				}));
+	}
+
 	/** upsert 單一天氣訊號對應的檔期，回傳這筆檔期的 campaign_code。 */
-	private String syncOne(WeatherSignal signal, Map<String, FestiveCampaignTagMatchTier> tagMappings) {
+	private String syncOne(WeatherSignal signal, Map<String, FestiveCampaignTagMatchTier> tagMappings,
+			BigDecimal regionCoverageRatio) {
 		String code = buildCampaignCode(signal);
 
 		FestiveCampaign campaign = festiveCampaignRepository.findByCampaignCode(code).orElseGet(FestiveCampaign::new);
@@ -125,6 +174,12 @@ public class WeatherCampaignSyncService {
 		campaign.setPreparationLeadDays(3);
 		campaign.setCampaignStatus(resolveWeatherStatus(signal));
 		campaign.setWeatherConfidence(signal.getConfidence());
+		campaign.setRegion(signal.getRegion());
+		// regionCoverageRatio 理論上一定有值（buildRegionCoverageRatios()對
+		// 這次signals裡出現的每個type都會算一筆），null時保守給0——不讓資料
+		// 異常的天氣檔期意外拿到滿額地域加成，比照weatherConfidence為null時
+		// 保守處理成LOW的既有原則（見ScoringService.calculateWeatherUrgencyFactor()）。
+		campaign.setRegionCoverageRatio(regionCoverageRatio != null ? regionCoverageRatio : BigDecimal.ZERO);
 		if (campaign.getIsManualOverride() == null) {
 			campaign.setIsManualOverride(false);
 		}

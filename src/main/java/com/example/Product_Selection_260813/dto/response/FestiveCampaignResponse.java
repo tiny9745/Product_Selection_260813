@@ -1,5 +1,6 @@
 package com.example.Product_Selection_260813.dto.response;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -18,6 +19,10 @@ public class FestiveCampaignResponse {
 	private Integer preparationLeadDays;
 	private FestiveCampaignStatus campaignStatus;
 	private Boolean isManualOverride;
+	/** 僅 category=WEATHER 時有值，見 FestiveCampaign 類別欄位註解與 V20 migration。 */
+	private String region;
+	/** 僅 category=WEATHER 時有值，同步當下凍結寫入，不即時重算（見 FestiveCampaign 類別欄位註解）。 */
+	private BigDecimal regionCoverageRatio;
 	private List<FestiveCampaignTagView> tags;
 
 	public static FestiveCampaignResponse from(FestiveCampaign campaign, List<FestiveCampaignTagView> tags) {
@@ -31,6 +36,8 @@ public class FestiveCampaignResponse {
 		dto.preparationLeadDays = campaign.getPreparationLeadDays();
 		dto.campaignStatus = campaign.getCampaignStatus();
 		dto.isManualOverride = campaign.getIsManualOverride();
+		dto.region = campaign.getRegion();
+		dto.regionCoverageRatio = campaign.getRegionCoverageRatio();
 		dto.tags = tags;
 		return dto;
 	}
@@ -105,6 +112,22 @@ public class FestiveCampaignResponse {
 
 	public void setIsManualOverride(Boolean isManualOverride) {
 		this.isManualOverride = isManualOverride;
+	}
+
+	public String getRegion() {
+		return region;
+	}
+
+	public void setRegion(String region) {
+		this.region = region;
+	}
+
+	public BigDecimal getRegionCoverageRatio() {
+		return regionCoverageRatio;
+	}
+
+	public void setRegionCoverageRatio(BigDecimal regionCoverageRatio) {
+		this.regionCoverageRatio = regionCoverageRatio;
 	}
 
 	public List<FestiveCampaignTagView> getTags() {

@@ -1,5 +1,6 @@
 package com.example.Product_Selection_260813.entity;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -54,6 +55,24 @@ public class FestiveCampaign {
     @Enumerated(EnumType.STRING)
     @Column(name = "weather_confidence")
     private WeatherForecastConfidence weatherConfidence;
+
+    /**
+     * 僅 category=WEATHER 時有值：這筆天氣檔期命中的區域代碼（NORTH/CENTRAL/
+     * SOUTH/EAST，對照 WeatherRegionConfig.REGION_CITIES 的 key）。FESTIVAL／
+     * SEASON 類檔期維持 NULL，語意上代表「全國性、不限地域」（見 V20 migration）。
+     */
+    @Column(name = "region", length = 10)
+    private String region;
+
+    /**
+     * 僅 category=WEATHER 時有值：WeatherCampaignSyncService 同步當下，依
+     * region_weights 算出「命中同一種天氣訊號類型的所有區域」加總的業務占比
+     * （0~1，四區全中＝1.0）。在同步當下凍結寫入，不在計分當下即時查表重算，
+     * 理由見 V20 migration 欄位註解（再現性：已核准商品的加成快照不因日後
+     * 調整占比設定被追溯性改變）。
+     */
+    @Column(name = "region_coverage_ratio", precision = 5, scale = 4)
+    private BigDecimal regionCoverageRatio;
 
     // target_tags(VARCHAR)欄位已移除：無法記錄「這個標籤屬於核心/一般/弱命中」的分級，
     // 改由festive_campaign_tags表承接（一檔期對多標籤、每個標籤各自帶match_tier），
@@ -136,6 +155,22 @@ public class FestiveCampaign {
 
 	public void setWeatherConfidence(WeatherForecastConfidence weatherConfidence) {
 		this.weatherConfidence = weatherConfidence;
+	}
+
+	public String getRegion() {
+		return region;
+	}
+
+	public void setRegion(String region) {
+		this.region = region;
+	}
+
+	public BigDecimal getRegionCoverageRatio() {
+		return regionCoverageRatio;
+	}
+
+	public void setRegionCoverageRatio(BigDecimal regionCoverageRatio) {
+		this.regionCoverageRatio = regionCoverageRatio;
 	}
 
 	public FestiveCampaignStatus getCampaignStatus() {

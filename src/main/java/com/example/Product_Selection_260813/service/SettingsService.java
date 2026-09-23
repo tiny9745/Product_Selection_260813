@@ -23,6 +23,7 @@ import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest
 import com.example.Product_Selection_260813.dto.request.RiskOptionCreateRequest;
 import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingCreateRequest;
 import com.example.Product_Selection_260813.dto.request.WeatherSignalTagMappingUpdateRequest;
+import com.example.Product_Selection_260813.dto.request.RegionWeightUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
@@ -32,6 +33,8 @@ import com.example.Product_Selection_260813.dto.response.FestiveCampaignTagView;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
 import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMappingResponse;
+import com.example.Product_Selection_260813.dto.response.WeatherSignalTagOptionResponse;
+import com.example.Product_Selection_260813.dto.response.RegionWeightResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
 import com.example.Product_Selection_260813.entity.EvaluationMode;
@@ -40,6 +43,9 @@ import com.example.Product_Selection_260813.entity.FestiveCampaignTag;
 import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.entity.RiskOption;
 import com.example.Product_Selection_260813.entity.WeatherSignalTagMapping;
+import com.example.Product_Selection_260813.entity.RegionWeight;
+import com.example.Product_Selection_260813.repository.RegionWeightRepository;
+import com.example.Product_Selection_260813.service.weather.WeatherRegionConfig;
 import com.example.Product_Selection_260813.enums.WeatherSignalType;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
@@ -150,6 +156,9 @@ public class SettingsService {
 
 	@Autowired
 	private WeatherSignalTagMappingRepository weatherSignalTagMappingRepository;
+
+	@Autowired
+	private RegionWeightRepository regionWeightRepository;
 
 	@Autowired
 	private AppUserRepository appUserRepository;
@@ -1187,6 +1196,20 @@ public class SettingsService {
 	}
 
 	/**
+	 * GET /api/settings/weather-signal-tags/options：操作角色也能打（不加
+	 * @PreAuthorize，比照 getAllFestiveCampaigns() 的既有慣例）。只回傳
+	 * isActive=true 的列，且只回傳 WeatherSignalTagOptionResponse 的三個
+	 * 欄位（不含 id／isSystemDefault 等管理用 metadata）——這支是給商品表單
+	 * 「可選標籤」下拉用的查詢端點，跟上面 getAllWeatherSignalTagMappings()
+	 * 這支設定頁 CRUD 用的管理端點分開，語意與權限都不同，不要合併。
+	 */
+	@Transactional(readOnly = true)
+	public List<WeatherSignalTagOptionResponse> getActiveWeatherSignalTagOptions() {
+		return weatherSignalTagMappingRepository.findByIsActiveTrue().stream()
+				.map(WeatherSignalTagOptionResponse::from).toList();
+	}
+
+	/**
 	 * POST /api/settings/weather-signal-tags：新增一筆天氣訊號 → 商品標籤對照。
 	 *
 	 * 新增後下一次天氣同步（排程或手動觸發）就會採計這筆對照，不需要另外
@@ -1285,6 +1308,99 @@ public class SettingsService {
 		mapping.setUpdatedBy(resolveUserId(username));
 		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
 		return WeatherSignalTagMappingResponse.from(saved);
+	}
+
+	// ========================= 地域占比設定（region_weights） =========================
+	// 2026-09-23新增：地域性影響評分方案B+D決議。WeatherCampaignSyncService
+	// 同步天氣檔期時，依這裡設定的占比計算 region_coverage_ratio（見該類別
+	// 與 FestiveCampaign 類別的欄位註解）。四區固定，不開放新增/刪除，只開放
+	// 調整占比，權限比照因子權重編輯（updateEvaluationModeFactors()）一律
+	// [僅管理]。
+
+	/**
+	 * GET /api/settings/region-weights：取得四區目前的占比設定。
+	 *
+	 * 固定回傳 WeatherRegionConfig.REGION_CITIES 的四個 key，即使
+	 * region_weights 資料表因故缺列（理論上不會，V20 migration 已種好四筆），
+	 * 也用 25.00 補齊，不讓畫面因為缺一區而整頁掛掉——比照本類別其餘
+	 * 「資料異常時保守處理，不讓單一筆壞資料波及整個查詢」的既有原則。
+	 */
+	@Transactional(readOnly = true)
+	public List<RegionWeightResponse> getRegionWeights() {
+		Map<String, RegionWeight> byRegion = regionWeightRepository.findAll().stream()
+				.collect(Collectors.toMap(RegionWeight::getRegion, r -> r));
+
+		// 固定順序（北→中→南→東）：Map.of()（WeatherRegionConfig.REGION_CITIES
+		// 的底層實作）的 keySet() 迭代順序不保證穩定，直接依它輸出會讓畫面上
+		// 四區列的順序在不同次伺服器重啟之間跳動，改用固定順序清單。
+		return List.of("NORTH", "CENTRAL", "SOUTH", "EAST").stream()
+				.map(region -> {
+					RegionWeight weight = byRegion.get(region);
+					if (weight == null) {
+						weight = new RegionWeight();
+						weight.setRegion(region);
+						weight.setWeightPercentage(BigDecimal.valueOf(25.00));
+					}
+					return RegionWeightResponse.from(weight);
+				})
+				.toList();
+	}
+
+	/**
+	 * PUT /api/settings/region-weights：整份覆蓋四區占比，加總須為100
+	 * （比照 updateEvaluationModeFactors() 的既有作法，見 RegionWeightUpdateRequest
+	 * 類別註解）。
+	 *
+	 * 這裡刻意不觸發既有天氣檔期的 region_coverage_ratio 重算——已經同步落地
+	 * 的檔期維持同步當下凍結的值，比照 WeightSnapshot 的再現性原則（見
+	 * FestiveCampaign.regionCoverageRatio 欄位註解），新占比從下一次
+	 * WeatherCampaignSyncService 排程（每天05:00）或手動觸發同步開始生效。
+	 */
+	@Transactional
+	public List<RegionWeightResponse> updateRegionWeights(RegionWeightUpdateRequest request, String username) {
+		Set<String> validRegions = WeatherRegionConfig.REGION_CITIES.keySet();
+
+		Map<String, BigDecimal> incoming = new LinkedHashMap<>();
+		for (RegionWeightUpdateRequest.RegionWeightItem item : request.getRegionWeights()) {
+			if (!validRegions.contains(item.getRegion())) {
+				throw new IllegalArgumentException(ValidationMessage.REGION_WEIGHT_UNKNOWN_REGION + item.getRegion());
+			}
+			incoming.put(item.getRegion(), item.getWeightPercentage());
+		}
+
+		Set<String> missing = new java.util.LinkedHashSet<>(validRegions);
+		missing.removeAll(incoming.keySet());
+		if (!missing.isEmpty()) {
+			throw new IllegalArgumentException(ValidationMessage.REGION_WEIGHT_MISSING_REGION + missing);
+		}
+
+		// 加總必須恰為100。用 compareTo 而非 equals——BigDecimal 的 equals 會比較
+		// scale，100 與 100.00 用 equals 判定為不相等，會誤擋正確的輸入（同
+		// updateEvaluationModeFactors() 的既有註解）。
+		BigDecimal sum = incoming.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+		if (sum.compareTo(BigDecimal.valueOf(100)) != 0) {
+			throw new IllegalArgumentException(
+					ValidationMessage.REGION_WEIGHT_SUM_NOT_100 + sum.stripTrailingZeros().toPlainString());
+		}
+
+		// 全部通過才寫入。updated_at 由 @UpdateTimestamp 自動填，不用手動 set。
+		Long operatorId = resolveUserId(username);
+		Map<String, RegionWeight> existing = regionWeightRepository.findAll().stream()
+				.collect(Collectors.toMap(RegionWeight::getRegion, r -> r));
+
+		for (Map.Entry<String, BigDecimal> entry : incoming.entrySet()) {
+			RegionWeight weight = existing.get(entry.getKey());
+			if (weight == null) {
+				weight = new RegionWeight();
+				weight.setRegion(entry.getKey());
+			}
+			weight.setWeightPercentage(entry.getValue());
+			weight.setUpdatedBy(operatorId);
+			regionWeightRepository.save(weight);
+		}
+
+		log.info("區域占比設定已更新：{}，操作者={}", incoming, username);
+		return getRegionWeights();
 	}
 
 	// ========================= 核心客群設定 =========================

@@ -523,9 +523,16 @@ public class ScoringService {
 	 * 結構上不存在的維度，節慶日期是確定的，天氣預報離現在越遠越不可信，
 	 * 不能用同一條公式直接套用（見規劃討論的差異說明）。
 	 *
-	 * weatherConfidence 為 null（理論上不該發生：WeatherCampaignSyncService
-	 * upsert WEATHER 檔期時一定會帶這個值）時，保守處理成 LOW，不讓一筆
-	 * 資料異常的天氣檔期意外拿到滿額加成。
+	 * 2026-09-23新增第三個乘數 regionCoverageRatio（地域性影響評分方案D）：
+	 * 這筆天氣檔期命中的區域，佔全公司業務的占比越低，加成力道越打折——
+	 * 例如只有東部單一區域命中、且東部占比只設定10%，即使matchWeight／
+	 * weatherConfidence都拉滿，最終boost也只會拿到一成。regionCoverageRatio
+	 * 是WeatherCampaignSyncService同步當下凍結寫入的值（見FestiveCampaign
+	 * 類別欄位註解），這裡單純讀取、不重算。
+	 *
+	 * weatherConfidence／regionCoverageRatio 為 null（理論上不該發生：
+	 * WeatherCampaignSyncService upsert WEATHER 檔期時一定會帶這兩個值）時，
+	 * 保守處理成 LOW／0，不讓一筆資料異常的天氣檔期意外拿到滿額加成。
 	 */
 	private BigDecimal calculateWeatherUrgencyFactor(FestiveCampaign campaign) {
 		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
@@ -546,8 +553,12 @@ public class ScoringService {
 		WeatherForecastConfidence confidence = campaign.getWeatherConfidence() != null
 				? campaign.getWeatherConfidence()
 				: WeatherForecastConfidence.LOW;
+		BigDecimal regionCoverageRatio = campaign.getRegionCoverageRatio() != null
+				? campaign.getRegionCoverageRatio()
+				: BigDecimal.ZERO;
 
-		return baseFactor.multiply(confidence.getConfidenceFactor()).setScale(2, RoundingMode.HALF_UP);
+		return baseFactor.multiply(confidence.getConfidenceFactor()).multiply(regionCoverageRatio)
+				.setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
