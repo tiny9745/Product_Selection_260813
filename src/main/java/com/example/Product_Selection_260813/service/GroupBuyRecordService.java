@@ -304,7 +304,7 @@ public class GroupBuyRecordService {
 	}
 
 	// =====================================================================
-	// 查詢與回退
+	// 查詢
 	// =====================================================================
 
 	@Transactional(readOnly = true)
@@ -324,22 +324,10 @@ public class GroupBuyRecordService {
 		return groupBuyRecordRepository.findAll().stream().map(GroupBuyRecordResponse::from).toList();
 	}
 
-	/**
-	 * 整批回退。匯入錯誤時不需要逐筆刪除。
-	 *
-	 * 回退後受影響品類的歷史分數會在下次 calculateEvaluation() 時自動反映，
-	 * 這裡不主動觸發重算——重算範圍可能很大，應由呼叫端決定時機。
-	 */
-	@Transactional
-	public int deleteBatch(String importBatchId) {
-		List<GroupBuyRecord> records = groupBuyRecordRepository.findByImportBatchId(importBatchId);
-		if (records.isEmpty()) {
-			throw new IllegalArgumentException("找不到匯入批次：" + importBatchId);
-		}
-		groupBuyRecordRepository.deleteAll(records);
-		log.info("開團紀錄批次回退：批次 {}，刪除 {} 筆", importBatchId, records.size());
-		return records.size();
-	}
+	// 整批回退 deleteBatch() 已於 2026-09-23 分支整併時移除（連同 REST 端點）：
+	// 歷史開團紀錄是「歷史成團率」計分因子的唯一來源，已影響過評分的資料
+	// 被整批刪除後無法追溯，風險高於保留一批錯誤資料。若確實需要清除錯誤
+	// 匯入，應由 DBA 依 import_batch_id 在資料庫層處理並留下操作紀錄。
 
 	// =====================================================================
 	// 解析工具

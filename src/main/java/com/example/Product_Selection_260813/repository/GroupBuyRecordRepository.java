@@ -64,9 +64,8 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 
 	// ---------------- 匯入管理 ----------------
 
+	/** 依匯入批次查詢，供追溯資料來源（整批回退已於 2026-09-23 移除）。 */
 	List<GroupBuyRecord> findByImportBatchId(String importBatchId);
-
-	void deleteByImportBatchId(String importBatchId);
 
 	List<GroupBuyRecord> findByProductTypeIdOrderByCampaignStartDateDesc(Long productTypeId);
 

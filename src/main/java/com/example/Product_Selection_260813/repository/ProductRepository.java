@@ -83,10 +83,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      */
     long countBySubmissionCountGreaterThan(int submissionCount);
 
+    /** 同上，但只算 createdBy = 指定使用者的部分，供操作人員的個人化選品轉換率使用。 */
+    long countBySubmissionCountGreaterThanAndCreatedBy(int submissionCount, Long createdBy);
+
     /**
      * 選品轉換率分子：目前review_status=APPROVED的不重複商品數。
      */
     long countByReviewStatus(ProductReviewStatus reviewStatus);
+
+    /** 同上，但只算 createdBy = 指定使用者的部分，供操作人員的個人化選品轉換率使用。 */
+    long countByReviewStatusAndCreatedBy(ProductReviewStatus reviewStatus, Long createdBy);
 
     /**
      * Dashboard「待人工審核」／「AI建議待確認」統計（GET /api/dashboard/statistics）

@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,10 +62,16 @@ public class DashboardController {
 
 	/**
 	 * GET /api/dashboard/conversion-rate：計算選品轉換率。
+	 *
+	 * 2026-09-23起依登入者角色切換口徑（PURCHASER 個人／MANAGER 全公司，
+	 * 見 DashboardConversionRateResponse 類別註解），所以需要
+	 * {@code @AuthenticationPrincipal}，跟本 Controller 其他三支端點
+	 * （公司整體口徑，不需要知道是誰在看）的簽章不一樣。
 	 */
 	@GetMapping("/conversion-rate")
-	public ResponseEntity<ApiResponse<DashboardConversionRateResponse>> getConversionRate() {
-		DashboardConversionRateResponse result = dashboardService.getConversionRate();
+	public ResponseEntity<ApiResponse<DashboardConversionRateResponse>> getConversionRate(
+			@AuthenticationPrincipal String username) {
+		DashboardConversionRateResponse result = dashboardService.getConversionRate(username);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 }

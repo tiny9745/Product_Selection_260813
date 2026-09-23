@@ -6,9 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,8 +30,12 @@ import jakarta.validation.Valid;
  * 原因是系統邊界：選品系統的職責到審核為止，不負責審核之後的開團執行。
  * 開團結果由外部系統產生後批次匯入，系統內視為唯讀的參考資料。
  *
- * 只有兩種寫入路徑：整批匯入、整批回退。兩者都是批次級別，沒有單筆操作，
- * 這樣資料的來源永遠可追溯到某一次匯入。請勿為了「補齊 CRUD」而新增端點。
+ * 只有一種資料寫入路徑：整批匯入（另有「認領」只回填 product_id，不改紀錄
+ * 內容），沒有單筆操作，這樣資料的來源永遠可追溯到某一次匯入。請勿為了
+ * 「補齊 CRUD」而新增端點。
+ *
+ * 2026-09-23 分支整併：移除原本的整批回退（DELETE /batch/{batchId}）。
+ * 理由見 GroupBuyRecordService 對應位置的說明。
  */
 @RestController
 @RequestMapping("/api/group-buy-records")
@@ -83,14 +85,6 @@ public class GroupBuyRecordController {
 			result = groupBuyRecordService.findAll();
 		}
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
-	}
-
-	/** 整批回退。匯入錯誤時使用，不需要逐筆刪除。 */
-	@PreAuthorize("hasRole('MANAGER')")
-	@DeleteMapping("/batch/{batchId}")
-	public ResponseEntity<ApiResponse<Void>> deleteBatch(@PathVariable("batchId") String batchId) {
-		int deleted = groupBuyRecordService.deleteBatch(batchId);
-		return ResponseEntity.ok(ApiResponse.success("已回退批次 " + batchId + "，共刪除 " + deleted + " 筆"));
 	}
 
 	/**

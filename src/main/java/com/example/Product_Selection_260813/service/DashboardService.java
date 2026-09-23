@@ -20,6 +20,7 @@ import com.example.Product_Selection_260813.dto.response.DashboardRecommendation
 import com.example.Product_Selection_260813.dto.response.DashboardRiskAlertItem;
 import com.example.Product_Selection_260813.dto.response.DashboardStatisticsResponse;
 import com.example.Product_Selection_260813.entity.AiAnalysis;
+import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.entity.RiskOption;
@@ -27,7 +28,9 @@ import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
+import com.example.Product_Selection_260813.enums.UserRole;
 import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
+import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
@@ -61,6 +64,9 @@ public class DashboardService {
 
 	@Autowired
 	private RiskOptionRepository riskOptionRepository;
+
+	@Autowired
+	private AppUserRepository appUserRepository;
 
 	/**
 	 * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數。
@@ -219,14 +225,34 @@ public class DashboardService {
 
 	/**
 	 * GET /api/dashboard/conversion-rate：選品轉換率（見DashboardConversionRateResponse
-	 * 類別註解的公式說明）。
+	 * 類別註解的公式與口徑說明）。
+	 *
+	 * 2026-09-23 分支整併：PURCHASER 只算自己建立的商品（個人自我檢視），
+	 * MANAGER 維持全公司口徑。角色以資料庫目前值為準（重查 AppUser），
+	 * 不信任 JWT 內可能已過期的角色宣告——與 ProductService.resolveUserId()
+	 * 同樣「以 username 重查」的既有做法一致。
 	 */
 	@Transactional(readOnly = true)
-	public DashboardConversionRateResponse getConversionRate() {
-		long approvedCount = productRepository.countByReviewStatus(ProductReviewStatus.APPROVED);
-		long submittedCount = productRepository.countBySubmissionCountGreaterThan(0);
+	public DashboardConversionRateResponse getConversionRate(String username) {
+		AppUser user = appUserRepository.findByUsername(username)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+
+		long approvedCount;
+		long submittedCount;
+		String scope;
+		if (user.getRole() == UserRole.MANAGER) {
+			scope = DashboardConversionRateResponse.SCOPE_COMPANY;
+			approvedCount = productRepository.countByReviewStatus(ProductReviewStatus.APPROVED);
+			submittedCount = productRepository.countBySubmissionCountGreaterThan(0);
+		} else {
+			scope = DashboardConversionRateResponse.SCOPE_PERSONAL;
+			approvedCount = productRepository.countByReviewStatusAndCreatedBy(ProductReviewStatus.APPROVED,
+					user.getId());
+			submittedCount = productRepository.countBySubmissionCountGreaterThanAndCreatedBy(0, user.getId());
+		}
 
 		DashboardConversionRateResponse response = new DashboardConversionRateResponse();
+		response.setScope(scope);
 		response.setApprovedCount(approvedCount);
 		response.setSubmittedCount(submittedCount);
 
