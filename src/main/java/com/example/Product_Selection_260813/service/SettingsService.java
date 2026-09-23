@@ -1686,7 +1686,11 @@ public class SettingsService {
 		if (request.getPreparationLeadDays() != null) {
 			campaign.setPreparationLeadDays(request.getPreparationLeadDays());
 		}
-		FestiveCampaign saved = festiveCampaignRepository.save(campaign);
+		// 2026-09-24：必須在下面的批次刪除之前把這些異動 flush 出去——deleteByCampaignId()
+		// 會清空 Persistence Context，沒 flush 的異動會被丟掉（完整原因見該方法註解）。
+		// 那支已加 flushAutomatically；這裡再用 saveAndFlush() 明確表達順序需求，
+		// 日後有人調整 repository 註解也不會再讓這個 bug 回來。
+		FestiveCampaign saved = festiveCampaignRepository.saveAndFlush(campaign);
 
 		festiveCampaignTagRepository.deleteByCampaignId(id);
 		saveTags(id, request.getTags());

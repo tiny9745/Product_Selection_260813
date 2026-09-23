@@ -99,13 +99,15 @@ public final class SystemSettingRegistry {
 				DataType.STRING, null, null, null, "NORMAL,CHILLED,FROZEN");
 
 		// ---------------- 運費估算 ----------------
+		// 2026-09-24：說明文字改在前端以提示泡泡（info-tip）逐項獨立顯示，原本 S/M/L
+		// 三項寫「同上」依賴表格上一列的上下文，改成泡泡後沒有「上」可參照，逐項寫完整。
 		register("freight_cost_xs", "運費估算", "材積 XS 運費估算", "毛利率因子計算用的運費估算基準（極小材積）。",
 				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.valueOf(100000), "元", "0");
-		register("freight_cost_s", "運費估算", "材積 S 運費估算", "同上（小材積）。",
+		register("freight_cost_s", "運費估算", "材積 S 運費估算", "毛利率因子計算用的運費估算基準（小材積）。",
 				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.valueOf(100000), "元", "0");
-		register("freight_cost_m", "運費估算", "材積 M 運費估算", "同上（中材積）。",
+		register("freight_cost_m", "運費估算", "材積 M 運費估算", "毛利率因子計算用的運費估算基準（中材積）。",
 				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.valueOf(100000), "元", "0");
-		register("freight_cost_l", "運費估算", "材積 L 運費估算", "同上（大材積）。",
+		register("freight_cost_l", "運費估算", "材積 L 運費估算", "毛利率因子計算用的運費估算基準（大材積）。",
 				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.valueOf(100000), "元", "0");
 
 		// ---------------- 目標區間（HISTORICAL 模式）----------------
@@ -116,7 +118,7 @@ public final class SystemSettingRegistry {
 				"HISTORICAL 模式計算下界時採用的分位數。",
 				DataType.INTEGER, BigDecimal.ZERO, BigDecimal.valueOf(49), "%", "10");
 		register("score_band_percentile_upper", "目標區間", "目標區間上界分位數",
-				"HISTORICAL 模式計算上界時採用的分位數，必須大於下界分位數（畫面與後端皆須驗證）。",
+				"HISTORICAL 模式計算上界時採用的分位數，必須大於下界分位數。",
 				DataType.INTEGER, BigDecimal.valueOf(51), BigDecimal.valueOf(100), "%", "90");
 	}
 

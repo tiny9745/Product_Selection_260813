@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,9 +40,18 @@ import com.example.Product_Selection_260813.service.ProductService;
 import jakarta.validation.Valid;
 
 /**
- * 對應 API總表 三、品項管理，全部端點皆為[操作+管理]皆可存取——SecurityConfig
- * 對所有非登入路徑的預設規則就是「已登入即可」，不需要額外加@PreAuthorize
- * （與/api/reviews等[僅管理]端點不同，那些才需要方法層級的角色限制）。
+ * 對應 API總表 三、品項管理。
+ *
+ * <b>權限（2026-09-24 職責分離，決策 D3，取代原本「全部[操作+管理]」的設計）：</b>
+ * <ul>
+ * <li>讀取端點（GET）維持[操作+管理]，不加@PreAuthorize：管理層在審核頁的
+ *     「決策紀錄」仍需以唯讀方式查看商品完整評估（前端 /products/:id 唯讀模式）。</li>
+ * <li>寫入端點（新增、批次新增、修改、刪除、重審、封存、復用、轉正、上傳圖片）
+ *     改為[僅操作]，逐支掛{@code @PreAuthorize("hasRole('PURCHASER')")}：
+ *     建立／維護選品（maker）與審核（checker）分屬兩個角色，管理層不能自己
+ *     建立商品再自己核准。前端隱藏入口只是體驗，這一層才是真正的防線。</li>
+ * </ul>
+ * 403 由 GlobalExceptionHandler 的 @PreAuthorize 分支統一處理。
  *
  * Controller只負責：解析Request、轉呼叫ProductService、決定HTTP狀態碼／回應格式，
  * 不含任何業務規則判斷——所有規則（欄位鎖定、狀態機、資料完整度門檻等）都在
@@ -186,6 +196,7 @@ public class ProductController {
 	/**
 	 * POST /api/products：手動新增品項，直接為正式候選（CANDIDATE）。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping
 	public ResponseEntity<ApiResponse<ProductResponse>> createProduct(@Valid @RequestBody ProductCreateRequest request,
 			@AuthenticationPrincipal String username) {
@@ -208,6 +219,7 @@ public class ProductController {
 	 * {@link ProductService#createProductsBatch}／{@link ProductBatchCreateResponse}
 	 * 的類別註解。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping(value = "/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public ResponseEntity<ApiResponse<ProductBatchCreateResponse>> createProductsBatch(
 			@RequestPart("items") @Valid ProductBatchCreateRequest request,
@@ -220,6 +232,7 @@ public class ProductController {
 	/**
 	 * PUT /api/products/{id}：整份覆蓋更新，欄位鎖定規則見ProductService。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PutMapping("/{id}")
 	public ResponseEntity<ApiResponse<ProductResponse>> updateProduct(@PathVariable("id") Long id,
 			@Valid @RequestBody ProductUpdateRequest request, @AuthenticationPrincipal String username) {
@@ -230,6 +243,7 @@ public class ProductController {
 	/**
 	 * DELETE /api/products/{id}：僅限未審核且尚未送審過的商品。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@DeleteMapping("/{id}")
 	public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable("id") Long id) {
 		productService.deleteProduct(id);
@@ -239,6 +253,7 @@ public class ProductController {
 	/**
 	 * POST /api/products/{id}/resubmit：REJECTED -&gt; PENDING，submission_count+1。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/resubmit")
 	public ResponseEntity<ApiResponse<ProductResponse>> resubmit(@PathVariable("id") Long id) {
 		ProductResponse result = productService.resubmit(id);
@@ -248,6 +263,7 @@ public class ProductController {
 	/**
 	 * POST /api/products/{id}/archive：(APPROVED或REJECTED) 且 ACTIVE -&gt; ARCHIVED。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/archive")
 	public ResponseEntity<ApiResponse<ProductResponse>> archive(@PathVariable("id") Long id) {
 		ProductResponse result = productService.archive(id);
@@ -257,6 +273,7 @@ public class ProductController {
 	/**
 	 * POST /api/products/{id}/restore：APPROVED 且 ARCHIVED -&gt; ACTIVE。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/restore")
 	public ResponseEntity<ApiResponse<ProductResponse>> restore(@PathVariable("id") Long id) {
 		ProductResponse result = productService.restore(id);
@@ -266,6 +283,7 @@ public class ProductController {
 	/**
 	 * POST /api/products/{id}/promote-to-candidate：AI_SUGGESTED -&gt; CANDIDATE。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/promote-to-candidate")
 	public ResponseEntity<ApiResponse<ProductResponse>> promoteToCandidate(@PathVariable("id") Long id) {
 		ProductResponse result = productService.promoteToCandidate(id);
@@ -280,6 +298,7 @@ public class ProductController {
 	 * imageUrl為選填欄位（見ProductCreateRequest/ProductUpdateRequest），
 	 * 不上傳圖片不影響商品的建立、送審、通過審核等任何流程。
 	 */
+	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/image")
 	public ResponseEntity<ApiResponse<ProductResponse>> uploadImage(@PathVariable("id") Long id,
 			@RequestParam("file") MultipartFile file) {

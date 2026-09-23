@@ -41,8 +41,22 @@ public interface FestiveCampaignTagRepository extends JpaRepository<FestiveCampa
 	 * 改成 @Modifying 的 JPQL 批次刪除：這種刪除不經過 persistence context
 	 * 的動作佇列，呼叫當下就立即送出 DELETE SQL 並執行完成，保證在
 	 * saveTags() 的 INSERT 執行之前，舊資料已經確實從資料庫刪除。
+	 *
+	 * ⚠️ 2026-09-24修正（「編輯檔期儲存後無效」）：原本只有 clearAutomatically = true。
+	 * 這個選項會在批次刪除執行完後清空整個 Persistence Context——而
+	 * SettingsService.updateFestiveCampaign() 在呼叫這支之前，已經改了 FestiveCampaign
+	 * 的名稱／分類／日期／備戰天數，這些異動還停留在 Persistence Context 裡等待 commit
+	 * 時 flush（save() 對既有 entity 只是 merge，不會立即送 UPDATE）。清空後 entity
+	 * 變成 detached，異動直接被丟掉，commit 時根本沒有 UPDATE festive_campaigns 可送。
+	 * 現象就是 SQL log 只有 select → delete tags → insert tags → select tags，標籤
+	 * 有存進去、檔期基本資料沒有；回應是用記憶體裡的 detached 物件組的，所以畫面
+	 * 當下看起來已更新，重新整理才發現沒存。
+	 *
+	 * 加上 flushAutomatically = true：執行批次刪除「之前」先 flush，把待送的 UPDATE
+	 * 送出去，之後再清空就不會遺失任何異動。clearAutomatically 保留——批次刪除繞過
+	 * Persistence Context，若同一交易稍早載入過這些標籤，清空可避免讀到已刪除的舊資料。
 	 */
-	@Modifying(clearAutomatically = true)
+	@Modifying(flushAutomatically = true, clearAutomatically = true)
 	@Query("delete from FestiveCampaignTag t where t.campaignId = :campaignId")
 	void deleteByCampaignId(@Param("campaignId") Long campaignId);
 }
