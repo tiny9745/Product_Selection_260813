@@ -54,6 +54,7 @@ public class AiSuggestionBatchService {
 	 * demo／開發階段可改用AiSuggestionBatchController的手動觸發端點，
 	 * 不需要真的等排程時間到才能驗證效果。
 	 */
+	// ⚠️ 必須晚於 TrendService.syncAllActiveProducts()（02:00 PTT 熱度同步），否則永遠讀到前一天的討論量
 	@Scheduled(cron = "0 0 3 * * *")
 	public void runDailyBatch() {
 		log.info("開始執行AI主動選品批次規則（Daily Cron）");

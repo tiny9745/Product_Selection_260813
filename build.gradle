@@ -50,6 +50,9 @@ dependencies {
 	// RestSecurityHandlers 仍用 Jackson 2 API，必須顯式加入，否則連編譯都過不了。
 	implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.4'
 
+	// PTT 討論量爬蟲（service/crawler/）：抓取並解析 PTT 網頁版搜尋結果
+	implementation 'org.jsoup:jsoup:1.23.2'
+
 	// 程式碼修改後儲存會自動重啟 Application(不一定成功)
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 

@@ -101,6 +101,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     /** 節慶加成每日重算用（ScoringService.refreshFestivalBoosts()）：尚未核准的商品。 */
     List<Product> findByReviewStatusNot(ProductReviewStatus reviewStatus);
 
+    /** PTT 熱度每日同步用（TrendService.syncAllActiveProducts()）：未封存的商品。 */
+    List<Product> findByItemStatus(ProductItemStatus itemStatus);
+
     /** 同上，但只算 createdBy = 指定使用者的部分，供操作人員的個人化選品轉換率使用。 */
     long countByReviewStatusAndCreatedBy(ProductReviewStatus reviewStatus, Long createdBy);
 
