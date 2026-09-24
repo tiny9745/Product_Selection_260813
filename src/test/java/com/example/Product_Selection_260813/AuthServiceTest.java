@@ -63,6 +63,8 @@ class AuthServiceTest {
 	void login_成功_回傳token與使用者資訊() {
 		when(appUserRepository.findByUsername("purchaser01")).thenReturn(Optional.of(enabledUser));
 		when(passwordEncoder.matches("correct-password", "encoded-hash")).thenReturn(true);
+		// login() 會先遞增 activeSessionVersion 並 save，再用 save 回傳的物件產生 token
+		when(appUserRepository.save(enabledUser)).thenReturn(enabledUser);
 		when(jwtTokenProvider.generateToken(enabledUser)).thenReturn("fake-jwt-token");
 		when(jwtTokenProvider.getExpirationSeconds()).thenReturn(28800L);
 

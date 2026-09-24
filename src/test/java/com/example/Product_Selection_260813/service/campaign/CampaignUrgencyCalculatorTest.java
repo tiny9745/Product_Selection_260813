@@ -35,7 +35,7 @@ class CampaignUrgencyCalculatorTest {
 		CampaignUrgencyCalculator.Result result = CampaignUrgencyCalculator.calculate(FestiveCategory.FESTIVAL,
 				FestiveCampaignStatus.PREPARING, 30, LocalDate.of(2026, 6, 19), TODAY, null, new BigDecimal("1.0000"));
 		assertThat(result.urgencyFactor()).isEqualTo(new BigDecimal("0.50"));
-		assertThat(result.weatherConfidenceFactor()).isEqualTo(null);
+		assertThat(result.weatherConfidenceFactor()).isNull();
 	}
 
 	@Test

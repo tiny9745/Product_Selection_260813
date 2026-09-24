@@ -45,6 +45,11 @@ dependencies {
 	// jjwt-jackson 讓 jjwt 用 Jackson 做 JSON 序列化，與 spring-boot-starter-web 內建的 Jackson 相容
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 
+	// Spring Boot 4 預設改走 Jackson 3（tools.jackson.*），compile classpath
+	// 不再提供 com.fasterxml.jackson.databind。WeatherClient / Gemini /
+	// RestSecurityHandlers 仍用 Jackson 2 API，必須顯式加入，否則連編譯都過不了。
+	implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.4'
+
 	// 程式碼修改後儲存會自動重啟 Application(不一定成功)
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
