@@ -29,6 +29,21 @@ public final class WeatherRegionConfig {
 	public record City(String name, double latitude, double longitude) {
 	}
 
+	/**
+	 * 區域代碼的中文名稱，與前端 WEATHER_REGION_LABEL 一致。2026-09-24 新增：天氣檔期名稱原本直接
+	 * 拼區域代碼（「NORTH大雨（系統自動）」），改用中文名稱。
+	 */
+	public static final Map<String, String> REGION_LABELS = Map.of(
+			"NORTH", "北部",
+			"CENTRAL", "中部",
+			"SOUTH", "南部",
+			"EAST", "東部");
+
+	/** 取區域中文名稱；未知代碼原樣回傳，不讓同步因名稱失敗。 */
+	public static String regionLabel(String region) {
+		return REGION_LABELS.getOrDefault(region, region);
+	}
+
 	public static final Map<String, List<City>> REGION_CITIES = Map.of(
 			"NORTH", List.of(
 					new City("台北", 25.0330, 121.5654),

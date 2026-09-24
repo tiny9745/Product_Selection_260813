@@ -129,8 +129,14 @@ public class Product {
 	@Column(name = "item_status", nullable = false)
 	private ProductItemStatus itemStatus = ProductItemStatus.ACTIVE;
 
+	/**
+	 * 第幾次送審（1 起算）。2026-09-24 修正：建立商品＝已確認送審（見 ProductCreateRequest 類別註解），
+	 * 所以預設是「第 1 次送審」而不是「尚未送審」；resubmit() 在此基礎上 +1。
+	 * 原本預設 0，造成審核紀錄凍結成「第 0 次送審」、送審轉換率分母只算得到重送過的商品。
+	 * DB 欄位預設值同步改為 1（V22）。
+	 */
 	@Column(name = "submission_count", nullable = false)
-	private Integer submissionCount = 0;
+	private Integer submissionCount = 1;
 
 	@Column(name = "created_by")
 	private Long createdBy;

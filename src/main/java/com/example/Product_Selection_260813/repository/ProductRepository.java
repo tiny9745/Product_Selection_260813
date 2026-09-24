@@ -87,9 +87,19 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     long countBySubmissionCountGreaterThanAndCreatedBy(int submissionCount, Long createdBy);
 
     /**
+     * 同上，但限定 candidateStatus（2026-09-24）：管理層選品轉換率的分母只算正式候選（CANDIDATE），
+     * 剔除 AI 建議、尚未轉正的商品。
+     */
+    long countBySubmissionCountGreaterThanAndCandidateStatus(int submissionCount,
+            ProductCandidateStatus candidateStatus);
+
+    /**
      * 選品轉換率分子：目前review_status=APPROVED的不重複商品數。
      */
     long countByReviewStatus(ProductReviewStatus reviewStatus);
+
+    /** 節慶加成每日重算用（ScoringService.refreshFestivalBoosts()）：尚未核准的商品。 */
+    List<Product> findByReviewStatusNot(ProductReviewStatus reviewStatus);
 
     /** 同上，但只算 createdBy = 指定使用者的部分，供操作人員的個人化選品轉換率使用。 */
     long countByReviewStatusAndCreatedBy(ProductReviewStatus reviewStatus, Long createdBy);

@@ -1,45 +1,30 @@
 package com.example.Product_Selection_260813.dto.request;
 
-import java.time.LocalDate;
 import java.util.List;
 
-import jakarta.validation.Valid;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
-import com.example.Product_Selection_260813.enums.FestiveCategory;
-
 /**
- * PUT /api/settings/festive-campaigns/{id} 的 Request Body：編輯檔期設定。
+ * PUT /api/settings/festive-campaigns/{id} 的 Request Body：編輯檔期（代碼不可修改）。
  *
- * campaignCode不可編輯（企劃書UI樹狀圖「編輯檔期」欄位清單本就不含代碼），
- * 且campaign_status／is_manual_override一樣不在這支DTO——狀態切換是
- * POST .../manual-status的職責，跟「編輯基本資料」是刻意拆開的兩個按鈕
- * （見企劃書十四-1「與『編輯』拆成兩個按鈕，避免使用者誤以為編輯儲存
- * 即等於切換狀態」）。
+ * 2026-09-24（V21）：移除 startDate／endDate，改帶日期規則欄位（見 FestiveCampaignRuleFields）。
+ * 既有資料是 WEATHER，或這次帶 WEATHER，一律 400（決議 D1）。
+ * tags、regions 皆為整份覆蓋。
  */
-public class FestiveCampaignUpdateRequest {
+public class FestiveCampaignUpdateRequest extends FestiveCampaignRuleFields {
 
 	@NotBlank(message = "檔期名稱不可為空")
 	@Size(max = 100, message = ValidationMessage.CAMPAIGN_NAME_TOO_LONG)
 	private String campaignName;
 
-	@NotNull(message = "檔期類別不可為空")
-	private FestiveCategory category;
-
-	@NotNull(message = "檔期開始日期不可為空")
-	private LocalDate startDate;
-
-	@NotNull(message = "檔期結束日期不可為空")
-	private LocalDate endDate;
-
-	// 準備期天數為負數會讓ScoringService.calculateUrgencyFactor()的分母失真，
-	// 使節慶加成算出不合理的值，必須在進Service前擋下。
 	@PositiveOrZero(message = ValidationMessage.CAMPAIGN_LEAD_DAYS_NEGATIVE)
+	@Max(value = 180, message = ValidationMessage.CAMPAIGN_LEAD_DAYS_TOO_LARGE)
 	private Integer preparationLeadDays;
 
 	@Valid
@@ -51,30 +36,6 @@ public class FestiveCampaignUpdateRequest {
 
 	public void setCampaignName(String campaignName) {
 		this.campaignName = campaignName;
-	}
-
-	public FestiveCategory getCategory() {
-		return category;
-	}
-
-	public void setCategory(FestiveCategory category) {
-		this.category = category;
-	}
-
-	public LocalDate getStartDate() {
-		return startDate;
-	}
-
-	public void setStartDate(LocalDate startDate) {
-		this.startDate = startDate;
-	}
-
-	public LocalDate getEndDate() {
-		return endDate;
-	}
-
-	public void setEndDate(LocalDate endDate) {
-		this.endDate = endDate;
 	}
 
 	public Integer getPreparationLeadDays() {

@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.service;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -316,10 +317,18 @@ public class ReviewService {
 			record.setEvaluationModeVersion(mode.getVersion());
 		});
 
+		// 2026-09-24 修正（方案 A）：festivalBoost／finalScore 原本凍結 product_evaluations 的已存值，
+		// 但 matchedCampaignSnapshot 是審核當下即時算的；product_evaluations 沒有排程重算，
+		// urgencyFactor 隨日期變動後兩者對不上，且快照不可覆寫，矛盾會被永久保存。
+		// 改用同一份即時 matchedCampaign 算 festivalBoost，finalScore＝已存 totalScore＋這個值，
+		// 讓快照裡的命中明細、加成、最終分數都基於審核當下同一時間點（與 LIVE 明細同一公式）。
+		// totalScore 為 null（完整度未達門檻）時 finalScore 維持 null，不以 0 誤導。
+		BigDecimal reviewFestivalBoost = ScoringService.calculateFestivalBoost(matchedCampaign);
 		evaluationOpt.ifPresent(evaluation -> {
 			record.setTotalScore(evaluation.getTotalScore());
-			record.setFestivalBoostSnapshot(evaluation.getFestivalBoost());
-			record.setFinalScoreSnapshot(evaluation.getFinalScore());
+			record.setFestivalBoostSnapshot(reviewFestivalBoost);
+			record.setFinalScoreSnapshot(evaluation.getTotalScore() == null ? null
+					: evaluation.getTotalScore().add(reviewFestivalBoost).setScale(2, RoundingMode.HALF_UP));
 			record.setDataCompleteness(evaluation.getDataCompleteness());
 			record.setBusinessScore(evaluation.getBusinessScore());
 			record.setAudienceScore(evaluation.getAudienceScore());

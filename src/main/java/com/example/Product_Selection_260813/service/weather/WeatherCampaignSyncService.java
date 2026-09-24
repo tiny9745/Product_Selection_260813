@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +29,7 @@ import com.example.Product_Selection_260813.repository.FestiveCampaignTagReposit
 import com.example.Product_Selection_260813.repository.RegionWeightRepository;
 import com.example.Product_Selection_260813.entity.WeatherSignalTagMapping;
 import com.example.Product_Selection_260813.repository.WeatherSignalTagMappingRepository;
+import com.example.Product_Selection_260813.service.campaign.FestiveCampaignsChangedEvent;
 
 /**
  * 把 WeatherSignalProvider 提供的天氣訊號，upsert 成 category=WEATHER 的
@@ -84,6 +86,10 @@ public class WeatherCampaignSyncService {
 	@Autowired
 	private FestiveCampaignTagRepository festiveCampaignTagRepository;
 
+	/** 2026-09-24（方案 2）：同步提交後觸發節慶加成重算，見 FestiveCampaignsChangedEvent。 */
+	@Autowired
+	private ApplicationEventPublisher eventPublisher;
+
 	/**
 	 * 每天清晨執行，在天氣資料來源當天更新之後（實際時間依
 	 * WeatherSignalProvider 的資料來源更新頻率調整，這裡先抓一個
@@ -114,6 +120,8 @@ public class WeatherCampaignSyncService {
 				.collect(Collectors.toSet());
 
 		int expiredCount = expireStaleWeatherCampaigns(syncedCodes);
+		// 天氣檔期新增／延續／結束都會改變加成；排程與手動觸發（POST /sync）都走這裡。
+		eventPublisher.publishEvent(new FestiveCampaignsChangedEvent("天氣檔期同步"));
 
 		return new WeatherSyncResponse(signals.size(), syncedCodes.size(), expiredCount);
 	}
@@ -240,6 +248,9 @@ public class WeatherCampaignSyncService {
 	}
 
 	private String buildCampaignName(WeatherSignal signal) {
-		return "%s%s（系統自動）".formatted(signal.getRegion(), signal.getType().getLabel());
+		// 2026-09-24：區域改用中文名稱（原本直接拼代碼，顯示成「NORTH大雨」）。
+		// 既有列在下次同步時由 syncOne() 覆寫名稱；手動覆蓋中的列同步時不動，名稱維持舊值。
+		return "%s%s（系統自動）".formatted(WeatherRegionConfig.regionLabel(signal.getRegion()),
+				signal.getType().getLabel());
 	}
 }

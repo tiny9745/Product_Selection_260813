@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.constants.BusinessTimeZone;
 import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.enums.ShelfLifeTier;
@@ -196,14 +197,19 @@ public class GateEvaluationService {
 					"供應商備貨前置期的值無法辨識：" + rawTier);
 		}
 
-		Optional<FestiveCampaign> campaignOpt = festiveCampaignRepository.findById(matchedCampaign.getCampaignId());
-		if (campaignOpt.isEmpty() || campaignOpt.get().getStartDate() == null) {
+		// 2026-09-24（V21，修正 B3）：節慶／季節型的 start_date 已是 NULL，改讀快照裡命中當期的開始日；
+		// 快照沒有這個值（V21 之前產生的舊快照）才退回查檔期資料表（只有天氣型還有 start_date）。
+		LocalDate startDate = matchedCampaign.occurrenceStartLocalDate();
+		if (startDate == null) {
+			Optional<FestiveCampaign> campaignOpt = festiveCampaignRepository.findById(matchedCampaign.getCampaignId());
+			startDate = campaignOpt.map(FestiveCampaign::getStartDate).orElse(null);
+		}
+		if (startDate == null) {
 			return GateResult.insufficientData(GATE_LEAD_TIME, RISK_SUPPLY,
 					"命中的檔期查無起始日期，無法計算剩餘備貨天數");
 		}
 
-		LocalDate startDate = campaignOpt.get().getStartDate();
-		long daysUntilStart = ChronoUnit.DAYS.between(LocalDate.now(), startDate);
+		long daysUntilStart = ChronoUnit.DAYS.between(LocalDate.now(BusinessTimeZone.TAIPEI), startDate);
 		String campaignName = matchedCampaign.getCampaignName() != null
 				? matchedCampaign.getCampaignName() : "檔期";
 

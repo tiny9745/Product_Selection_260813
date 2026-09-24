@@ -192,6 +192,19 @@ public class ProductController {
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
+	/**
+	 * GET /api/products/custom-field-schema/all：不限品類，列出目前「生效中」的全部自訂商品屬性題目，
+	 * 供批次匯入頁面組出聯集欄位（範本表頭）使用（2026-09-24 新增，Bug A）。
+	 * 與 getCustomFieldSchema(productTypeId) 刻意分成兩支：一份檔案可能同時涵蓋多個品類，
+	 * 無法只查單一品類；合併成「productTypeId 選填」會讓「不帶參數」究竟是全部還是錯誤變得曖昧。
+	 * 權限比照上面那支：讀取端點不加 @PreAuthorize（[操作+管理]，見類別註解），不需要 MANAGER。
+	 */
+	@GetMapping("/custom-field-schema/all")
+	public ResponseEntity<ApiResponse<List<CustomFieldDefinitionResponse>>> getAllActiveCustomFieldSchema() {
+		List<CustomFieldDefinitionResponse> result = settingsService.getAllActiveCustomFields();
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
 
 	/**
 	 * POST /api/products：手動新增品項，直接為正式候選（CANDIDATE）。

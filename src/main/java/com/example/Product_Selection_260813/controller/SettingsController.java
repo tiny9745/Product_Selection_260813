@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
@@ -29,6 +30,8 @@ import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionRe
 import com.example.Product_Selection_260813.dto.response.FactorDefinitionResponse;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
+import com.example.Product_Selection_260813.dto.request.FestiveCampaignOccurrenceOverrideRequest;
+import com.example.Product_Selection_260813.dto.request.FestiveCampaignOccurrencePreviewRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeUpdateRequest;
@@ -42,6 +45,8 @@ import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequ
 import com.example.Product_Selection_260813.dto.request.SystemSettingUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
 import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
+import com.example.Product_Selection_260813.dto.response.FestiveCampaignOccurrenceOverrideResponse;
+import com.example.Product_Selection_260813.dto.response.FestiveCampaignOccurrencePreviewResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
@@ -49,6 +54,7 @@ import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMapping
 import com.example.Product_Selection_260813.dto.response.WeatherSignalTagOptionResponse;
 import com.example.Product_Selection_260813.dto.response.RegionWeightResponse;
 import com.example.Product_Selection_260813.dto.response.SystemSettingResponse;
+import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.service.SettingsService;
 
@@ -483,9 +489,20 @@ public class SettingsController {
 	// ========================= 節慶檔期管理 =========================
 
 	// [操作+管理]，不加@PreAuthorize
+	// 2026-09-24：category 選填、可重複（?category=FESTIVAL&category=SEASON）；未帶＝全部類別，
+	// 與改版前行為相同，既有呼叫端（商品表單可選標籤）不受影響。
 	@GetMapping("/festive-campaigns")
-	public ResponseEntity<ApiResponse<List<FestiveCampaignResponse>>> getFestiveCampaigns() {
-		List<FestiveCampaignResponse> result = settingsService.getAllFestiveCampaigns();
+	public ResponseEntity<ApiResponse<List<FestiveCampaignResponse>>> getFestiveCampaigns(
+			@RequestParam(value = "category", required = false) List<FestiveCategory> categories) {
+		List<FestiveCampaignResponse> result = settingsService.getAllFestiveCampaigns(categories);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	// [操作+管理]，不加@PreAuthorize：唯讀清單，比照 GET /festive-campaigns。
+	// 切換狀態仍走 POST /festive-campaigns/{id}/manual-status [僅管理]。
+	@GetMapping("/weather-campaigns/current")
+	public ResponseEntity<ApiResponse<List<FestiveCampaignResponse>>> getCurrentWeatherCampaigns() {
+		List<FestiveCampaignResponse> result = settingsService.getCurrentWeatherCampaigns();
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
@@ -511,5 +528,47 @@ public class SettingsController {
 			@Valid @RequestBody FestiveCampaignManualStatusRequest request) {
 		FestiveCampaignResponse result = settingsService.switchManualStatus(id, request);
 		return ResponseEntity.ok(ApiResponse.success("已切換檔期狀態", result));
+	}
+
+	// ---------- 檔期規則改版（V21，2026-09-24）：預覽與逐年覆寫，權限比照既有檔期寫入端點 ----------
+
+	/**
+	 * 日期規則即時預覽：body 同新增檔期的規則欄位（不含代碼與標籤），回傳由今天起的 3 期，不寫入。
+	 * 路徑是靜態字面 occurrence-preview，與 /festive-campaigns/{id} 系列不衝突（POST 沒有 /{id} 的對應）。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/festive-campaigns/occurrence-preview")
+	public ResponseEntity<ApiResponse<List<FestiveCampaignOccurrencePreviewResponse>>> previewFestiveCampaignOccurrences(
+			@Valid @RequestBody FestiveCampaignOccurrencePreviewRequest request) {
+		List<FestiveCampaignOccurrencePreviewResponse> result = settingsService.previewFestiveCampaignOccurrences(request);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/festive-campaigns/{id}/occurrence-overrides")
+	public ResponseEntity<ApiResponse<List<FestiveCampaignOccurrenceOverrideResponse>>> getFestiveCampaignOccurrenceOverrides(
+			@PathVariable("id") Long id) {
+		List<FestiveCampaignOccurrenceOverrideResponse> result = settingsService.getFestiveCampaignOccurrenceOverrides(id);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/** 新增或更新某一週期年的日期覆寫；WEATHER 檔期回 400。 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/festive-campaigns/{id}/occurrence-overrides/{cycleYear}")
+	public ResponseEntity<ApiResponse<FestiveCampaignOccurrenceOverrideResponse>> upsertFestiveCampaignOccurrenceOverride(
+			@PathVariable("id") Long id, @PathVariable("cycleYear") int cycleYear,
+			@Valid @RequestBody FestiveCampaignOccurrenceOverrideRequest request,
+			@AuthenticationPrincipal String username) {
+		FestiveCampaignOccurrenceOverrideResponse result = settingsService.upsertFestiveCampaignOccurrenceOverride(id,
+				cycleYear, request, username);
+		return ResponseEntity.ok(ApiResponse.success("已儲存日期覆寫", result));
+	}
+
+	@PreAuthorize("hasRole('MANAGER')")
+	@DeleteMapping("/festive-campaigns/{id}/occurrence-overrides/{cycleYear}")
+	public ResponseEntity<ApiResponse<Void>> deleteFestiveCampaignOccurrenceOverride(@PathVariable("id") Long id,
+			@PathVariable("cycleYear") int cycleYear) {
+		settingsService.deleteFestiveCampaignOccurrenceOverride(id, cycleYear);
+		return ResponseEntity.ok(ApiResponse.success("已刪除日期覆寫"));
 	}
 }

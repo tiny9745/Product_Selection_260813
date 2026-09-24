@@ -19,7 +19,8 @@ import java.math.BigDecimal;
  * createdBy = 目前登入者的商品，供選品人員自我檢視「我建立的選品通過率
  * 是不是偏低」。同一支端點、不同帳號呼叫會拿到不同數字，這是設計行為，
  * 不是快取或計算錯誤。</li>
- * <li>MANAGER（管理人員）→ {@link #SCOPE_COMPANY}：維持原本的全公司口徑。
+ * <li>MANAGER（管理人員）→ {@link #SCOPE_COMPANY}：全公司口徑，分子分母都只計正式候選
+ * （candidateStatus=CANDIDATE），剔除 AI 建議、尚未轉正的商品（2026-09-24）。
  * 管理人員通常不自己建立選品，若也套用個人口徑，儀表板上會恆為「尚無
  * 資料」，對主管沒有參考價值。</li>
  * </ul>

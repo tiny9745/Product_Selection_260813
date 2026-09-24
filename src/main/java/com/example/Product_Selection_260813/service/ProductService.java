@@ -739,20 +739,21 @@ public class ProductService {
 	/**
 	 * DELETE /api/products/{id}：僅限「未審核＋無正式審核紀錄」。
 	 *
-	 * review_status=PENDING 且 submission_count=0 這個組合等價於「無審核紀錄」：
+	 * review_status=PENDING 且 submission_count=1 這個組合等價於「無審核紀錄」：
 	 * 狀態機只有PENDING-&gt;APPROVED/REJECTED（審核）、REJECTED-&gt;PENDING（resubmit，
-	 * 且必定submission_count&gt;=1）兩條路徑會離開/回到PENDING，因此「PENDING且
-	 * submission_count=0」只可能是「從未送審過」，不需要額外查review_records表
+	 * 且必定submission_count&gt;=2）兩條路徑會離開/回到PENDING，因此「PENDING且
+	 * submission_count=1」只可能是「第 1 次送審、尚未被審核」，不需要額外查review_records表
 	 * （企劃書三、品項管理「刪除品項」備註原文即此推導）。
+	 * 2026-09-24：submission_count 改為 1 起算（見 Product.submissionCount），比較值由 0 改為 1。
 	 */
 	@Transactional
 	public void deleteProduct(Long id) {
 		Product product = findProductOrThrow(id);
 
 		boolean deletable = product.getReviewStatus() == ProductReviewStatus.PENDING
-				&& product.getSubmissionCount() != null && product.getSubmissionCount() == 0;
+				&& product.getSubmissionCount() != null && product.getSubmissionCount() == 1;
 		if (!deletable) {
-			throw new IllegalStateException("僅未審核且尚未送審過的商品可刪除");
+			throw new IllegalStateException("僅尚未審核過（第 1 次送審中）的商品可刪除");
 		}
 
 		// ⚠️ 修正：products 被三張表參照，且沒有任何一個外鍵設 ON DELETE CASCADE：

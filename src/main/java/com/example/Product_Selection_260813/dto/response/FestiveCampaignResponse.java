@@ -4,43 +4,67 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-import com.example.Product_Selection_260813.entity.FestiveCampaign;
+import com.example.Product_Selection_260813.enums.CampaignDateRuleType;
+import com.example.Product_Selection_260813.enums.CampaignStatusSource;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
+import com.example.Product_Selection_260813.enums.ObservedHolidayRule;
+import com.example.Product_Selection_260813.enums.SolarTerm;
+import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 
+/**
+ * 檔期回應。
+ *
+ * 2026-09-24（V21 檔期規則改版）：startDate／endDate／campaignStatus 保留欄位名稱，語意改為
+ * 「目前或下一期」的起訖日與推算後的有效狀態，前端列表與商品表單的既有讀取不必大改；
+ * 另外帶出規則欄位、區域、週期年、補假日與中文規則描述。組裝邏輯在
+ * FestiveCampaignRuleService（需要批次載入標籤、區域、覆寫，避免 N+1），這裡只是資料容器。
+ */
 public class FestiveCampaignResponse {
 
 	private Long id;
 	private String campaignCode;
 	private String campaignName;
 	private FestiveCategory category;
+	/** 目前或下一期 occurrence 的開始日（V21 起語意變更）；WEATHER 為同步寫入的實際日期。 */
 	private LocalDate startDate;
+	/** 目前或下一期 occurrence 的結束日；WEATHER 為實際日期。 */
 	private LocalDate endDate;
 	private Integer preparationLeadDays;
+	/** 推算後的有效狀態（見 statusSource）；V21 前是資料表存的值。 */
 	private FestiveCampaignStatus campaignStatus;
 	private Boolean isManualOverride;
-	/** 僅 category=WEATHER 時有值，見 FestiveCampaign 類別欄位註解與 V20 migration。 */
+	/** 僅 WEATHER：命中區域代碼。節慶／季節型的區域見 regions。 */
 	private String region;
-	/** 僅 category=WEATHER 時有值，同步當下凍結寫入，不即時重算（見 FestiveCampaign 類別欄位註解）。 */
+	/** 僅 WEATHER：預報可信度（2026-09-24 新增，供「天氣連動 › 目前的天氣檔期」顯示）；其餘類別為 null。 */
+	private WeatherForecastConfidence weatherConfidence;
+	/** WEATHER 為同步當下凍結值；季節型依 regions 與 region_weights 當下計算；節慶型一律 1.0。 */
 	private BigDecimal regionCoverageRatio;
 	private List<FestiveCampaignTagView> tags;
-
-	public static FestiveCampaignResponse from(FestiveCampaign campaign, List<FestiveCampaignTagView> tags) {
-		FestiveCampaignResponse dto = new FestiveCampaignResponse();
-		dto.id = campaign.getId();
-		dto.campaignCode = campaign.getCampaignCode();
-		dto.campaignName = campaign.getCampaignName();
-		dto.category = campaign.getCategory();
-		dto.startDate = campaign.getStartDate();
-		dto.endDate = campaign.getEndDate();
-		dto.preparationLeadDays = campaign.getPreparationLeadDays();
-		dto.campaignStatus = campaign.getCampaignStatus();
-		dto.isManualOverride = campaign.getIsManualOverride();
-		dto.region = campaign.getRegion();
-		dto.regionCoverageRatio = campaign.getRegionCoverageRatio();
-		dto.tags = tags;
-		return dto;
-	}
+	private CampaignDateRuleType dateRuleType;
+	private Integer ruleMonth;
+	private Integer ruleDay;
+	private Integer ruleWeekOrdinal;
+	private Integer ruleWeekday;
+	private SolarTerm ruleSolarTerm;
+	private Integer ruleOffsetDays;
+	private Integer durationDays;
+	private Integer endMonth;
+	private Integer endDay;
+	private ObservedHolidayRule observedHolidayRule;
+	private Boolean expandLongWeekend;
+	/** 季節型的受影響區域；空＝全國。節慶型一律為空（全國）。 */
+	private List<String> regions;
+	/** 目前或下一期的週期年。 */
+	private Integer cycleYear;
+	/** 本期起訖日是否來自逐年覆寫。 */
+	private Boolean occurrenceOverridden;
+	/** 本期依補假規則算出的補假日。 */
+	private List<LocalDate> observedHolidays;
+	private CampaignStatusSource statusSource;
+	private Integer manualOverrideCycle;
+	/** 後端組好的中文規則描述，例：「每年農曆 5 月 5 日起 3 天」。 */
+	private String ruleDescription;
 
 	public Long getId() {
 		return id;
@@ -114,6 +138,14 @@ public class FestiveCampaignResponse {
 		this.isManualOverride = isManualOverride;
 	}
 
+	public WeatherForecastConfidence getWeatherConfidence() {
+		return weatherConfidence;
+	}
+
+	public void setWeatherConfidence(WeatherForecastConfidence weatherConfidence) {
+		this.weatherConfidence = weatherConfidence;
+	}
+
 	public String getRegion() {
 		return region;
 	}
@@ -136,5 +168,157 @@ public class FestiveCampaignResponse {
 
 	public void setTags(List<FestiveCampaignTagView> tags) {
 		this.tags = tags;
+	}
+
+	public CampaignDateRuleType getDateRuleType() {
+		return dateRuleType;
+	}
+
+	public void setDateRuleType(CampaignDateRuleType dateRuleType) {
+		this.dateRuleType = dateRuleType;
+	}
+
+	public Integer getRuleMonth() {
+		return ruleMonth;
+	}
+
+	public void setRuleMonth(Integer ruleMonth) {
+		this.ruleMonth = ruleMonth;
+	}
+
+	public Integer getRuleDay() {
+		return ruleDay;
+	}
+
+	public void setRuleDay(Integer ruleDay) {
+		this.ruleDay = ruleDay;
+	}
+
+	public Integer getRuleWeekOrdinal() {
+		return ruleWeekOrdinal;
+	}
+
+	public void setRuleWeekOrdinal(Integer ruleWeekOrdinal) {
+		this.ruleWeekOrdinal = ruleWeekOrdinal;
+	}
+
+	public Integer getRuleWeekday() {
+		return ruleWeekday;
+	}
+
+	public void setRuleWeekday(Integer ruleWeekday) {
+		this.ruleWeekday = ruleWeekday;
+	}
+
+	public SolarTerm getRuleSolarTerm() {
+		return ruleSolarTerm;
+	}
+
+	public void setRuleSolarTerm(SolarTerm ruleSolarTerm) {
+		this.ruleSolarTerm = ruleSolarTerm;
+	}
+
+	public Integer getRuleOffsetDays() {
+		return ruleOffsetDays;
+	}
+
+	public void setRuleOffsetDays(Integer ruleOffsetDays) {
+		this.ruleOffsetDays = ruleOffsetDays;
+	}
+
+	public Integer getDurationDays() {
+		return durationDays;
+	}
+
+	public void setDurationDays(Integer durationDays) {
+		this.durationDays = durationDays;
+	}
+
+	public Integer getEndMonth() {
+		return endMonth;
+	}
+
+	public void setEndMonth(Integer endMonth) {
+		this.endMonth = endMonth;
+	}
+
+	public Integer getEndDay() {
+		return endDay;
+	}
+
+	public void setEndDay(Integer endDay) {
+		this.endDay = endDay;
+	}
+
+	public ObservedHolidayRule getObservedHolidayRule() {
+		return observedHolidayRule;
+	}
+
+	public void setObservedHolidayRule(ObservedHolidayRule observedHolidayRule) {
+		this.observedHolidayRule = observedHolidayRule;
+	}
+
+	public Boolean getExpandLongWeekend() {
+		return expandLongWeekend;
+	}
+
+	public void setExpandLongWeekend(Boolean expandLongWeekend) {
+		this.expandLongWeekend = expandLongWeekend;
+	}
+
+	public List<String> getRegions() {
+		return regions;
+	}
+
+	public void setRegions(List<String> regions) {
+		this.regions = regions;
+	}
+
+	public Integer getCycleYear() {
+		return cycleYear;
+	}
+
+	public void setCycleYear(Integer cycleYear) {
+		this.cycleYear = cycleYear;
+	}
+
+	public Boolean getOccurrenceOverridden() {
+		return occurrenceOverridden;
+	}
+
+	public void setOccurrenceOverridden(Boolean occurrenceOverridden) {
+		this.occurrenceOverridden = occurrenceOverridden;
+	}
+
+	public List<LocalDate> getObservedHolidays() {
+		return observedHolidays;
+	}
+
+	public void setObservedHolidays(List<LocalDate> observedHolidays) {
+		this.observedHolidays = observedHolidays;
+	}
+
+	public CampaignStatusSource getStatusSource() {
+		return statusSource;
+	}
+
+	public void setStatusSource(CampaignStatusSource statusSource) {
+		this.statusSource = statusSource;
+	}
+
+	public Integer getManualOverrideCycle() {
+		return manualOverrideCycle;
+	}
+
+	public void setManualOverrideCycle(Integer manualOverrideCycle) {
+		this.manualOverrideCycle = manualOverrideCycle;
+	}
+
+	public String getRuleDescription() {
+		return ruleDescription;
+	}
+
+	public void setRuleDescription(String ruleDescription) {
+		this.ruleDescription = ruleDescription;
 	}
 }

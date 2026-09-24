@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,8 @@ import com.example.Product_Selection_260813.common.exception.SystemConfiguration
 import com.example.Product_Selection_260813.dto.request.AudienceProfileUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignCreateRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignManualStatusRequest;
+import com.example.Product_Selection_260813.dto.request.FestiveCampaignOccurrenceOverrideRequest;
+import com.example.Product_Selection_260813.dto.request.FestiveCampaignOccurrencePreviewRequest;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignTagInput;
 import com.example.Product_Selection_260813.dto.request.FestiveCampaignUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductTypeCreateRequest;
@@ -28,8 +31,9 @@ import com.example.Product_Selection_260813.dto.request.RiskOptionUpdateRequest;
 import com.example.Product_Selection_260813.dto.request.SwitchEvaluationModeRequest;
 import com.example.Product_Selection_260813.dto.response.AudienceProfileResponse;
 import com.example.Product_Selection_260813.dto.response.EvaluationModeResponse;
+import com.example.Product_Selection_260813.dto.response.FestiveCampaignOccurrenceOverrideResponse;
+import com.example.Product_Selection_260813.dto.response.FestiveCampaignOccurrencePreviewResponse;
 import com.example.Product_Selection_260813.dto.response.FestiveCampaignResponse;
-import com.example.Product_Selection_260813.dto.response.FestiveCampaignTagView;
 import com.example.Product_Selection_260813.dto.response.ProductTypeResponse;
 import com.example.Product_Selection_260813.dto.response.RiskOptionSettingResponse;
 import com.example.Product_Selection_260813.dto.response.WeatherSignalTagMappingResponse;
@@ -63,6 +67,9 @@ import com.example.Product_Selection_260813.enums.CustomFieldType;
 import com.example.Product_Selection_260813.enums.FactorDataSource;
 import com.example.Product_Selection_260813.enums.FactorStrategyCode;
 import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
+import com.example.Product_Selection_260813.enums.FestiveCategory;
+import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
+import com.example.Product_Selection_260813.service.campaign.FestiveCampaignsChangedEvent;
 import com.example.Product_Selection_260813.enums.ScoreBandSourceMode;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeScoreBandRepository;
@@ -196,6 +203,10 @@ public class SettingsService {
 	@Autowired
 	private FestiveCampaignTagRepository festiveCampaignTagRepository;
 
+	/** 2026-09-24 檔期規則改版：規則驗證、本期推算、回應組裝、逐年覆寫都集中在這裡。 */
+	@Autowired
+	private FestiveCampaignRuleService festiveCampaignRuleService;
+
 	// 目標區間 HISTORICAL 模式需要的兩個依賴
 	@Autowired
 	private ProductTypeScoreBandRepository productTypeScoreBandRepository;
@@ -205,6 +216,15 @@ public class SettingsService {
 
 	@Autowired
 	private com.example.Product_Selection_260813.service.resolver.AlgorithmSettings algorithmSettings;
+
+	/** 2026-09-24（方案 2）：檔期相關設定變更後通知重算節慶加成，見 FestiveCampaignsChangedEvent。 */
+	@Autowired
+	private ApplicationEventPublisher eventPublisher;
+
+	/** 交易提交後由 FestivalBoostRefreshListener 重算 product_evaluations 的節慶加成。 */
+	private void publishCampaignsChanged(String reason) {
+		eventPublisher.publishEvent(new FestiveCampaignsChangedEvent(reason));
+	}
 
 	// ========================= 評估模式 =========================
 
@@ -818,6 +838,32 @@ public class SettingsService {
 	}
 
 	/**
+	 * GET /api/products/custom-field-schema/all：批次匯入頁面組出「自訂屬性」聯集欄位用
+	 * （2026-09-24 新增，Bug A）。不限品類，只回傳生效中的題目；新版本取代舊版本時舊版
+	 * isActive 會被設為 false，因此不需要另外判斷 isSuperseded。
+	 *
+	 * 與 listCustomFieldDefinitions()（全部，含停用／已取代，設定頁管理用）、
+	 * getApplicableCustomFields(productTypeId)（生效中且依品類過濾，單筆表單與寫入驗證用）
+	 * 三者刻意分開，各自對應不同呼叫端，避免同一支方法背負多種語意。
+	 */
+	@Transactional(readOnly = true)
+	public List<CustomFieldDefinitionResponse> getAllActiveCustomFields() {
+		List<CustomFieldDefinition> active = customFieldDefinitionRepository.findByIsActiveTrue();
+		if (active.isEmpty()) {
+			return List.of();
+		}
+		List<Long> ids = active.stream().map(CustomFieldDefinition::getId).toList();
+		Map<Long, List<Long>> applicableTypesByFieldId = customFieldApplicableTypeRepository
+				.findByFieldDefinitionIdIn(ids).stream()
+				.collect(Collectors.groupingBy(CustomFieldApplicableType::getFieldDefinitionId,
+						Collectors.mapping(CustomFieldApplicableType::getRootProductTypeId, Collectors.toList())));
+		return active.stream()
+				.map(d -> CustomFieldDefinitionResponse.from(d,
+						applicableTypesByFieldId.getOrDefault(d.getId(), List.of())))
+				.toList();
+	}
+
+	/**
 	 * POST /api/settings/custom-field-definitions：新增自訂商品屬性題目。
 	 *
 	 * 三件事要檢查：
@@ -1400,6 +1446,8 @@ public class SettingsService {
 		}
 
 		log.info("區域占比設定已更新：{}，操作者={}", incoming, username);
+		// 季節型檔期的地域覆蓋率依目前占比即時計算，占比改了加成就會變。
+		publishCampaignsChanged("地域占比調整");
 		return getRegionWeights();
 	}
 
@@ -1436,21 +1484,6 @@ public class SettingsService {
 		profile.setKeywords(request.getKeywords());
 		AudienceProfile saved = audienceProfileRepository.save(profile);
 		return AudienceProfileResponse.from(saved);
-	}
-
-	/**
-	 * 檔期起訖日期關係驗證。
-	 *
-	 * startDate晚於endDate時，ScoringService.calculateUrgencyFactor()算出的
-	 * 剩餘天數會是負數，讓節慶加成的急迫係數完全失真——而節慶加成是直接加在
-	 * finalScore上的，錯誤會一路傳到商品排序與審核快照。
-	 *
-	 * 單一日期的必填由DTO的@NotNull攔截，這裡只處理兩個欄位之間的關係。
-	 */
-	private void validateCampaignDateRange(LocalDate startDate, LocalDate endDate) {
-		if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
-			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_DATE_RANGE_INVALID);
-		}
 	}
 
 	private AudienceProfile findActiveAudienceProfileOrThrow() {
@@ -1636,143 +1669,158 @@ public class SettingsService {
 	// ========================= 節慶檔期管理 =========================
 
 	/**
-	 * GET /api/settings/festive-campaigns：取得所有檔期設定。
+	 * GET /api/settings/festive-campaigns：取得檔期設定，可依類別篩選（未帶＝全部）。
 	 */
 	@Transactional(readOnly = true)
-	public List<FestiveCampaignResponse> getAllFestiveCampaigns() {
-		return festiveCampaignRepository.findAll().stream().map(this::toFestiveCampaignResponse).toList();
+	public List<FestiveCampaignResponse> getAllFestiveCampaigns(List<FestiveCategory> categories) {
+		// 2026-09-24（V21）：標籤、區域、逐年覆寫一次批次載入後在記憶體分組，不再每筆各查一次（N+1）；
+		// startDate／endDate／campaignStatus 為推算後的本期值（見 FestiveCampaignRuleService）。
+		// 2026-09-24：categories 為選填篩選。未帶＝全部類別（商品表單的可選標籤仍依賴這個行為）；
+		// 節慶檔期頁帶 FESTIVAL、SEASON，天氣檔期改由 getCurrentWeatherCampaigns() 提供。
+		List<FestiveCampaign> campaigns = categories == null || categories.isEmpty()
+				? festiveCampaignRepository.findAll()
+				: festiveCampaignRepository.findByCategoryIn(categories.stream().distinct().toList());
+		return festiveCampaignRuleService.toResponses(campaigns);
 	}
 
 	/**
-	 * POST /api/settings/festive-campaigns：新增檔期。campaignCode需唯一，
-	 * campaign_status固定從UPCOMING開始（見FestiveCampaignCreateRequest類別註解）。
+	 * GET /api/settings/weather-campaigns/current：「天氣連動」分頁的目前天氣檔期清單（唯讀）。
+	 *
+	 * 範圍＝準備期／進行中的天氣檔期，加上所有手動覆蓋中的天氣檔期（含被設成 EXPIRED 的，
+	 * 才能在畫面上恢復自動判斷）。已自然結束、且沒有手動覆蓋的歷史列不回傳。
+	 * 切換狀態沿用既有 POST /api/settings/festive-campaigns/{id}/manual-status，不另開端點。
+	 */
+	@Transactional(readOnly = true)
+	public List<FestiveCampaignResponse> getCurrentWeatherCampaigns() {
+		return festiveCampaignRuleService.toResponses(festiveCampaignRepository.findCurrentOrManualByCategory(
+				FestiveCategory.WEATHER, List.of(FestiveCampaignStatus.PREPARING, FestiveCampaignStatus.ACTIVE)));
+	}
+
+	/**
+	 * POST /api/settings/festive-campaigns：新增檔期。
+	 *
+	 * 2026-09-24（V21 檔期規則改版）：只接受 FESTIVAL／SEASON（WEATHER 回 400，D1），改存日期規則，
+	 * start_date／end_date 寫 NULL（D2）；代碼不可帶年份（D5）。規則驗證的單一入口是
+	 * FestiveCampaignRuleService.validateRule()，與預覽端點共用。
 	 */
 	@Transactional
 	public FestiveCampaignResponse createFestiveCampaign(FestiveCampaignCreateRequest request) {
+		festiveCampaignRuleService.validateCode(request.getCampaignCode());
+		festiveCampaignRuleService.validateRule(request);
 		if (festiveCampaignRepository.findByCampaignCode(request.getCampaignCode()).isPresent()) {
 			throw new IllegalArgumentException("檔期代碼已存在：" + request.getCampaignCode());
 		}
-		validateCampaignDateRange(request.getStartDate(), request.getEndDate());
 
 		FestiveCampaign campaign = new FestiveCampaign();
 		campaign.setCampaignCode(request.getCampaignCode());
 		campaign.setCampaignName(request.getCampaignName());
-		campaign.setCategory(request.getCategory());
-		campaign.setStartDate(request.getStartDate());
-		campaign.setEndDate(request.getEndDate());
 		if (request.getPreparationLeadDays() != null) {
 			campaign.setPreparationLeadDays(request.getPreparationLeadDays());
 		}
+		festiveCampaignRuleService.applyRule(campaign, request);
 
-		FestiveCampaign saved = festiveCampaignRepository.save(campaign);
+		FestiveCampaign saved = festiveCampaignRepository.saveAndFlush(campaign);
 		saveTags(saved.getId(), request.getTags());
-		return toFestiveCampaignResponse(saved);
+		festiveCampaignRuleService.replaceRegions(saved.getId(), request.getRegions());
+		publishCampaignsChanged("新增檔期 " + request.getCampaignCode());
+		return festiveCampaignRuleService.toResponse(findFestiveCampaignOrThrow(saved.getId()));
 	}
 
 	/**
-	 * PUT /api/settings/festive-campaigns/{id}：編輯檔期基本資料與標籤。
-	 * 標籤整份覆蓋（先刪除該檔期既有全部標籤，再依Request重新寫入）。
+	 * PUT /api/settings/festive-campaigns/{id}：編輯檔期基本資料、日期規則、標籤與區域。
+	 * 標籤與區域皆整份覆蓋。既有資料或這次帶的類別是 WEATHER 一律 400（D1：天氣檔期只能切換狀態）。
+	 *
+	 * ⚠️ 必須先 saveAndFlush 再刪標籤／區域：兩支 deleteByCampaignId() 都會清空 Persistence Context，
+	 * 沒 flush 的檔期異動會被丟掉（2026-09-24「編輯檔期儲存後無效」的根本原因，見
+	 * FestiveCampaignTagRepository.deleteByCampaignId() 註解）。
 	 */
 	@Transactional
 	public FestiveCampaignResponse updateFestiveCampaign(Long id, FestiveCampaignUpdateRequest request) {
-		FestiveCampaign campaign = festiveCampaignRepository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException("檔期不存在"));
-		validateCampaignDateRange(request.getStartDate(), request.getEndDate());
+		FestiveCampaign campaign = findFestiveCampaignOrThrow(id);
+		if (campaign.getCategory() == FestiveCategory.WEATHER) {
+			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_WEATHER_NOT_EDITABLE);
+		}
+		festiveCampaignRuleService.validateRule(request);
 
 		campaign.setCampaignName(request.getCampaignName());
-		campaign.setCategory(request.getCategory());
-		campaign.setStartDate(request.getStartDate());
-		campaign.setEndDate(request.getEndDate());
 		if (request.getPreparationLeadDays() != null) {
 			campaign.setPreparationLeadDays(request.getPreparationLeadDays());
 		}
-		// 2026-09-24：必須在下面的批次刪除之前把這些異動 flush 出去——deleteByCampaignId()
-		// 會清空 Persistence Context，沒 flush 的異動會被丟掉（完整原因見該方法註解）。
-		// 那支已加 flushAutomatically；這裡再用 saveAndFlush() 明確表達順序需求，
-		// 日後有人調整 repository 註解也不會再讓這個 bug 回來。
-		FestiveCampaign saved = festiveCampaignRepository.saveAndFlush(campaign);
+		festiveCampaignRuleService.applyRule(campaign, request);
+		festiveCampaignRepository.saveAndFlush(campaign);
 
 		festiveCampaignTagRepository.deleteByCampaignId(id);
 		saveTags(id, request.getTags());
+		festiveCampaignRuleService.replaceRegions(id, request.getRegions());
+		publishCampaignsChanged("編輯檔期 id=" + id);
 
-		return toFestiveCampaignResponse(saved);
+		return festiveCampaignRuleService.toResponse(findFestiveCampaignOrThrow(id));
 	}
 
 	/**
-	 * POST /api/settings/festive-campaigns/{id}/manual-status：手動切換檔期狀態
-	 * （熔斷清單②備援機制）。status切換campaign_status目標值，overrideEnabled
-	 * 切換is_manual_override開關，兩者分開表達（企劃書API總表原文備註）。
+	 * POST /api/settings/festive-campaigns/{id}/manual-status：手動切換檔期狀態，或恢復自動判斷。
 	 *
-	 * ⚠️ 2026-09-17修正：全專案搜過一輪，找不到任何地方會依日期自動計算
-	 * campaign_status——沒有排程工作、沒有其他 setCampaignStatus() 呼叫點，
-	 * 「自動判斷」這個概念從頭到尾沒有真正的計算邏輯對應。原本這個方法
-	 * 不管 overrideEnabled 是 true 還是 false，一律直接把 request.getStatus()
-	 * （前端傳來的、通常就是畫面上當下顯示的舊值）存回去——選「恢復自動
-	 * 判斷」时，實際存進去的還是那個舊的手動狀態，只有 is_manual_override
-	 * 這個旗標變成 false，狀態文字本身完全沒有跟著重新計算，這就是「恢復
-	 * 自動判斷後仍維持手動狀態」的根本原因。
-	 *
-	 * 這裡補上 resolveAutomaticStatus()：overrideEnabled=false 時，狀態改
-	 * 依目前日期、開始/結束日、準備天數即時算一次，不看前端傳來的
-	 * status（那個值在這個模式下沒有意義，因為不該由人指定）；
-	 * overrideEnabled=true 時才使用 request.getStatus() 這個人工指定值，
-	 * 維持原本的手動指定行為。
-	 *
-	 * ⚠️ 這只解決「這次呼叫當下」重新計算一次——非手動覆蓋的檔期，日期
-	 * 過境之後狀態依然不會自動往前推進（例如準備期結束、進入進行中），
-	 * 除非又有人手動點一次「恢復自動判斷」或編輯檔期。要做到「每天自動
-	 * 更新」需要額外的排程工作（@Scheduled），這是本次沒有做的部分，
-	 * 需要先確認是否要新增這個排程，再評估「是否需要手動功能」——如果
-	 * 之後真的補上每日排程，手動覆蓋才有明確的存在理由：讓管理者暫時
-	 * 蓋過排程的自動判斷結果；如果不打算做排程，這個「自動判斷」目前
-	 * 就只等於「這次先幫你算一次，之後不會再變」，需要團隊確認這樣是否
-	 * 足夠。
+	 * 2026-09-24（V21，D10）：
+	 * - FESTIVAL／SEASON：overrideEnabled=true 時寫入狀態，並把 manual_override_cycle 設成「當下本期」
+	 *   的週期年——覆蓋只對本期有效，進入下一期自動失效（讀取時判斷）；false 時清除旗標與週期。
+	 *   EXPIRED 只能以這個方式設定，意思是「本期停用」。
+	 * - WEATHER：行為不變（覆蓋期間同步服務不動這筆；恢復時依實際起訖日重算一次）。
 	 */
 	@Transactional
 	public FestiveCampaignResponse switchManualStatus(Long id, FestiveCampaignManualStatusRequest request) {
-		FestiveCampaign campaign = festiveCampaignRepository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException("檔期不存在"));
+		FestiveCampaign campaign = findFestiveCampaignOrThrow(id);
 		boolean overrideEnabled = Boolean.TRUE.equals(request.getOverrideEnabled());
-		campaign.setCampaignStatus(overrideEnabled ? request.getStatus() : resolveAutomaticStatus(campaign));
-		campaign.setIsManualOverride(overrideEnabled);
-		FestiveCampaign saved = festiveCampaignRepository.save(campaign);
-		return toFestiveCampaignResponse(saved);
+		if (campaign.getCategory() == FestiveCategory.WEATHER) {
+			campaign.setCampaignStatus(overrideEnabled ? request.getStatus()
+					: festiveCampaignRuleService.resolveAutomaticStatus(campaign));
+			campaign.setIsManualOverride(overrideEnabled);
+		} else if (overrideEnabled) {
+			Integer currentCycle = festiveCampaignRuleService.currentOccurrence(campaign)
+					.map(occurrence -> occurrence.cycleYear())
+					.orElseThrow(() -> new IllegalArgumentException("無法推算本期日期，不能手動指定狀態"));
+			campaign.setCampaignStatus(request.getStatus());
+			campaign.setIsManualOverride(true);
+			campaign.setManualOverrideCycle(currentCycle);
+		} else {
+			campaign.setIsManualOverride(false);
+			campaign.setManualOverrideCycle(null);
+			campaign.setCampaignStatus(festiveCampaignRuleService.resolveAutomaticStatus(campaign));
+		}
+		festiveCampaignRepository.saveAndFlush(campaign);
+		publishCampaignsChanged("切換檔期狀態 id=" + id);
+		return festiveCampaignRuleService.toResponse(campaign);
 	}
 
-	/**
-	 * 依目前日期、檔期起訖日、準備天數計算「應該」是哪個狀態，給
-	 * switchManualStatus() 在「恢復自動判斷」時使用。
-	 *
-	 * 邊界規則（沿用 ScoringService 對 PREPARING 期間的既有定義：
-	 * 「準備期＝開始日往前推 preparationLeadDays 天」）：
-	 * - 今天 &lt; 開始日 - 準備天數 → UPCOMING（即將開始）
-	 * - 開始日 - 準備天數 &lt;= 今天 &lt; 開始日 → PREPARING（準備期）
-	 * - 開始日 &lt;= 今天 &lt;= 結束日 → ACTIVE（進行中）
-	 * - 今天 &gt; 結束日 → EXPIRED（已結束）
-	 *
-	 * 準備天數為 null 或 <= 0 時視為 0（沒有準備期，開始日當天直接從
-	 * UPCOMING 跳到 ACTIVE），跟 ScoringService.calculateFestivalUrgency()
-	 * 對 leadDays 的防禦性處理一致，不要求呼叫端保證這個欄位一定有值。
-	 */
-	private FestiveCampaignStatus resolveAutomaticStatus(FestiveCampaign campaign) {
-		LocalDate today = LocalDate.now();
-		LocalDate startDate = campaign.getStartDate();
-		LocalDate endDate = campaign.getEndDate();
-		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
-				? campaign.getPreparationLeadDays()
-				: 0;
-		LocalDate preparationStart = startDate.minusDays(leadDays);
+	/** POST /api/settings/festive-campaigns/occurrence-preview：試算由今天起的 3 期，不寫入。 */
+	public List<FestiveCampaignOccurrencePreviewResponse> previewFestiveCampaignOccurrences(
+			FestiveCampaignOccurrencePreviewRequest request) {
+		return festiveCampaignRuleService.preview(request);
+	}
 
-		if (today.isAfter(endDate)) {
-			return FestiveCampaignStatus.EXPIRED;
-		}
-		if (!today.isBefore(startDate)) {
-			return FestiveCampaignStatus.ACTIVE;
-		}
-		if (!today.isBefore(preparationStart)) {
-			return FestiveCampaignStatus.PREPARING;
-		}
-		return FestiveCampaignStatus.UPCOMING;
+	/** GET /api/settings/festive-campaigns/{id}/occurrence-overrides */
+	public List<FestiveCampaignOccurrenceOverrideResponse> getFestiveCampaignOccurrenceOverrides(Long id) {
+		return festiveCampaignRuleService.listOverrides(id);
+	}
+
+	/** PUT /api/settings/festive-campaigns/{id}/occurrence-overrides/{cycleYear}；WEATHER 回 400。 */
+	@Transactional
+	public FestiveCampaignOccurrenceOverrideResponse upsertFestiveCampaignOccurrenceOverride(Long id, int cycleYear,
+			FestiveCampaignOccurrenceOverrideRequest request, String username) {
+		FestiveCampaignOccurrenceOverrideResponse result = festiveCampaignRuleService.upsertOverride(id, cycleYear,
+				request, resolveUserId(username));
+		publishCampaignsChanged("逐年覆寫 id=" + id + " " + cycleYear);
+		return result;
+	}
+
+	/** DELETE /api/settings/festive-campaigns/{id}/occurrence-overrides/{cycleYear} */
+	@Transactional
+	public void deleteFestiveCampaignOccurrenceOverride(Long id, int cycleYear) {
+		festiveCampaignRuleService.deleteOverride(id, cycleYear);
+		publishCampaignsChanged("刪除逐年覆寫 id=" + id + " " + cycleYear);
+	}
+
+	private FestiveCampaign findFestiveCampaignOrThrow(Long id) {
+		return festiveCampaignRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("檔期不存在"));
 	}
 
 	/**
@@ -1810,12 +1858,6 @@ public class SettingsService {
 			tag.setMatchTier(entry.getValue().getMatchTier());
 			festiveCampaignTagRepository.save(tag);
 		}
-	}
-
-	private FestiveCampaignResponse toFestiveCampaignResponse(FestiveCampaign campaign) {
-		List<FestiveCampaignTagView> tags = festiveCampaignTagRepository.findByCampaignId(campaign.getId()).stream()
-				.map(FestiveCampaignTagView::from).toList();
-		return FestiveCampaignResponse.from(campaign, tags);
 	}
 
 	// ========================= 內部輔助方法 =========================

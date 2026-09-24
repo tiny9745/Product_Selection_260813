@@ -242,8 +242,14 @@ public class DashboardService {
 		String scope;
 		if (user.getRole() == UserRole.MANAGER) {
 			scope = DashboardConversionRateResponse.SCOPE_COMPANY;
-			approvedCount = productRepository.countByReviewStatus(ProductReviewStatus.APPROVED);
-			submittedCount = productRepository.countBySubmissionCountGreaterThan(0);
+			// 2026-09-24：管理層口徑剔除 AI 建議（candidateStatus=AI_SUGGESTED）的商品——那些商品已從
+			// 正式候選移出、尚未經人工轉正，不在待審流程內（同 getStatistics() 的 pendingCount 口徑）。
+			// 分子也限定 CANDIDATE：AI 建議只會標記 PENDING 商品，正常情況下已核准商品不會是 AI_SUGGESTED，
+			// 但分子分母用同一個候選條件，才保證分子一定是分母的子集合。
+			approvedCount = productRepository.countByCandidateStatusAndReviewStatus(ProductCandidateStatus.CANDIDATE,
+					ProductReviewStatus.APPROVED);
+			submittedCount = productRepository.countBySubmissionCountGreaterThanAndCandidateStatus(0,
+					ProductCandidateStatus.CANDIDATE);
 		} else {
 			scope = DashboardConversionRateResponse.SCOPE_PERSONAL;
 			approvedCount = productRepository.countByReviewStatusAndCreatedBy(ProductReviewStatus.APPROVED,

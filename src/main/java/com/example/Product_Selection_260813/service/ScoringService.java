@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -21,12 +20,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
 import com.example.Product_Selection_260813.service.scoring.HistoricalScoreCalculator;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
+import com.example.Product_Selection_260813.constants.BusinessTimeZone;
+import com.example.Product_Selection_260813.service.campaign.ActiveCampaignWindow;
+import com.example.Product_Selection_260813.service.campaign.CampaignUrgencyCalculator;
+import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.dto.response.EvaluationResponse;
@@ -44,11 +49,8 @@ import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.entity.TrendSignal;
-import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
-import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
-import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
@@ -58,7 +60,6 @@ import com.example.Product_Selection_260813.repository.EvaluationFactorRepositor
 import com.example.Product_Selection_260813.repository.EvaluationModeRepository;
 import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
-import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
@@ -96,8 +97,8 @@ public class ScoringService {
 	// 之後的歷史資料回測校準屬於Phase 2待辦（見十三），此處先照文件明訂值寫死。
 	private static final BigDecimal BOOST_CAP = new BigDecimal("5");
 
-	// 季節型檔期PREPARING期間固定係數（企劃書節慶加成計分規則明訂，非本類別臆測）。
-	private static final BigDecimal SEASON_PREPARING_URGENCY_FACTOR = new BigDecimal("0.20");
+	// 季節型檔期PREPARING期間固定係數 0.20（企劃書明訂）：2026-09-24 隨急迫係數公式移到
+	// CampaignUrgencyCalculator.SEASON_PREPARING_TIME_FACTOR，數值不變。
 
 	// Match Weight三層數值已改由FestiveCampaignTagMatchTier enum攜帶（見該類別），
 	// 這裡不再需要暫定的DEFAULT_MATCH_WEIGHT——festive_campaign_tags表補上分級資料後，
@@ -132,8 +133,9 @@ public class ScoringService {
 	@Autowired
 	private ProductTypeRepository productTypeRepository;
 
+	/** 2026-09-24 V21：計分候選檔期改由規則推算（取代 FestiveCampaignRepository.findByCampaignStatusIn）。 */
 	@Autowired
-	private FestiveCampaignRepository festiveCampaignRepository;
+	private FestiveCampaignRuleService festiveCampaignRuleService;
 
 	@Autowired
 	private FestiveCampaignTagRepository festiveCampaignTagRepository;
@@ -397,15 +399,17 @@ public class ScoringService {
 	 * 組裝review_records.matched_campaign_snapshot：Festival Boost可解釋性明細。
 	 *
 	 * 命中判定與係數計算依企劃書「節慶加成計分規則」：
-	 * - 僅比對campaign_status IN (PREPARING, ACTIVE)的檔期
+	 * - 只比對「推算後」為 PREPARING／ACTIVE 的檔期（2026-09-24 V21 修正 B1）：節慶／季節型的狀態
+	 *   依日期規則即時推算，不再讀資料表裡從不自動推進的 campaign_status；天氣型仍依同步寫入的狀態。
+	 *   候選清單由 FestiveCampaignRuleService.findLiveWindows() 批次產生（區域、覆寫一次載入）。
 	 * - 命中＝product.campaign_tags與該檔期festive_campaign_tags.tag集合的交集非空
 	 * - Match Weight＝命中標籤中最高等級的match_tier權重（核心1.0／一般0.6／弱0.3），
 	 *   多標籤取最高等級不加總（見FestiveCampaignTagMatchTier）
 	 * - 多節慶重疊：以「該檔期算出的Festival Boost」取最大值(MAX)，不加總
 	 * - 未命中任何檔期時回傳null（對應「未命中檔期時不顯示此區塊，Festival Boost=0」）
 	 *
-	 * 一次批次查出所有候選檔期的標籤明細（findByCampaignIdIn），而非對每個候選檔期
-	 * 各自查一次，避免候選檔期數量增加時的N+1查詢。
+	 * 快照新增命中期間、地域、覆蓋率與各係數（見 MatchedCampaignSnapshot 類別註解），
+	 * 已審核商品的重現性由快照保證，檔期規則或占比之後再改都不影響。
 	 */
 	@Transactional(readOnly = true)
 	public MatchedCampaignSnapshot buildMatchedCampaignSnapshot(Product product) {
@@ -414,25 +418,35 @@ public class ScoringService {
 			return null;
 		}
 
-		List<FestiveCampaign> candidates = festiveCampaignRepository
-				.findByCampaignStatusIn(List.of(FestiveCampaignStatus.PREPARING, FestiveCampaignStatus.ACTIVE));
+		LocalDate today = LocalDate.now(BusinessTimeZone.TAIPEI);
+		List<ActiveCampaignWindow> candidates = festiveCampaignRuleService.findLiveWindows(today);
 		if (candidates.isEmpty()) {
 			return null;
 		}
+		return matchCampaign(productTags, candidates, loadCampaignTags(candidates), today);
+	}
 
-		List<Long> candidateIds = candidates.stream().map(FestiveCampaign::getId).toList();
-		Map<Long, List<FestiveCampaignTag>> tagsByCampaign = festiveCampaignTagRepository
-				.findByCampaignIdIn(candidateIds).stream()
+	/** 候選檔期的標籤，一次批次載入後依檔期分組（避免逐檔期查詢）。 */
+	private Map<Long, List<FestiveCampaignTag>> loadCampaignTags(List<ActiveCampaignWindow> candidates) {
+		List<Long> candidateIds = candidates.stream().map(window -> window.campaign().getId()).toList();
+		return festiveCampaignTagRepository.findByCampaignIdIn(candidateIds).stream()
 				.collect(Collectors.groupingBy(FestiveCampaignTag::getCampaignId));
+	}
 
-		FestiveCampaign bestCampaign = null;
+	/**
+	 * 命中判定本體（2026-09-24 由 buildMatchedCampaignSnapshot() 抽出）：候選檔期與其標籤由呼叫端
+	 * 提供，讓 refreshFestivalBoosts() 對整批商品只查一次檔期與標籤，單筆與批次走同一套判定。
+	 */
+	private MatchedCampaignSnapshot matchCampaign(Set<String> productTags, List<ActiveCampaignWindow> candidates,
+			Map<Long, List<FestiveCampaignTag>> tagsByCampaign, LocalDate today) {
+		ActiveCampaignWindow bestWindow = null;
+		CampaignUrgencyCalculator.Result bestUrgency = null;
 		Set<String> bestMatchedTags = Set.of();
 		BigDecimal bestMatchWeight = BigDecimal.ZERO;
-		BigDecimal bestUrgencyFactor = BigDecimal.ZERO;
 		BigDecimal bestBoost = BigDecimal.ZERO;
 
-		for (FestiveCampaign campaign : candidates) {
-			List<FestiveCampaignTag> campaignTags = tagsByCampaign.getOrDefault(campaign.getId(), List.of());
+		for (ActiveCampaignWindow window : candidates) {
+			List<FestiveCampaignTag> campaignTags = tagsByCampaign.getOrDefault(window.campaign().getId(), List.of());
 
 			// 該檔期底下，命中商品標籤的所有tag，取其中match_tier權重最高者
 			FestiveCampaignTag bestMatch = null;
@@ -452,113 +466,47 @@ public class ScoringService {
 			}
 
 			BigDecimal matchWeight = bestMatch.getMatchTier().getMatchWeight();
-			BigDecimal urgencyFactor = calculateUrgencyFactor(campaign);
-			BigDecimal boost = matchWeight.multiply(urgencyFactor).multiply(BOOST_CAP);
+			CampaignUrgencyCalculator.Result urgency = calculateUrgencyFactor(window, today);
+			BigDecimal boost = matchWeight.multiply(urgency.urgencyFactor()).multiply(BOOST_CAP);
 
 			if (boost.compareTo(bestBoost) > 0) {
 				bestBoost = boost;
-				bestCampaign = campaign;
+				bestWindow = window;
+				bestUrgency = urgency;
 				bestMatchedTags = matchedTags;
 				bestMatchWeight = matchWeight;
-				bestUrgencyFactor = urgencyFactor;
 			}
 		}
 
-		if (bestCampaign == null) {
+		if (bestWindow == null) {
 			return null;
 		}
 
+		FestiveCampaign campaign = bestWindow.campaign();
 		MatchedCampaignSnapshot snapshot = new MatchedCampaignSnapshot();
-		snapshot.setCampaignId(bestCampaign.getId());
-		snapshot.setCampaignName(bestCampaign.getCampaignName());
+		snapshot.setCampaignId(campaign.getId());
+		snapshot.setCampaignName(campaign.getCampaignName());
 		snapshot.setMatchedTags(new ArrayList<>(bestMatchedTags));
 		snapshot.setMatchWeight(bestMatchWeight);
-		snapshot.setUrgencyFactor(bestUrgencyFactor);
+		snapshot.setUrgencyFactor(bestUrgency.urgencyFactor());
+		snapshot.setCategory(campaign.getCategory().name());
+		snapshot.setCycleYear(bestWindow.occurrence().cycleYear());
+		snapshot.setOccurrenceStartDate(bestWindow.occurrence().startDate().toString());
+		snapshot.setOccurrenceEndDate(bestWindow.occurrence().endDate().toString());
+		snapshot.setOccurrenceOverridden(bestWindow.occurrence().overridden());
+		snapshot.setRegions(new ArrayList<>(bestWindow.regions()));
+		snapshot.setRegionCoverageRatio(bestUrgency.regionCoverage());
+		snapshot.setTimeFactor(bestUrgency.timeFactor());
+		snapshot.setWeatherConfidenceFactor(bestUrgency.weatherConfidenceFactor());
 		return snapshot;
 	}
 
-	/**
-	 * Urgency Factor（時間緊迫係數）：
-	 * - ACTIVE：固定1.0
-	 * - PREPARING＋節日型(FESTIVAL)：線性遞增 1－(剩餘天數/準備天數)
-	 * - PREPARING＋季節型(SEASON)：固定0.2（不遞增）
-	 * 其餘狀態（UPCOMING／EXPIRED）理論上不會進到這裡（呼叫端已用
-	 * findByCampaignStatusIn(PREPARING, ACTIVE)過濾），此處僅防禦性回傳0。
-	 */
-	private BigDecimal calculateUrgencyFactor(FestiveCampaign campaign) {
-		if (campaign.getCampaignStatus() == FestiveCampaignStatus.ACTIVE) {
-			return BigDecimal.ONE;
-		}
-		if (campaign.getCampaignStatus() != FestiveCampaignStatus.PREPARING) {
-			return BigDecimal.ZERO;
-		}
-		if (campaign.getCategory() == FestiveCategory.SEASON) {
-			return SEASON_PREPARING_URGENCY_FACTOR;
-		}
-		if (campaign.getCategory() == FestiveCategory.WEATHER) {
-			return calculateWeatherUrgencyFactor(campaign);
-		}
-
-		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
-				? campaign.getPreparationLeadDays()
-				: 1;
-		long remainingDays = Math.max(ChronoUnit.DAYS.between(LocalDate.now(), campaign.getStartDate()), 0);
-
-		BigDecimal ratio = BigDecimal.valueOf(remainingDays).divide(BigDecimal.valueOf(leadDays), 4,
-				RoundingMode.HALF_UP);
-		BigDecimal factor = BigDecimal.ONE.subtract(ratio);
-
-		if (factor.compareTo(BigDecimal.ZERO) < 0) {
-			factor = BigDecimal.ZERO;
-		}
-		if (factor.compareTo(BigDecimal.ONE) > 0) {
-			factor = BigDecimal.ONE;
-		}
-		return factor.setScale(2, RoundingMode.HALF_UP);
-	}
-
-	/**
-	 * WEATHER 類別的 urgencyFactor：跟 FESTIVAL 一樣採線性遞增（距開始日越近、
-	 * 基礎值越高），但額外乘上 weatherConfidence 係數——這是 FESTIVAL／SEASON
-	 * 結構上不存在的維度，節慶日期是確定的，天氣預報離現在越遠越不可信，
-	 * 不能用同一條公式直接套用（見規劃討論的差異說明）。
-	 *
-	 * 2026-09-23新增第三個乘數 regionCoverageRatio（地域性影響評分方案D）：
-	 * 這筆天氣檔期命中的區域，佔全公司業務的占比越低，加成力道越打折——
-	 * 例如只有東部單一區域命中、且東部占比只設定10%，即使matchWeight／
-	 * weatherConfidence都拉滿，最終boost也只會拿到一成。regionCoverageRatio
-	 * 是WeatherCampaignSyncService同步當下凍結寫入的值（見FestiveCampaign
-	 * 類別欄位註解），這裡單純讀取、不重算。
-	 *
-	 * weatherConfidence／regionCoverageRatio 為 null（理論上不該發生：
-	 * WeatherCampaignSyncService upsert WEATHER 檔期時一定會帶這兩個值）時，
-	 * 保守處理成 LOW／0，不讓一筆資料異常的天氣檔期意外拿到滿額加成。
-	 */
-	private BigDecimal calculateWeatherUrgencyFactor(FestiveCampaign campaign) {
-		long leadDays = campaign.getPreparationLeadDays() != null && campaign.getPreparationLeadDays() > 0
-				? campaign.getPreparationLeadDays()
-				: 1;
-		long remainingDays = Math.max(ChronoUnit.DAYS.between(LocalDate.now(), campaign.getStartDate()), 0);
-
-		BigDecimal ratio = BigDecimal.valueOf(remainingDays).divide(BigDecimal.valueOf(leadDays), 4,
-				RoundingMode.HALF_UP);
-		BigDecimal baseFactor = BigDecimal.ONE.subtract(ratio);
-		if (baseFactor.compareTo(BigDecimal.ZERO) < 0) {
-			baseFactor = BigDecimal.ZERO;
-		}
-		if (baseFactor.compareTo(BigDecimal.ONE) > 0) {
-			baseFactor = BigDecimal.ONE;
-		}
-
-		WeatherForecastConfidence confidence = campaign.getWeatherConfidence() != null
-				? campaign.getWeatherConfidence()
-				: WeatherForecastConfidence.LOW;
-		BigDecimal regionCoverageRatio = campaign.getRegionCoverageRatio() != null
-				? campaign.getRegionCoverageRatio()
-				: BigDecimal.ZERO;
-
-		return baseFactor.multiply(confidence.getConfidenceFactor()).multiply(regionCoverageRatio)
-				.setScale(2, RoundingMode.HALF_UP);
+	/** 急迫係數與其三個乘數，公式見 CampaignUrgencyCalculator（修正 B2）。 */
+	private CampaignUrgencyCalculator.Result calculateUrgencyFactor(ActiveCampaignWindow window, LocalDate today) {
+		FestiveCampaign campaign = window.campaign();
+		return CampaignUrgencyCalculator.calculate(campaign.getCategory(), window.status(),
+				campaign.getPreparationLeadDays(), window.occurrence().startDate(), today,
+				campaign.getWeatherConfidence(), window.regionCoverage());
 	}
 
 	/**
@@ -660,12 +608,122 @@ public class ScoringService {
 
 		FestivalBoostResponse response = new FestivalBoostResponse();
 		response.setDataSource("LIVE");
-		response.setMatchedCampaign(buildMatchedCampaignSnapshot(product));
+
+		// 命中明細（含當下的 urgencyFactor）本來就是即時重算，維持不變。
+		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
+		response.setMatchedCampaign(campaignSnapshot);
+
+		// 2026-09-24 修正（Bug B）：festivalBoost／finalScore 原本讀 product_evaluations 裡「上次
+		// calculateEvaluation() 寫入時」的值，但 matchedCampaign 是即時重算。product_evaluations
+		// 沒有排程重算（只在商品新增／編輯、趨勢同步時更新），PREPARING／WEATHER 檔期的
+		// urgencyFactor 隨日期遞增、或檔期轉 ACTIVE 後，就會出現「urgencyFactor 100%、命中核心標籤，
+		// festivalBoost 卻不是 matchWeight×urgencyFactor×5」的矛盾（實例：顯示 4.44，應為 5.00）。
+		// 改為用同一份即時 campaignSnapshot 算 festivalBoost；finalScore＝已存的 totalScore
+		// （加權分數，不受時間漂移影響）＋這個即時 festivalBoost，整包回傳值都基於同一時間點。
+		// 只影響本次 Response，不回寫 product_evaluations；列表排序／Top10 用的仍是已存值，
+		// 那是排程重算的議題（獨立 backlog），不在本次範圍。
+		BigDecimal freshFestivalBoost = calculateFestivalBoost(campaignSnapshot);
+		response.setFestivalBoost(freshFestivalBoost);
 		getCurrentEvaluation(productId).ifPresent(evaluation -> {
-			response.setFestivalBoost(evaluation.getFestivalBoost());
-			response.setFinalScore(evaluation.getFinalScore());
+			// totalScore 為 null（資料完整度未達門檻、從未成功計分）時 finalScore 維持 null，
+			// 前端顯示「—」，不用 0 誤導。
+			if (evaluation.getTotalScore() != null) {
+				response.setFinalScore(evaluation.getTotalScore().add(freshFestivalBoost)
+						.setScale(2, RoundingMode.HALF_UP));
+			}
 		});
 		return response;
+	}
+
+	/**
+	 * Festival Boost＝matchWeight × urgencyFactor × BOOST_CAP（未命中＝0）。
+	 * calculateEvaluation()（寫入 product_evaluations）、getFestivalBoostDetail()（LIVE 明細）與
+	 * ReviewService.submitReview()（審核快照）共用這一個公式，避免各寫一份、日後只改到其中一邊
+	 * 又出現數字對不上。
+	 */
+	public static BigDecimal calculateFestivalBoost(MatchedCampaignSnapshot campaignSnapshot) {
+		if (campaignSnapshot == null) {
+			return BigDecimal.ZERO;
+		}
+		return campaignSnapshot.getMatchWeight().multiply(campaignSnapshot.getUrgencyFactor()).multiply(BOOST_CAP)
+				.setScale(2, RoundingMode.HALF_UP);
+	}
+
+	// ============================================================
+	// 節慶加成每日重算（2026-09-24，方案 2）
+	// ============================================================
+
+	/**
+	 * 只重算 product_evaluations 裡「會隨日期與檔期設定變動」的三欄：festival_boost、
+	 * matched_campaign_id、final_score（＝已存 total_score＋新加成）。加權總分等其餘欄位不動，
+	 * calculated_at 也不動（它代表完整評分的計算時間）。
+	 *
+	 * <b>為什麼需要：</b>urgencyFactor 以「天」為單位隨檔期接近而上升、檔期狀態會轉換，但
+	 * product_evaluations 原本只在商品新增／編輯、趨勢同步時才重算，詳情頁、清單、Top10（資料庫
+	 * 依 final_score 排序）、審核頁讀到的都是舊加成，與即時算出的命中明細對不上（實例：急迫係數
+	 * 100%、核心標籤，加成卻顯示 4.44 而非 5.00）。
+	 *
+	 * <b>範圍：</b>尚未核准的商品（已核准商品一律讀審核快照）；total_score 為 null（從未達資料
+	 * 完整度門檻）的跳過，沒有分數可加。未達門檻但保留舊分數的商品照樣更新加成，
+	 * 讓同一個舊 total_score 搭配的加成與畫面上的即時命中明細一致。
+	 *
+	 * <b>觸發：</b>每天 05:10（台灣時間），接在 05:00 天氣同步之後；另外在天氣同步、節慶檔期
+	 * 新增／編輯／切換狀態／逐年覆寫、地域占比調整後，由 FestivalBoostRefreshListener 在交易
+	 * 提交後立即觸發（見 FestiveCampaignsChangedEvent）。
+	 *
+	 * REQUIRES_NEW：事件監聽在原交易提交後（AFTER_COMMIT）執行，此時原交易資源仍綁定在執行緒上，
+	 * 用 REQUIRED 會加入一個已提交的交易而寫不進去，必須開新交易。
+	 *
+	 * @return 實際有變動而寫回的筆數
+	 */
+	@Scheduled(cron = "0 10 5 * * *", zone = "Asia/Taipei")
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int refreshFestivalBoosts() {
+		List<Product> products = productRepository.findByReviewStatusNot(ProductReviewStatus.APPROVED);
+		if (products.isEmpty()) {
+			return 0;
+		}
+		Map<Long, ProductEvaluation> evaluationsByProductId = productEvaluationRepository
+				.findByProductIdIn(products.stream().map(Product::getId).toList()).stream()
+				.collect(Collectors.toMap(ProductEvaluation::getProductId, evaluation -> evaluation));
+
+		// 候選檔期與其標籤整批只查一次，所有商品共用同一個「今天」，結果彼此一致。
+		LocalDate today = LocalDate.now(BusinessTimeZone.TAIPEI);
+		List<ActiveCampaignWindow> candidates = festiveCampaignRuleService.findLiveWindows(today);
+		Map<Long, List<FestiveCampaignTag>> tagsByCampaign = candidates.isEmpty() ? Map.of()
+				: loadCampaignTags(candidates);
+
+		List<ProductEvaluation> changed = new ArrayList<>();
+		for (Product product : products) {
+			ProductEvaluation evaluation = evaluationsByProductId.get(product.getId());
+			if (evaluation == null || evaluation.getTotalScore() == null) {
+				continue;
+			}
+			Set<String> productTags = splitTags(product.getCampaignTags());
+			MatchedCampaignSnapshot snapshot = productTags.isEmpty() || candidates.isEmpty() ? null
+					: matchCampaign(productTags, candidates, tagsByCampaign, today);
+			BigDecimal festivalBoost = calculateFestivalBoost(snapshot);
+			Long matchedCampaignId = snapshot != null ? snapshot.getCampaignId() : null;
+			BigDecimal finalScore = evaluation.getTotalScore().add(festivalBoost).setScale(2, RoundingMode.HALF_UP);
+
+			if (sameValue(evaluation.getFestivalBoost(), festivalBoost)
+					&& sameValue(evaluation.getFinalScore(), finalScore)
+					&& Objects.equals(evaluation.getMatchedCampaignId(), matchedCampaignId)) {
+				continue; // 沒變就不寫，避免每天整批無意義 UPDATE
+			}
+			evaluation.setFestivalBoost(festivalBoost);
+			evaluation.setMatchedCampaignId(matchedCampaignId);
+			evaluation.setFinalScore(finalScore);
+			changed.add(evaluation);
+		}
+		productEvaluationRepository.saveAll(changed);
+		log.info("節慶加成重算完成：檢查 {} 個未核准商品，更新 {} 筆", products.size(), changed.size());
+		return changed.size();
+	}
+
+	/** BigDecimal 以數值比較（4.4 與 4.40 視為相同），null 只等於 null。 */
+	private static boolean sameValue(BigDecimal stored, BigDecimal computed) {
+		return stored == null ? computed == null : computed != null && stored.compareTo(computed) == 0;
 	}
 
 	// ============================================================
@@ -746,10 +804,7 @@ public class ScoringService {
 		BigDecimal forecastScore = groupScore(FactorCode.FORECAST_GROUP, factorScores, weights);
 
 		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
-		BigDecimal festivalBoost = campaignSnapshot != null
-				? campaignSnapshot.getMatchWeight().multiply(campaignSnapshot.getUrgencyFactor()).multiply(BOOST_CAP)
-						.setScale(2, RoundingMode.HALF_UP)
-				: BigDecimal.ZERO;
+		BigDecimal festivalBoost = calculateFestivalBoost(campaignSnapshot);
 
 		evaluation.setBusinessScore(businessScore);
 		evaluation.setAudienceScore(audienceScore);

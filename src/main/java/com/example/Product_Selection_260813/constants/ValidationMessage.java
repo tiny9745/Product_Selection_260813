@@ -48,6 +48,26 @@ public class ValidationMessage {
 	public static final String CAMPAIGN_LEAD_DAYS_NEGATIVE = "準備期天數不可為負數";
 	public static final String CAMPAIGN_CODE_TOO_LONG = "檔期代碼長度不可超過50字元";
 	public static final String CAMPAIGN_NAME_TOO_LONG = "檔期名稱長度不可超過100字元";
+	// 檔期規則改版（V21，2026-09-24）：訊息文字與前端表單驗證一致，修改時兩邊一起改
+	public static final String CAMPAIGN_WEATHER_NOT_EDITABLE = "天氣型檔期由系統依天氣預報自動產生，不可手動建立或修改";
+	public static final String CAMPAIGN_CODE_FORMAT_INVALID = "檔期代碼須為大寫英數與底線，且不可包含年份";
+	public static final String CAMPAIGN_RULE_TYPE_REQUIRED = "請選擇日期規則類型";
+	public static final String CAMPAIGN_SEASON_RULE_TYPE_INVALID = "季節型檔期只能使用固定國曆日期";
+	public static final String CAMPAIGN_RULE_DATE_INVALID = "日期不存在";
+	public static final String CAMPAIGN_RULE_NTH_WEEKDAY_INVALID = "請選擇第 1–4 個或最後一個星期幾";
+	public static final String CAMPAIGN_RULE_LUNAR_DATE_INVALID = "農曆日期不存在";
+	public static final String CAMPAIGN_RULE_SOLAR_TERM_REQUIRED = "請選擇節氣";
+	public static final String CAMPAIGN_RULE_OFFSET_INVALID = "偏移天數須介於 -30 與 30 之間";
+	public static final String CAMPAIGN_DURATION_INVALID = "節慶持續天數須介於 1 與 60 之間";
+	public static final String CAMPAIGN_SEASON_END_REQUIRED = "請設定季節結束月日";
+	public static final String CAMPAIGN_LEAD_DAYS_TOO_LARGE = "準備期天數不可超過180天";
+	public static final String CAMPAIGN_REGION_INVALID = "區域代碼無效";
+	/** 2026-09-24：節慶不帶地域屬性，一律視為全國；只有季節型可以指定受影響區域。 */
+	public static final String CAMPAIGN_REGION_SEASON_ONLY = "影響地域僅適用季節型檔期，節慶型一律視為全國";
+	/** 2026-09-24：季節型的開始日可直接指定，偏移天數只對節慶型有意義。 */
+	public static final String CAMPAIGN_OFFSET_FESTIVAL_ONLY = "偏移天數僅適用節慶型檔期";
+	public static final String CAMPAIGN_HOLIDAY_RULE_FESTIVAL_ONLY = "補假與連假設定僅適用節慶型";
+	public static final String CAMPAIGN_OVERRIDE_RANGE_INVALID = "覆寫日期區間無效";
 	public static final String AUDIENCE_AGE_RANGE_INVALID = "最小年齡不可大於最大年齡";
 	public static final String AUDIENCE_AGE_MIN_RANGE = "最小年齡須介於0至150之間";
 	public static final String AUDIENCE_AGE_MAX_RANGE = "最大年齡須介於0至150之間";
