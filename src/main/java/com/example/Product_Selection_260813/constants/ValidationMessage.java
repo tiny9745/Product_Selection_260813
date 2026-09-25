@@ -118,6 +118,10 @@ public class ValidationMessage {
 	// Review（規格驗證）
 	public static final String REVIEW_PRODUCT_ID_NULL = "商品編號不可為空";
 	public static final String REVIEW_STATUS_NULL = "審核結果不可為空";
+	// 決策紀錄查詢（GET /api/reviews/decision-records）
+	public static final String REVIEW_RECORD_DATE_RANGE_INVALID = "審核日期起日不可晚於迄日";
+	public static final String REVIEW_RECORD_SORT_UNSUPPORTED = "決策紀錄僅支援依審核時間、送審次數、最終分數排序：";
+	public static final String REVIEW_RECORD_SORT_MULTIPLE = "決策紀錄一次只能指定一個排序欄位";
 	
 	// User（帳號管理）
 	public static final String USER_USERNAME_BLANK = "登入帳號不可為空";

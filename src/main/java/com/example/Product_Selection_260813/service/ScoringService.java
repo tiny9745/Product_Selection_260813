@@ -667,16 +667,21 @@ public class ScoringService {
 	 * 完整度門檻）的跳過，沒有分數可加。未達門檻但保留舊分數的商品照樣更新加成，
 	 * 讓同一個舊 total_score 搭配的加成與畫面上的即時命中明細一致。
 	 *
-	 * <b>觸發：</b>每天 05:10（台灣時間），接在 05:00 天氣同步之後；另外在天氣同步、節慶檔期
-	 * 新增／編輯／切換狀態／逐年覆寫、地域占比調整後，由 FestivalBoostRefreshListener 在交易
-	 * 提交後立即觸發（見 FestiveCampaignsChangedEvent）。
+	 * <b>觸發：</b>
+	 * <ul>
+	 * <li>每天 00:05（台灣時間）：急迫係數以「天」為單位變化，換日後立即更新（2026-09-24 由 05:10
+	 * 改為 00:05，消除 00:00～05:10 顯示前一天加成的空窗；05:00 天氣同步本身會另外觸發）。</li>
+	 * <li>應用程式啟動完成時：部署或重啟後不必等到下一次排程（FestivalBoostRefreshListener）。</li>
+	 * <li>天氣同步、節慶檔期新增／編輯／切換狀態／逐年覆寫、地域占比調整後，由
+	 * FestivalBoostRefreshListener 在交易提交後立即觸發（見 FestiveCampaignsChangedEvent）。</li>
+	 * </ul>
 	 *
 	 * REQUIRES_NEW：事件監聽在原交易提交後（AFTER_COMMIT）執行，此時原交易資源仍綁定在執行緒上，
 	 * 用 REQUIRED 會加入一個已提交的交易而寫不進去，必須開新交易。
 	 *
 	 * @return 實際有變動而寫回的筆數
 	 */
-	@Scheduled(cron = "0 10 5 * * *", zone = "Asia/Taipei")
+	@Scheduled(cron = "0 5 0 * * *", zone = "Asia/Taipei")
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public int refreshFestivalBoosts() {
 		List<Product> products = productRepository.findByReviewStatusNot(ProductReviewStatus.APPROVED);
@@ -719,6 +724,36 @@ public class ScoringService {
 		productEvaluationRepository.saveAll(changed);
 		log.info("節慶加成重算完成：檢查 {} 個未核准商品，更新 {} 筆", products.size(), changed.size());
 		return changed.size();
+	}
+
+	/**
+	 * 全量重算尚未核准商品的評估（2026-09-24）：逐筆呼叫 calculateEvaluation(productId, null)，
+	 * 模式與權重依「目前」設定重新解析，加權總分、節慶加成、最終分數一起更新。
+	 *
+	 * 觸發：評分設定變更後由 EvaluationRecalculationListener 呼叫（見 EvaluationSettingsChangedEvent）。
+	 * 已核准商品一律讀審核快照（weight_snapshot），不在範圍內。
+	 *
+	 * 單筆失敗（例如資料異常造成的 IllegalArgumentException）只記 log 並繼續，不讓一件商品擋住
+	 * 其他商品的重算；持久層例外會使整個交易回滾，由監聽器記錄。
+	 * REQUIRES_NEW 的原因同 refreshFestivalBoosts()。calculateEvaluation() 在此為同類別內部呼叫，
+	 * 不經代理，直接加入這個新交易。
+	 *
+	 * @return 成功重算的筆數
+	 */
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public int recalculatePendingEvaluations() {
+		List<Product> products = productRepository.findByReviewStatusNot(ProductReviewStatus.APPROVED);
+		int recalculated = 0;
+		for (Product product : products) {
+			try {
+				calculateEvaluation(product.getId(), null);
+				recalculated++;
+			} catch (IllegalArgumentException | IllegalStateException e) {
+				log.warn("商品 {} 全量重算失敗，保留原評估：{}", product.getId(), e.getMessage());
+			}
+		}
+		log.info("全量重算完成：{} 個未核准商品，成功 {} 筆", products.size(), recalculated);
+		return recalculated;
 	}
 
 	/** BigDecimal 以數值比較（4.4 與 4.40 視為相同），null 只等於 null。 */

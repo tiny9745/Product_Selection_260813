@@ -226,6 +226,15 @@ public class SettingsService {
 		eventPublisher.publishEvent(new FestiveCampaignsChangedEvent(reason));
 	}
 
+	/**
+	 * 評分設定（模式、權重、目標區間、自訂因子、核心客群、品類、演算法參數）變更後，
+	 * 交易提交後由 EvaluationRecalculationListener 全量重算尚未核准商品的評估（2026-09-24）。
+	 * 驗證失敗而回滾時不會觸發（AFTER_COMMIT）。
+	 */
+	private void publishEvaluationSettingsChanged(String reason) {
+		eventPublisher.publishEvent(new EvaluationSettingsChangedEvent(reason));
+	}
+
 	// ========================= 評估模式 =========================
 
 	/**
@@ -264,8 +273,9 @@ public class SettingsService {
 	 * 只送部分欄位的話，後端得把送來的值與資料庫既有值混合才能驗證，
 	 * 而使用者在畫面上算出的加總與後端實際驗的可能不同。
 	 *
-	 * 這裡不觸發既有商品重算——重算範圍可能很大，應由呼叫端決定時機。
-	 * 而且已完成審核的商品有 weight_snapshot 保護，本來就不受影響。
+	 * 2026-09-24：寫入後發布 EvaluationSettingsChangedEvent，交易提交後全量重算尚未核准商品
+	 * （原本「不觸發重算、由呼叫端決定時機」，但沒有任何呼叫端觸發，品項清單的分數會停在舊權重）。
+	 * 已完成審核的商品有 weight_snapshot 保護，不受影響。
 	 */
 	@Transactional
 	public WeightSnapshot updateEvaluationModeFactors(Long evaluationModeId,
@@ -310,6 +320,7 @@ public class SettingsService {
 		evaluationFactorRepository.saveAll(factors);
 		log.info("自訂模式權重已更新：模式 {}，操作者 {}", evaluationModeId, username);
 
+		publishEvaluationSettingsChanged("調整自訂模式權重 modeId=" + evaluationModeId);
 		return scoringService.buildWeightSnapshot(evaluationModeId);
 	}
 
@@ -370,6 +381,7 @@ public class SettingsService {
 
 		log.info("目標區間已新增：productTypeId={}，factorCode={}，操作者={}",
 				request.getProductTypeId(), request.getFactorCode(), username);
+		publishEvaluationSettingsChanged("新增品類目標區間");
 		return ProductTypeScoreBandResponse.from(band);
 	}
 
@@ -414,6 +426,7 @@ public class SettingsService {
 		productTypeScoreBandRepository.save(band);
 
 		log.info("目標區間已更新：id={}，模式={}，操作者={}", bandId, mode, username);
+		publishEvaluationSettingsChanged("編輯品類目標區間");
 		return ProductTypeScoreBandResponse.from(band);
 	}
 
@@ -607,6 +620,7 @@ public class SettingsService {
 
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
 		log.info("自訂因子已新增：{}，策略 {}，操作者 {}", factorCode, request.getStrategyCode(), username);
+		publishEvaluationSettingsChanged("新增自訂計分因子");
 		return FactorDefinitionResponse.from(saved);
 	}
 
@@ -668,6 +682,7 @@ public class SettingsService {
 		FactorDefinition saved = factorDefinitionRepository.save(updated);
 		log.info("自訂因子已編輯：{}（新版本id={}，取代舊版本id={}），操作者 {}", saved.getFactorCode(), saved.getId(),
 				old.getId(), username);
+		publishEvaluationSettingsChanged("編輯自訂計分因子 id=" + id);
 		return FactorDefinitionResponse.from(saved);
 	}
 
@@ -744,6 +759,7 @@ public class SettingsService {
 			evaluationFactorRepository.save(f);
 		});
 
+		publishEvaluationSettingsChanged("停用自訂計分因子 id=" + id);
 		return FactorDefinitionResponse.from(saved);
 	}
 
@@ -768,6 +784,7 @@ public class SettingsService {
 		definition.setIsActive(true);
 		definition.setUpdatedBy(resolveUserId(username));
 		FactorDefinition saved = factorDefinitionRepository.save(definition);
+		publishEvaluationSettingsChanged("啟用自訂計分因子 id=" + id);
 		return FactorDefinitionResponse.from(saved);
 	}
 
@@ -1100,6 +1117,8 @@ public class SettingsService {
 	 * 只能切換成既有3套模式其中之一，不能直接修改既有模式的固定權重；
 	 * 寫入前需驗證目標evaluation_mode_id存在，再UPDATE system_settings的對應值
 	 * （見企劃書四-14設計取捨）。
+	 * 2026-09-24：切換後全量重算尚未核准商品（EvaluationSettingsChangedEvent），否則分數要等到
+	 * 商品被編輯才會改用新模式。
 	 */
 	@Transactional
 	public EvaluationModeResponse switchCurrentEvaluationMode(SwitchEvaluationModeRequest request, String username) {
@@ -1117,6 +1136,7 @@ public class SettingsService {
 		// 誤以為必須手動維護這個欄位。
 		systemSettingRepository.save(setting);
 
+		publishEvaluationSettingsChanged("切換目前生效模式 modeId=" + request.getEvaluationModeId());
 		return EvaluationModeResponse.from(targetMode);
 	}
 
@@ -1483,6 +1503,7 @@ public class SettingsService {
 		profile.setPreferenceDescription(request.getPreferenceDescription());
 		profile.setKeywords(request.getKeywords());
 		AudienceProfile saved = audienceProfileRepository.save(profile);
+		publishEvaluationSettingsChanged("核心客群設定");
 		return AudienceProfileResponse.from(saved);
 	}
 
@@ -1575,6 +1596,7 @@ public class SettingsService {
 		type.setName(request.getName());
 		type.setDescription(request.getDescription());
 		ProductType saved = productTypeRepository.save(type);
+		publishEvaluationSettingsChanged("品類設定 id=" + id);
 		return ProductTypeResponse.from(saved);
 	}
 
@@ -1927,6 +1949,7 @@ public class SettingsService {
 
 		String updatedByName = appUserRepository.findById(saved.getUpdatedBy())
 				.map(AppUser::getName).orElse(null);
+		publishEvaluationSettingsChanged("演算法參數");
 		return SystemSettingResponse.from(meta, saved.getSettingValue(), saved.getUpdatedAt(), updatedByName);
 	}
 
