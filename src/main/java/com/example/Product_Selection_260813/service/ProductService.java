@@ -300,8 +300,9 @@ public class ProductService {
 
 		if (latest.getPopularityScore() != null
 				&& latest.getPopularityScore().compareTo(AI_SUGGEST_POPULARITY_THRESHOLD) > 0) {
-			dto.setSuggestionReason(String.format("最新熱度分數 %s 分，超過 %s 分門檻。",
-					latest.getPopularityScore().toPlainString(), AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString()));
+			dto.setSuggestionReason(String.format("最新熱度分數 %s 分%s，超過 %s 分門檻。",
+					latest.getPopularityScore().toPlainString(), describeTrendSource(latest.getSource()),
+					AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString()));
 			return;
 		}
 
@@ -309,7 +310,8 @@ public class ProductService {
 				&& recentSignals.stream()
 						.limit(AI_SUGGEST_CONSECUTIVE_UP_DAYS)
 						.allMatch(signal -> signal.getTrendDirection() == com.example.Product_Selection_260813.enums.TrendSignalTrendDirection.UP)) {
-			dto.setSuggestionReason(String.format("連續 %d 天呈上升趨勢。", AI_SUGGEST_CONSECUTIVE_UP_DAYS));
+			dto.setSuggestionReason(String.format("連續 %d 天呈上升趨勢%s。", AI_SUGGEST_CONSECUTIVE_UP_DAYS,
+					describeTrendSource(latest.getSource())));
 			return;
 		}
 
@@ -318,6 +320,20 @@ public class ProductService {
 		// 改過但商品狀態沒有重新計算過），誠實顯示「無法重建理由」，
 		// 不要編造一個看似合理但其實是猜的說法。
 		dto.setSuggestionReason("（依當時的判定條件標記為建議，目前重新計算對不上任何條件，可能是判定邏輯之後有調整過）");
+	}
+
+	/**
+	 * 建議原因後面標註資料來源：讓人看得出是依 PTT 真實討論量，還是 PTT 取不到時的
+	 * 模擬資料建議的——兩者可信度不同，不能混在同一句話裡看不出差別。
+	 */
+	private static String describeTrendSource(String source) {
+		if ("PTT".equals(source)) {
+			return "（PTT 討論量）";
+		}
+		if ("SIMULATED".equals(source)) {
+			return "（模擬資料，PTT 當時無法取得）";
+		}
+		return source == null ? "" : "（" + source + "）";
 	}
 
 	/**

@@ -100,8 +100,17 @@ public class TrendService {
 
 		syncProduct(product);
 
-		return new TransactionTemplate(transactionManager)
-				.execute(status -> scoringService.buildTrendSnapshot(productId));
+		return scoringService.buildTrendSnapshot(productId);
+	}
+
+	/**
+	 * GET /api/products/{id}/trend：最新一筆趨勢資料，不觸發爬蟲；尚無資料回傳 null。
+	 */
+	public TrendSnapshot getLatestTrend(Long productId) {
+		if (!productRepository.existsById(productId)) {
+			throw new IllegalArgumentException("商品不存在");
+		}
+		return scoringService.buildTrendSnapshot(productId);
 	}
 
 	/**
