@@ -1,11 +1,13 @@
 package com.example.Product_Selection_260813.controller;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -85,15 +87,25 @@ public class ReviewController {
 
 	/**
 	 * GET /api/reviews/decision-records：跨商品的審核紀錄彙總查詢頁。
-	 * reviewResult 可選，不帶代表查全部（APPROVED／REJECTED）。
+	 * 以下參數皆選填，不帶代表不篩選（2026-09-24 新增後三項，既有呼叫端不受影響）：
+	 * - reviewResult：APPROVED／REJECTED
+	 * - keyword：比對審核當下的商品名稱（product_snapshot.name）
+	 * - reviewedFrom／reviewedTo：審核日期 yyyy-MM-dd，兩端皆含當天
+	 * - sort：reviewedAt（預設 desc）／submissionCount／finalScore，一次一個欄位
 	 */
 	@PreAuthorize("hasRole('MANAGER')")
 	@GetMapping("/api/reviews/decision-records")
 	public ResponseEntity<ApiResponse<Page<ReviewRecordResponse>>> getDecisionRecords(
 			@RequestParam(value = "reviewResult", required = false)
 			com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus reviewResult,
+			@RequestParam(value = "keyword", required = false) String keyword,
+			@RequestParam(value = "reviewedFrom", required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reviewedFrom,
+			@RequestParam(value = "reviewedTo", required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate reviewedTo,
 			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ReviewRecordResponse> result = reviewService.getDecisionRecords(reviewResult, pageable);
+		Page<ReviewRecordResponse> result = reviewService.getDecisionRecords(reviewResult, keyword, reviewedFrom,
+				reviewedTo, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

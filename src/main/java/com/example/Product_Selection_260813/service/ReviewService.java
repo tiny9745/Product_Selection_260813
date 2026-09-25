@@ -1,6 +1,8 @@
 package com.example.Product_Selection_260813.service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.LinkedHashSet;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -14,7 +16,9 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -231,11 +235,30 @@ public class ReviewService {
 	 * searchProducts()「null=不篩選」的既有慣例）。修正前這支端點完全不接受
 	 * 篩選參數，前端的結果篩選只能對「已經抓回來的那一頁」做，資料量一多、 篩選條件剛好不在那一頁時就會誤報「找不到」，即使資料庫裡其實有。
 	 */
+	/**
+	 * 2026-09-24：新增 keyword／reviewedFrom／reviewedTo 篩選與伺服器端排序。
+	 * 原本排序、搜尋、日期都只能在前端對當頁 20 筆做，跨頁結果不一致。
+	 * 前端傳入的 Pageable 排序只取欄位與方向，經白名單轉成 sortKey／sortDir 交給
+	 * ReviewRecordRepository.searchDecisionRecords() 的 ORDER BY CASE；
+	 * 送進 Repository 的 Pageable 一律是 unsorted（見該方法註解）。
+	 */
 	@Transactional(readOnly = true)
-	public Page<ReviewRecordResponse> getDecisionRecords(ReviewRecordReviewStatus reviewResult, Pageable pageable) {
-		Page<ReviewRecord> page = reviewResult != null
-				? reviewRecordRepository.findByReviewStatusOrderByReviewedAtDesc(reviewResult, pageable)
-				: reviewRecordRepository.findAllByOrderByReviewedAtDesc(pageable);
+	public Page<ReviewRecordResponse> getDecisionRecords(ReviewRecordReviewStatus reviewResult, String keyword,
+			LocalDate reviewedFrom, LocalDate reviewedTo, Pageable pageable) {
+		if (reviewedFrom != null && reviewedTo != null && reviewedFrom.isAfter(reviewedTo)) {
+			throw new IllegalArgumentException(ValidationMessage.REVIEW_RECORD_DATE_RANGE_INVALID);
+		}
+		Sort.Order order = resolveDecisionRecordSort(pageable.getSort());
+		Page<ReviewRecord> page = reviewRecordRepository.searchDecisionRecords(
+				reviewResult == null ? null : reviewResult.name(),
+				reviewedFrom == null ? null : reviewedFrom.atStartOfDay(),
+				// 迄日含當天：轉成「隔天 00:00」的開區間上界，不用 23:59:59，
+				// 才不會漏掉秒數以下的時間。
+				reviewedTo == null ? null : reviewedTo.plusDays(1).atStartOfDay(),
+				toLikeKeyword(keyword),
+				order.getProperty(),
+				order.getDirection().name(),
+				PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()));
 		// ⚠️ 2026-09-17修正：reviewerId 只是編號，前端「決策紀錄」表格的
 		// 「審核人」欄位一直顯示「—」——不是查無資料，是這裡從來沒有把
 		// id 解成姓名（見 ReviewRecordResponse 類別註解「reviewerId
@@ -245,6 +268,51 @@ public class ReviewService {
 		return page.map(record -> ReviewRecordResponse.from(record, getRiskOptionIds(record.getId())).withReviewerName(
 				record.getReviewerId() == null ? null : reviewerNameById.get(record.getReviewerId()))
 				.withOtherRiskNote(getOtherRiskNote(record.getId())));
+	}
+
+	/** 決策紀錄可排序欄位：API 參數名稱 → Repository ORDER BY CASE 使用的 sortKey。 */
+	private static final Map<String, String> DECISION_RECORD_SORT_KEYS = Map.of(
+			"reviewedAt", "reviewedAt",
+			"submissionCount", "submissionCount",
+			"finalScore", "finalScore",
+			// 同時接受回應 DTO 上的欄位名稱，呼叫端不用記兩套名字。
+			"finalScoreSnapshot", "finalScore");
+
+	/**
+	 * 白名單驗證決策紀錄排序。未指定時預設審核時間新到舊；指定了白名單以外的
+	 * 欄位（例如商品名稱、審核人）直接 400，而不是默默改用預設排序——
+	 * 默默忽略會讓呼叫端以為排序生效了，正是這次要修掉的問題。
+	 */
+	private Sort.Order resolveDecisionRecordSort(Sort sort) {
+		if (sort == null || sort.isUnsorted()) {
+			return Sort.Order.desc("reviewedAt");
+		}
+		List<Sort.Order> orders = sort.toList();
+		if (orders.size() > 1) {
+			throw new IllegalArgumentException(ValidationMessage.REVIEW_RECORD_SORT_MULTIPLE);
+		}
+		Sort.Order requested = orders.get(0);
+		String sortKey = DECISION_RECORD_SORT_KEYS.get(requested.getProperty());
+		if (sortKey == null) {
+			throw new IllegalArgumentException(
+					ValidationMessage.REVIEW_RECORD_SORT_UNSUPPORTED + requested.getProperty());
+		}
+		return new Sort.Order(requested.getDirection(), sortKey);
+	}
+
+	/**
+	 * 關鍵字前處理：去空白、空字串視為不篩選、轉小寫（SQL 端同樣 LOWER，
+	 * 讓英文商品名大小寫不敏感），並跳脫 LIKE 萬用字元，避免使用者輸入
+	 * 「100%」這類字串時 % 被當成萬用字元。MySQL 預設跳脫字元為反斜線。
+	 */
+	private static String toLikeKeyword(String keyword) {
+		if (keyword == null || keyword.isBlank()) {
+			return null;
+		}
+		return keyword.trim().toLowerCase(Locale.ROOT)
+				.replace("\\", "\\\\")
+				.replace("%", "\\%")
+				.replace("_", "\\_");
 	}
 
 	// ========================= 提交審核 =========================
