@@ -2,13 +2,14 @@ package com.example.Product_Selection_260813.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -22,10 +23,12 @@ import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.service.crawler.MarketBuzzProvider;
 import com.example.Product_Selection_260813.service.crawler.MarketBuzzSignal;
 import com.example.Product_Selection_260813.service.crawler.StubMarketBuzzProvider;
+import com.example.Product_Selection_260813.service.crawler.TrendCrawlerSettings;
 
 /**
- * 對應 API總表 四、評估／趨勢／AI 底下唯一掛在TrendController的端點：
- * POST /api/products/{id}/trend/sync，以及每天 02:00 的全商品熱度同步排程。
+ * 對應 API總表 四、評估／趨勢／AI 底下掛在TrendController的端點：
+ * POST /api/products/{id}/trend/sync、GET /api/products/{id}/trend，以及全商品
+ * 熱度同步的逐一同步邏輯（排程、執行紀錄、手動觸發見 TrendSyncRunService）。
  *
  * 依十二-13分層決議，本類別只負責「同步趨勢資料」本身（寫入trend_signals），
  * 觸發重算的部分透過呼叫ScoringService完成（單向依賴：TrendService → ScoringService，
@@ -85,6 +88,9 @@ public class TrendService {
 	@Autowired
 	private PlatformTransactionManager transactionManager;
 
+	@Autowired
+	private TrendCrawlerSettings trendCrawlerSettings;
+
 	/**
 	 * POST /api/products/{id}/trend/sync：手動同步指定商品的最新市場趨勢／熱門度資料，
 	 * 並觸發評估結果重算。
@@ -97,6 +103,10 @@ public class TrendService {
 	public TrendSnapshot syncTrend(Long productId) {
 		Product product = productRepository.findById(productId)
 				.orElseThrow(() -> new IllegalArgumentException("商品不存在"));
+		if (!trendCrawlerSettings.isPttEnabled()) {
+			// 停用時不改用模擬資料，理由見 TrendCrawlerSettings 類別說明
+			throw new IllegalStateException("PTT 熱度來源目前已停用，請管理者到系統設定啟用後再同步");
+		}
 
 		syncProduct(product);
 
@@ -113,27 +123,36 @@ public class TrendService {
 		return scoringService.buildTrendSnapshot(productId);
 	}
 
-	/**
-	 * 每天 02:00 同步所有未封存商品的 PTT 熱度。
-	 *
-	 * ⚠️ 排程順序不可調換：02:00 本排程 → 03:00 AiSuggestionBatchService →
-	 * 05:00 WeatherCampaignSyncService。AI 建議批次讀的是 trend_signals 最新資料，
-	 * 本排程若晚於 03:00，AI 建議永遠看到前一天的討論量，而且不會有任何錯誤提示。
-	 *
-	 * 單一商品失敗只記錄錯誤，不中斷其他商品。商品數多時請留意總耗時：每個商品約
-	 * 7 個看板 × 1~5 頁 × 1 秒，若接近 1 小時會壓到 03:00 的 AI 建議批次，
-	 * 屆時需要調整看板數或 ptt.request-delay-ms。
-	 */
-	@Scheduled(cron = "0 0 2 * * *")
-	public void syncAllActiveProducts() {
-		List<Product> products = productRepository.findByItemStatus(ProductItemStatus.ACTIVE);
-		log.info("開始每日 PTT 熱度同步：共 {} 個未封存商品", products.size());
-		long startedAt = System.currentTimeMillis();
+	/** 全商品同步的統計結果；processed = 已處理（成功＋備援＋失敗）的商品數。 */
+	public record SyncAllResult(int total, int realCount, int fallbackCount, int failedCount) {
+		public int processed() {
+			return realCount + fallbackCount + failedCount;
+		}
+	}
 
+	/** 全商品同步的對象：所有未封存商品。 */
+	public List<Product> findProductsToSync() {
+		return productRepository.findByItemStatus(ProductItemStatus.ACTIVE);
+	}
+
+	/**
+	 * 依序同步多個商品。排程、執行紀錄、防止重複執行都由 TrendSyncRunService 負責，
+	 * 這裡只做「逐一同步＋計數」。
+	 *
+	 * 單一商品失敗只記錄錯誤，不中斷其他商品。每處理完一個商品前先問 shouldContinue，
+	 * 回傳 false 就提早結束（例如執行途中 PTT 來源被停用），已處理的結果照樣保留。
+	 *
+	 * @param onProgress 每處理完一個商品回報一次目前的統計，供畫面顯示進度
+	 */
+	public SyncAllResult syncAll(List<Product> products, BooleanSupplier shouldContinue,
+			Consumer<SyncAllResult> onProgress) {
 		int realCount = 0;
 		int fallbackCount = 0;
 		int failedCount = 0;
 		for (Product product : products) {
+			if (!shouldContinue.getAsBoolean()) {
+				break;
+			}
 			try {
 				TrendSignal saved = syncProduct(product);
 				if (StubMarketBuzzProvider.SOURCE.equals(saved.getSource())) {
@@ -145,14 +164,9 @@ public class TrendService {
 				failedCount++;
 				log.error("商品 {}（{}）熱度同步失敗，繼續下一個商品", product.getId(), product.getName(), e);
 			}
+			onProgress.accept(new SyncAllResult(products.size(), realCount, fallbackCount, failedCount));
 		}
-
-		long elapsedSeconds = (System.currentTimeMillis() - startedAt) / 1000;
-		log.info("每日 PTT 熱度同步完成：真實資料 {} 筆、改用模擬資料 {} 筆、失敗 {} 筆，耗時 {} 秒",
-				realCount, fallbackCount, failedCount, elapsedSeconds);
-		if (elapsedSeconds > 50 * 60) {
-			log.warn("每日 PTT 熱度同步耗時超過 50 分鐘，可能壓到 03:00 的 AI 建議批次，請減少看板數或請求間隔");
-		}
+		return new SyncAllResult(products.size(), realCount, fallbackCount, failedCount);
 	}
 
 	/** 取得熱度（交易外）→ 寫入 trend_signals 並重算評分（交易內）。 */
