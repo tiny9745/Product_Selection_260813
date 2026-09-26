@@ -194,6 +194,9 @@ public class AuthService {
 		}
 
 		user.setPassword(passwordEncoder.encode(newPassword));
+		// V24：使用者親自換掉管理者給的密碼後解除強制修改。新 token 由 generateToken()
+		// 依這個值決定是否帶 mustChangePassword claim，因此必須在 generateToken() 之前設定。
+		user.setMustChangePassword(false);
 		// 同 login()：遞增版本號並存檔，讓其他裝置上的舊 token 立即失效。
 		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
 		AppUser saved = appUserRepository.save(user);

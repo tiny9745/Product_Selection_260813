@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +20,8 @@ import com.example.Product_Selection_260813.dto.request.ClaimGroupBuyRecordsRequ
 import com.example.Product_Selection_260813.dto.response.GroupBuyImportResult;
 import com.example.Product_Selection_260813.dto.response.GroupBuyRecordClaimCandidateResponse;
 import com.example.Product_Selection_260813.dto.response.GroupBuyRecordResponse;
+import com.example.Product_Selection_260813.enums.UserRole;
+import com.example.Product_Selection_260813.security.AuthenticatedUserRole;
 import com.example.Product_Selection_260813.service.GroupBuyRecordService;
 
 import jakarta.validation.Valid;
@@ -71,18 +74,23 @@ public class GroupBuyRecordController {
 	 * 唯讀查詢。可依品類或商品篩選，皆不指定時回傳全部。
 	 *
 	 * 操作與管理角色都可讀——採購需要看到歷史成團狀況才能判斷自己的預估合不合理。
+	 * 但成本資訊依角色揭露（2026-09 職責分層）：PURCHASER 拿到的 costPriceAtTime／marginRate
+	 * 固定為 null，MANAGER 才有值，見 GroupBuyRecordResponse 類別說明。
+	 * 這支原本沒有任何角色判斷，操作層可直接看到每筆成本價，屬資訊揭露範圍問題。
 	 */
 	@GetMapping
 	public ResponseEntity<ApiResponse<List<GroupBuyRecordResponse>>> list(
 			@RequestParam(name = "productTypeId", required = false) Long productTypeId,
-			@RequestParam(name = "productId", required = false) Long productId) {
+			@RequestParam(name = "productId", required = false) Long productId,
+			Authentication authentication) {
+		UserRole viewerRole = AuthenticatedUserRole.of(authentication);
 		List<GroupBuyRecordResponse> result;
 		if (productId != null) {
-			result = groupBuyRecordService.findByProduct(productId);
+			result = groupBuyRecordService.findByProduct(productId, viewerRole);
 		} else if (productTypeId != null) {
-			result = groupBuyRecordService.findByProductType(productTypeId);
+			result = groupBuyRecordService.findByProductType(productTypeId, viewerRole);
 		} else {
-			result = groupBuyRecordService.findAll();
+			result = groupBuyRecordService.findAll(viewerRole);
 		}
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}

@@ -40,15 +40,22 @@ public class AppUser {
 
     @Column(name = "enabled", nullable = false)
     private Boolean enabled = true;
-
-    /**
-     * 目前有效的登入版本號。每次登入／密碼變更／明確登出都會遞增；
-     * JwtAuthenticationFilter 比對 JWT 裡帶的版本號與這裡是否一致，
-     * 不一致視為 token 已失效——這是單一登入的核心機制，見 V5 migration
-     * 的完整說明。
-     */
-    @Column(name = "active_session_version", nullable = false)
-    private Integer activeSessionVersion = 0;
+
+    /**
+     * 目前有效的登入版本號。每次登入／密碼變更／明確登出都會遞增；
+     * JwtAuthenticationFilter 比對 JWT 裡帶的版本號與這裡是否一致，
+     * 不一致視為 token 已失效——這是單一登入的核心機制，見 V5 migration
+     * 的完整說明。
+     */
+    @Column(name = "active_session_version", nullable = false)
+    private Integer activeSessionVersion = 0;
+
+    /**
+     * 下次登入是否必須先修改密碼（V24）。帳號建立與管理者代重設密碼時設為 true，
+     * 使用者透過 AuthService.changePassword() 修改成功後回到 false。
+     */
+    @Column(name = "must_change_password", nullable = false)
+    private Boolean mustChangePassword = false;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -128,5 +135,13 @@ public class AppUser {
 
     public void setActiveSessionVersion(Integer activeSessionVersion) {
         this.activeSessionVersion = activeSessionVersion;
+    }
+
+    public Boolean getMustChangePassword() {
+        return mustChangePassword;
+    }
+
+    public void setMustChangePassword(Boolean mustChangePassword) {
+        this.mustChangePassword = mustChangePassword;
     }
 }

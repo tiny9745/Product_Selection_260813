@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.UserCreateRequest;
+import com.example.Product_Selection_260813.dto.request.UserPasswordResetRequest;
 import com.example.Product_Selection_260813.dto.response.UserAccountResponse;
 import com.example.Product_Selection_260813.service.UserService;
 
@@ -85,5 +86,19 @@ public class UserController {
 	public ResponseEntity<ApiResponse<UserAccountResponse>> enableUser(@PathVariable("id") Long id) {
 		UserAccountResponse result = userService.enableUser(id);
 		return ResponseEntity.ok(ApiResponse.success("帳號已復用", result));
+	}
+
+	/**
+	 * PUT /api/users/{id}/reset-password：管理者代重設密碼（V24）。
+	 *
+	 * 重設後該帳號現有登入立即失效，使用者以新密碼登入後會被強制先修改密碼。
+	 * 需帶入目前登入者 username，供 Service 層擋下「重設自己」（理由見 UserService.resetPassword()）。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/{id}/reset-password")
+	public ResponseEntity<ApiResponse<UserAccountResponse>> resetPassword(@PathVariable("id") Long id,
+			@Valid @RequestBody UserPasswordResetRequest request, @AuthenticationPrincipal String username) {
+		UserAccountResponse result = userService.resetPassword(id, request.getNewPassword(), username);
+		return ResponseEntity.ok(ApiResponse.success("密碼已重設，該使用者下次登入時需先修改密碼", result));
 	}
 }

@@ -10,6 +10,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
@@ -45,18 +46,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtTokenProvider jwtTokenProvider;
 	private final com.example.Product_Selection_260813.repository.AppUserRepository appUserRepository;
+	private final RestSecurityHandlers restSecurityHandlers;
 
 	public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider,
-			com.example.Product_Selection_260813.repository.AppUserRepository appUserRepository) {
+			com.example.Product_Selection_260813.repository.AppUserRepository appUserRepository,
+			RestSecurityHandlers restSecurityHandlers) {
 		this.jwtTokenProvider = jwtTokenProvider;
 		this.appUserRepository = appUserRepository;
+		this.restSecurityHandlers = restSecurityHandlers;
 	}
+
+	/** V24：必須先修改密碼的帳號，只能呼叫這個前綴底下的 API（/me、/me/password、/logout 等）。 */
+	private static final String PASSWORD_CHANGE_ALLOWED_PREFIX = "/api/auth/";
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
 
-		extractTokenFromCookie(request).flatMap(jwtTokenProvider::parseClaims).ifPresent(claims -> {
+		Optional<Claims> parsed = extractTokenFromCookie(request).flatMap(jwtTokenProvider::parseClaims);
+		if (parsed.isPresent()) {
+			Claims claims = parsed.get();
 			String username = jwtTokenProvider.getUsername(claims);
 			String role = jwtTokenProvider.getRole(claims);
 			Integer tokenVersion = jwtTokenProvider.getSessionVersion(claims);
@@ -71,19 +80,33 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			// 不符——這批舊 token 沒有攜帶版本資訊，沒有辦法比對，保守起見
 			// 一律要求重新登入，而不是放行一個無法驗證的 token。
 			Integer currentVersion = appUserRepository.findActiveSessionVersionByUsername(username).orElse(null);
-			if (tokenVersion == null || currentVersion == null || !tokenVersion.equals(currentVersion)) {
-				return;
+			boolean versionMatches = tokenVersion != null && currentVersion != null && tokenVersion.equals(currentVersion);
+
+			if (versionMatches) {
+				// V24：管理者設定的密碼尚未被使用者換掉時，只放行 /api/auth/**。
+				// 前端 Route Guard 只是導頁體驗；真正的限制在這裡，避免拿著臨時密碼的人
+				// 直接呼叫其他 API。直接回 403 而不是「不設定身分」（那會變成 401，
+				// 前端會誤判成登入失效而踢回登入頁）。
+				if (jwtTokenProvider.isPasswordChangeRequired(claims) && !isPasswordChangeAllowedPath(request)) {
+					restSecurityHandlers.writePasswordChangeRequired(response);
+					return;
+				}
+
+				// 統一加上"ROLE_"前綴：Spring Security的hasRole("MANAGER")底層比對的
+				// 就是"ROLE_MANAGER"這個Authority字串，這是框架慣例，不是本專案自創的規則。
+				var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
+
+				var authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
+				SecurityContextHolder.getContext().setAuthentication(authentication);
 			}
-
-			// 統一加上"ROLE_"前綴：Spring Security的hasRole("MANAGER")底層比對的
-			// 就是"ROLE_MANAGER"這個Authority字串，這是框架慣例，不是本專案自創的規則。
-			var authorities = List.of(new SimpleGrantedAuthority("ROLE_" + role));
-
-			var authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
-			SecurityContextHolder.getContext().setAuthentication(authentication);
-		});
+		}
 
 		filterChain.doFilter(request, response);
+	}
+
+	private boolean isPasswordChangeAllowedPath(HttpServletRequest request) {
+		String path = request.getRequestURI().substring(request.getContextPath().length());
+		return path.startsWith(PASSWORD_CHANGE_ALLOWED_PREFIX);
 	}
 
 	private Optional<String> extractTokenFromCookie(HttpServletRequest request) {

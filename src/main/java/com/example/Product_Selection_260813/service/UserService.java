@@ -13,9 +13,9 @@ import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 
 /**
- * 對應 四、API總表「1-2. 帳號管理」四支端點（皆為[僅管理]）：
+ * 對應 四、API總表「1-2. 帳號管理」五支端點（皆為[僅管理]）：
  * GET /api/users、POST /api/users、PUT /api/users/{id}/disable、
- * PUT /api/users/{id}/enable。
+ * PUT /api/users/{id}/enable、PUT /api/users/{id}/reset-password（V24 新增）。
  *
  * <b>與AuthService的職責分界</b>（七-5決議）：AuthService負責「驗證我是誰」
  * （登入、取得自身資料、登出），本類別負責「管理別人的帳號」（列出、新增、停用、復用）。
@@ -68,10 +68,9 @@ public class UserService {
 		user.setUsername(request.getUsername());
 		user.setName(request.getName());
 		user.setRole(request.getRole());
-		// 密碼一律經BCrypt雜湊後存入，絕不以明文保存；
-		// 沿用AuthService.login()驗證時使用的同一個PasswordEncoder Bean，
-		// 確保產生與驗證兩端的演算法與強度設定一致。
-		user.setPassword(passwordEncoder.encode(request.getPassword()));
+		// 建立帳號與代重設密碼共用同一套「設定管理者給的密碼＋強制下次登入修改」邏輯（V24），
+		// 雜湊方式等說明見 assignManagerIssuedPassword()。
+		assignManagerIssuedPassword(user, request.getPassword());
 
 		AppUser saved = appUserRepository.save(user);
 		return UserAccountResponse.from(saved);
@@ -119,5 +118,42 @@ public class UserService {
 		user.setEnabled(true);
 		AppUser saved = appUserRepository.save(user);
 		return UserAccountResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/users/{id}/reset-password：管理者代重設密碼（V24）。
+	 *
+	 * <ul>
+	 * <li><b>禁止重設自己</b>：管理者自己的密碼應走個人資料頁的「修改密碼」（需驗證目前密碼）。
+	 * 若允許，這支端點會變成一條「不需要目前密碼就能改掉自己密碼」的捷徑，失去
+	 * AuthService.changePassword() 驗證目前密碼的保護。</li>
+	 * <li><b>遞增 activeSessionVersion</b>：重設的典型情境是「使用者忘記密碼」或「帳號疑似外洩」，
+	 * 後者必須讓該帳號現有的所有登入立即失效，否則外洩的 token 在重設後仍可用到自然過期。</li>
+	 * <li>已停用的帳號也可以重設（不會因此被啟用），讓管理者能先處理密碼再復用帳號。</li>
+	 * </ul>
+	 */
+	@Transactional
+	public UserAccountResponse resetPassword(Long id, String newPassword, String currentUsername) {
+		AppUser user = appUserRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+		if (user.getUsername().equals(currentUsername)) {
+			throw new IllegalStateException("不可重設自己的密碼，請改用個人資料頁的「修改密碼」");
+		}
+		assignManagerIssuedPassword(user, newPassword);
+		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
+		AppUser saved = appUserRepository.save(user);
+		return UserAccountResponse.from(saved);
+	}
+
+	/**
+	 * 「管理者設定的密碼」共用邏輯：帳號建立與代重設密碼都走這裡，兩者固定觸發
+	 * 強制下次登入修改密碼，不提供個別開關（規格決議：不為此多開設定項）。
+	 *
+	 * 密碼一律經 BCrypt 雜湊後存入，絕不以明文保存；沿用 AuthService.login()
+	 * 驗證時使用的同一個 PasswordEncoder Bean，確保產生與驗證兩端的演算法一致。
+	 */
+	private void assignManagerIssuedPassword(AppUser user, String rawPassword) {
+		user.setPassword(passwordEncoder.encode(rawPassword));
+		user.setMustChangePassword(true);
 	}
 }

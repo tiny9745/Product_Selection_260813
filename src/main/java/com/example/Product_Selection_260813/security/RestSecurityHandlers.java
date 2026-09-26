@@ -52,6 +52,18 @@ public class RestSecurityHandlers implements AuthenticationEntryPoint, AccessDen
 		writeJsonError(response, HttpStatus.FORBIDDEN, "權限不足");
 	}
 
+	/**
+	 * V24：帳號處於「必須先修改密碼」狀態時，呼叫 /api/auth/** 以外的 API 一律回 403。
+	 * 由 JwtAuthenticationFilter 呼叫（Filter 層，無法走 GlobalExceptionHandler）。
+	 * 訊息刻意跟一般「權限不足」不同，前端可直接顯示給使用者。
+	 */
+	public void writePasswordChangeRequired(HttpServletResponse response) throws IOException {
+		writeJsonError(response, HttpStatus.FORBIDDEN, PASSWORD_CHANGE_REQUIRED_MESSAGE);
+	}
+
+	/** 前端 http interceptor 依此訊息判斷要導向個人資料頁的改密碼區塊，修改時需同步前端常數。 */
+	public static final String PASSWORD_CHANGE_REQUIRED_MESSAGE = "請先修改密碼後再使用系統功能";
+
 	private void writeJsonError(HttpServletResponse response, HttpStatus status, String message) throws IOException {
 		response.setStatus(status.value());
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);

@@ -25,6 +25,8 @@ public class UserAccountResponse {
 	private String name;
 	private UserRole role;
 	private Boolean enabled;
+	/** V24：管理者設定的密碼尚未被使用者換掉（帳號管理表格顯示「待修改密碼」用）。 */
+	private Boolean mustChangePassword;
 	private LocalDateTime createdAt;
 
 	public static UserAccountResponse from(AppUser user) {
@@ -34,6 +36,7 @@ public class UserAccountResponse {
 		dto.name = user.getName();
 		dto.role = user.getRole();
 		dto.enabled = user.getEnabled();
+		dto.mustChangePassword = Boolean.TRUE.equals(user.getMustChangePassword());
 		dto.createdAt = user.getCreatedAt();
 		return dto;
 	}
@@ -76,6 +79,14 @@ public class UserAccountResponse {
 
 	public void setEnabled(Boolean enabled) {
 		this.enabled = enabled;
+	}
+
+	public Boolean getMustChangePassword() {
+		return mustChangePassword;
+	}
+
+	public void setMustChangePassword(Boolean mustChangePassword) {
+		this.mustChangePassword = mustChangePassword;
 	}
 
 	public LocalDateTime getCreatedAt() {

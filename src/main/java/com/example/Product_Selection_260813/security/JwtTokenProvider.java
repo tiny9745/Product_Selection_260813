@@ -35,6 +35,13 @@ public class JwtTokenProvider {
 	private static final String CLAIM_ROLE = "role";
 	private static final String CLAIM_NAME = "name";
 	private static final String CLAIM_SESSION_VERSION = "sessionVersion";
+	/**
+	 * V24：只在 AppUser.mustChangePassword=true 時寫入。JwtAuthenticationFilter 依此只放行
+	 * /api/auth/**。寫在 token 裡而不是每個請求查資料庫：這個狀態只會在「登入」與「修改密碼」
+	 * 兩個時間點改變，而這兩個時間點本來就會重新簽發 token；管理者代重設密碼則會遞增
+	 * activeSessionVersion 讓舊 token 失效，所以 token 內的值不會跟資料庫不一致。
+	 */
+	private static final String CLAIM_MUST_CHANGE_PASSWORD = "mustChangePassword";
 
 	private final SecretKey signingKey;
 	private final long expirationMs;
@@ -71,6 +78,7 @@ public class JwtTokenProvider {
 				.claim(CLAIM_ROLE, user.getRole().name())
 				.claim(CLAIM_NAME, user.getName())
 				.claim(CLAIM_SESSION_VERSION, user.getActiveSessionVersion())
+				.claim(CLAIM_MUST_CHANGE_PASSWORD, Boolean.TRUE.equals(user.getMustChangePassword()))
 				.issuedAt(now)
 				.expiration(expiry)
 				.signWith(signingKey)
@@ -110,5 +118,13 @@ public class JwtTokenProvider {
 	 */
 	public Integer getSessionVersion(Claims claims) {
 		return claims.get(CLAIM_SESSION_VERSION, Integer.class);
+	}
+
+	/**
+	 * token 是否處於「必須先修改密碼」狀態（V24）。V24 上線前簽發的 token 沒有這個 claim，
+	 * 視為 false——那批帳號在 migration 後的 must_change_password 也都是 0，結果一致。
+	 */
+	public boolean isPasswordChangeRequired(Claims claims) {
+		return Boolean.TRUE.equals(claims.get(CLAIM_MUST_CHANGE_PASSWORD, Boolean.class));
 	}
 }

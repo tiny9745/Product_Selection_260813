@@ -20,6 +20,12 @@ public class UserResponse {
 	private String username;
 	private String name;
 	private UserRole role;
+	/**
+	 * V24：true 代表這個帳號必須先修改密碼才能使用其他功能。前端 Route Guard
+	 * 依此把使用者導到個人資料頁的改密碼區塊；後端另由 JwtAuthenticationFilter
+	 * 擋下 /api/auth/** 以外的請求，前端導頁只是使用體驗，不是權限邊界。
+	 */
+	private Boolean mustChangePassword;
 
 	public static UserResponse from(AppUser user) {
 		UserResponse dto = new UserResponse();
@@ -27,6 +33,7 @@ public class UserResponse {
 		dto.username = user.getUsername();
 		dto.name = user.getName();
 		dto.role = user.getRole();
+		dto.mustChangePassword = Boolean.TRUE.equals(user.getMustChangePassword());
 		return dto;
 	}
 
@@ -60,5 +67,13 @@ public class UserResponse {
 
 	public void setRole(UserRole role) {
 		this.role = role;
+	}
+
+	public Boolean getMustChangePassword() {
+		return mustChangePassword;
+	}
+
+	public void setMustChangePassword(Boolean mustChangePassword) {
+		this.mustChangePassword = mustChangePassword;
 	}
 }

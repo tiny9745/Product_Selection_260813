@@ -32,6 +32,7 @@ import com.example.Product_Selection_260813.entity.GroupBuyRecord;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductType;
 import com.example.Product_Selection_260813.enums.GroupBuyResult;
+import com.example.Product_Selection_260813.enums.UserRole;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
@@ -307,21 +308,25 @@ public class GroupBuyRecordService {
 	// 查詢
 	// =====================================================================
 
+	// 三個查詢方法都帶 viewerRole：成本價／毛利率的揭露範圍由 GroupBuyRecordResponse.from()
+	// 依角色決定（PURCHASER 看不到成本），見該類別說明。
+
 	@Transactional(readOnly = true)
-	public List<GroupBuyRecordResponse> findByProductType(Long productTypeId) {
+	public List<GroupBuyRecordResponse> findByProductType(Long productTypeId, UserRole viewerRole) {
 		return groupBuyRecordRepository.findByProductTypeIdOrderByCampaignStartDateDesc(productTypeId)
-				.stream().map(GroupBuyRecordResponse::from).toList();
+				.stream().map(record -> GroupBuyRecordResponse.from(record, viewerRole)).toList();
 	}
 
 	@Transactional(readOnly = true)
-	public List<GroupBuyRecordResponse> findByProduct(Long productId) {
+	public List<GroupBuyRecordResponse> findByProduct(Long productId, UserRole viewerRole) {
 		return groupBuyRecordRepository.findByProductIdOrderByCampaignStartDateDesc(productId)
-				.stream().map(GroupBuyRecordResponse::from).toList();
+				.stream().map(record -> GroupBuyRecordResponse.from(record, viewerRole)).toList();
 	}
 
 	@Transactional(readOnly = true)
-	public List<GroupBuyRecordResponse> findAll() {
-		return groupBuyRecordRepository.findAll().stream().map(GroupBuyRecordResponse::from).toList();
+	public List<GroupBuyRecordResponse> findAll(UserRole viewerRole) {
+		return groupBuyRecordRepository.findAll().stream()
+				.map(record -> GroupBuyRecordResponse.from(record, viewerRole)).toList();
 	}
 
 	// 整批回退 deleteBatch() 已於 2026-09-23 分支整併時移除（連同 REST 端點）：
