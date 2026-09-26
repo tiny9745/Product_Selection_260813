@@ -123,7 +123,10 @@ public class ReviewService {
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		// app_users 是使用者帳號本身的資料，不屬於評分／AI 網域，不算跨越
 		// 類別 Java Doc 講的十二-13分層邊界（該邊界只規範 Scoring／Trend／AiSelection）。
-		Set<Long> createdByIds = page.getContent().stream().map(Product::getCreatedBy).filter(id -> id != null)
+		// V25：送審人（submittedBy）一併批次解析，待審清單的「送審人」改用它。
+		Set<Long> createdByIds = page.getContent().stream()
+				.flatMap(product -> java.util.stream.Stream.of(product.getCreatedBy(), product.getSubmittedBy()))
+				.filter(id -> id != null)
 				.collect(Collectors.toSet());
 		Map<Long, String> createdByNameById = resolveUserNames(createdByIds);
 
@@ -144,6 +147,8 @@ public class ReviewService {
 			return ProductResponse.from(product)
 					.withCreatedByName(
 							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
+					.withSubmittedByName(
+							product.getSubmittedBy() == null ? null : createdByNameById.get(product.getSubmittedBy()))
 					.withEvaluationSummary(evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
 		});

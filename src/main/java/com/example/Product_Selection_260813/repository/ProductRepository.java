@@ -28,6 +28,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * updatedAt 與 createdAt 相同，之後每次編輯都會更新 updatedAt，
      * 這樣篩選出來的清單才會反映「最近有變化」而不是「最早建立」。
      */
+    /*
+     * 2026-09 CSV 匯出新增三組條件（品項清單與匯出共用，見 ProductSearchCriteria）：
+     * - 送審批次：submittedBy + submittedAt 落在該曆日；或 withoutSubmissionBatch＝TRUE
+     *   只取沒有送審批次資料的商品（V25 前重送過、無法回填的商品）。
+     * - 審核日期：以該商品「最新一筆」審核紀錄的 reviewedAt 判斷。APPROVED 商品的
+     *   最新一筆就是核准那一筆（核准後不會再送審），與決策紀錄頁的審核日期一致。
+     * - 未曾匯出：product_export_logs 沒有任何一列。
+     */
     @Query("""
             SELECT p FROM Product p
             WHERE (:reviewStatus IS NULL OR p.reviewStatus = :reviewStatus)
@@ -37,6 +45,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (:keyword IS NULL OR p.name LIKE CONCAT('%', :keyword, '%'))
               AND (:updatedFrom IS NULL OR p.updatedAt >= :updatedFrom)
               AND (:updatedTo IS NULL OR p.updatedAt <= :updatedTo)
+              AND (:submittedBy IS NULL OR p.submittedBy = :submittedBy)
+              AND (:submittedFrom IS NULL OR p.submittedAt >= :submittedFrom)
+              AND (:submittedToExclusive IS NULL OR p.submittedAt < :submittedToExclusive)
+              AND (:withoutSubmissionBatch IS NULL OR p.submittedAt IS NULL)
+              AND (:reviewedFrom IS NULL OR EXISTS (
+                    SELECT r.id FROM ReviewRecord r
+                    WHERE r.productId = p.id AND r.reviewedAt >= :reviewedFrom
+                      AND r.reviewedAt = (SELECT MAX(r2.reviewedAt) FROM ReviewRecord r2 WHERE r2.productId = p.id)))
+              AND (:reviewedToExclusive IS NULL OR EXISTS (
+                    SELECT r.id FROM ReviewRecord r
+                    WHERE r.productId = p.id AND r.reviewedAt < :reviewedToExclusive
+                      AND r.reviewedAt = (SELECT MAX(r2.reviewedAt) FROM ReviewRecord r2 WHERE r2.productId = p.id)))
+              AND (:neverExported IS NULL OR NOT EXISTS (
+                    SELECT l.id FROM ProductExportLog l WHERE l.productId = p.id))
             """)
     Page<Product> search(
             @Param("reviewStatus") ProductReviewStatus reviewStatus,
@@ -46,7 +68,39 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("keyword") String keyword,
             @Param("updatedFrom") java.time.LocalDateTime updatedFrom,
             @Param("updatedTo") java.time.LocalDateTime updatedTo,
+            @Param("submittedBy") Long submittedBy,
+            @Param("submittedFrom") java.time.LocalDateTime submittedFrom,
+            @Param("submittedToExclusive") java.time.LocalDateTime submittedToExclusive,
+            @Param("withoutSubmissionBatch") Boolean withoutSubmissionBatch,
+            @Param("reviewedFrom") java.time.LocalDateTime reviewedFrom,
+            @Param("reviewedToExclusive") java.time.LocalDateTime reviewedToExclusive,
+            @Param("neverExported") Boolean neverExported,
             Pageable pageable);
+
+    /** 以參數物件呼叫上方查詢：參數對應只寫在這一個地方，避免呼叫端對調同型別參數。 */
+    default Page<Product> search(ProductSearchCriteria c, Pageable pageable) {
+        return search(c.reviewStatus(), c.itemStatus(), c.candidateStatus(), c.productTypeId(), c.keyword(),
+                c.updatedFrom(), c.updatedTo(), c.submittedBy(), c.submittedFrom(), c.submittedToExclusive(),
+                c.withoutSubmissionBatch(), c.reviewedFrom(), c.reviewedToExclusive(), c.neverExported(), pageable);
+    }
+
+    /**
+     * 送審批次清單（GET /api/products/submission-batches）：依（送審人, 送審日期）分組計數。
+     * 只計入正式候選（CANDIDATE），與品項清單的預設範圍一致。native query：需要 DATE()。
+     * 回傳欄位：submitted_by, submitted_date, product_count。
+     */
+    @Query(value = """
+            SELECT p.submitted_by, DATE(p.submitted_at) AS submitted_date, COUNT(*) AS product_count
+            FROM products p
+            WHERE p.submitted_at IS NOT NULL AND p.candidate_status = 'CANDIDATE'
+            GROUP BY p.submitted_by, DATE(p.submitted_at)
+            ORDER BY submitted_date DESC, p.submitted_by
+            """, nativeQuery = true)
+    List<Object[]> countBySubmissionBatch();
+
+    /** 沒有送審批次資料（submitted_at IS NULL）的正式候選筆數，供批次下拉的「（無批次資料）」選項。 */
+    @Query("SELECT COUNT(p) FROM Product p WHERE p.submittedAt IS NULL AND p.candidateStatus = 'CANDIDATE'")
+    long countWithoutSubmissionBatch();
 
     /**
      * AI建議清單（GET /api/products/ai-suggested）：

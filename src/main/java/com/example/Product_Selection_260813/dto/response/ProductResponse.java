@@ -123,6 +123,15 @@ public class ProductResponse {
 	private LocalDateTime updatedAt;
 	private Long updatedBy;
 	/**
+	 * V25：最近一次送審的時間／送審人。與 updatedAt 不同，一般編輯不會改變它；
+	 * 審核頁的「送審時間」改用這個欄位（原本拿 updatedAt 代替）。
+	 * V25 上線前重新送審過的商品無法回填，兩者皆為 null。
+	 */
+	private LocalDateTime submittedAt;
+	private Long submittedBy;
+	/** 送審人姓名，與 createdByName 同一種「批次查詢後才填入」的例外（withSubmittedByName）。 */
+	private String submittedByName;
+	/**
 	 * 「為什麼被 AI 推薦」的說明文字。只有 GET /api/products/ai-suggested
 	 * 這支端點會填值，其餘所有回傳 ProductResponse 的端點一律是 null——
 	 * 原本前端這個欄位是恆為 null 的死欄位，因為判定「要不要推薦」的
@@ -205,6 +214,8 @@ public class ProductResponse {
 		dto.createdAt = product.getCreatedAt();
 		dto.updatedAt = product.getUpdatedAt();
 		dto.updatedBy = product.getUpdatedBy();
+		dto.submittedAt = product.getSubmittedAt();
+		dto.submittedBy = product.getSubmittedBy();
 		return dto;
 	}
 
@@ -218,6 +229,12 @@ public class ProductResponse {
 	 */
 	public ProductResponse withCreatedByName(String createdByName) {
 		this.createdByName = createdByName;
+		return this;
+	}
+
+	/** 補上批次查詢好的送審人姓名（V25），用法同 withCreatedByName()。 */
+	public ProductResponse withSubmittedByName(String submittedByName) {
+		this.submittedByName = submittedByName;
 		return this;
 	}
 
@@ -545,6 +562,18 @@ public class ProductResponse {
 
 	public void setCreatedAt(LocalDateTime createdAt) {
 		this.createdAt = createdAt;
+	}
+
+	public LocalDateTime getSubmittedAt() {
+		return submittedAt;
+	}
+
+	public Long getSubmittedBy() {
+		return submittedBy;
+	}
+
+	public String getSubmittedByName() {
+		return submittedByName;
 	}
 
 	public LocalDateTime getUpdatedAt() {

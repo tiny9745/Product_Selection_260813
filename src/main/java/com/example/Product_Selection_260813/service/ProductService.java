@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.service;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -34,10 +35,12 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.Product_Selection_260813.constants.ValidationMessage;
 import com.example.Product_Selection_260813.dto.request.ProductBatchItemRequest;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductFilterRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductBatchCreateResponse;
 import com.example.Product_Selection_260813.dto.response.ProductBatchItemResult;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
+import com.example.Product_Selection_260813.dto.response.SubmissionBatchResponse;
 import com.example.Product_Selection_260813.dto.response.CustomFieldDefinitionResponse;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
@@ -59,6 +62,7 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
+import com.example.Product_Selection_260813.repository.ProductSearchCriteria;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
 import com.example.Product_Selection_260813.service.gate.GateResult;
@@ -168,8 +172,9 @@ public class ProductService {
 	 * 十二-13分層決議劃定的邊界。
 	 */
 	private Map<Long, String> resolveCreatedByNames(List<Product> products) {
+		// 2026-09（V25）：一併涵蓋送審人（submittedBy），同一次查詢解決兩種姓名。
 		Set<Long> ids = products.stream()
-				.map(Product::getCreatedBy)
+				.flatMap(product -> java.util.stream.Stream.of(product.getCreatedBy(), product.getSubmittedBy()))
 				.filter(Objects::nonNull)
 				.collect(Collectors.toSet());
 		if (ids.isEmpty()) {
@@ -218,18 +223,12 @@ public class ProductService {
 	 * Repository.search()維持通用（null=不篩選），由呼叫端決定要不要套用預設值。
 	 */
 	@Transactional(readOnly = true)
-	public Page<ProductResponse> searchProducts(ProductReviewStatus reviewStatus, ProductItemStatus itemStatus,
-			ProductCandidateStatus candidateStatus, Long productTypeId, String keyword,
-			java.time.LocalDateTime updatedFrom, java.time.LocalDateTime updatedTo, Pageable pageable) {
+	public Page<ProductResponse> searchProducts(ProductFilterRequest filter, Pageable pageable) {
+		// 2026-09：參數改為 ProductFilterRequest，與 POST /api/products/export 共用同一套篩選
+		// （見 toCriteria()），確保「畫面上看到的清單」與「匯出的內容」條件一致。
+		Page<Product> page = productRepository.search(toCriteria(filter), pageable);
 
-		ProductCandidateStatus effectiveCandidateStatus = candidateStatus != null ? candidateStatus
-				: ProductCandidateStatus.CANDIDATE;
-
-		Page<Product> page = productRepository
-				.search(reviewStatus, itemStatus, effectiveCandidateStatus, productTypeId, keyword,
-						updatedFrom, updatedTo, pageable);
-
-		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
+		// 批次查一次 createdBy／submittedBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
 		// 同理批次查一次評估結果；該商品若尚無評估紀錄，evaluation 為 null，
 		// withEvaluationSummary 兩個參數一起傳 null，畫面顯示「—」而非 0。
@@ -239,10 +238,94 @@ public class ProductService {
 			return ProductResponse.from(product)
 					.withCreatedByName(
 							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
+					.withSubmittedByName(
+							product.getSubmittedBy() == null ? null : createdByNameById.get(product.getSubmittedBy()))
 					.withEvaluationSummary(
 							evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
 		});
+	}
+
+	/**
+	 * 篩選條件 → Repository 查詢條件。品項清單與 CSV 匯出（ProductExportService）共用。
+	 *
+	 * <ul>
+	 * <li>candidateStatus 不帶時預設 CANDIDATE（業務預設值只定義在這裡，理由見 searchProducts()）。</li>
+	 * <li>送審批次：解析 SubmissionBatchId；"NONE" 轉成「只要沒有送審批次資料」。</li>
+	 * <li>審核日期：閉區間的日期 → [起日 00:00, 迄日隔天 00:00)，選同一天也能涵蓋整天。
+	 * 起日晚於迄日直接 400，不默默回傳 0 筆讓使用者以為沒資料。</li>
+	 * <li>neverExported：只有 TRUE 才篩（false／null 都等於不篩）。</li>
+	 * </ul>
+	 */
+	public ProductSearchCriteria toCriteria(ProductFilterRequest filter) {
+		ProductFilterRequest f = filter != null ? filter : new ProductFilterRequest();
+		if (f.getReviewedFrom() != null && f.getReviewedTo() != null && f.getReviewedFrom().isAfter(f.getReviewedTo())) {
+			throw new IllegalArgumentException("審核日期起日不可晚於迄日");
+		}
+		SubmissionBatchId batch = SubmissionBatchId.parse(f.getSubmissionBatch());
+		boolean withoutBatch = batch != null && batch.none();
+		return new ProductSearchCriteria(
+				f.getReviewStatus(),
+				f.getItemStatus(),
+				f.getCandidateStatus() != null ? f.getCandidateStatus() : ProductCandidateStatus.CANDIDATE,
+				f.getProductTypeId(),
+				f.getKeyword(),
+				f.getUpdatedFrom(),
+				f.getUpdatedTo(),
+				batch == null || withoutBatch ? null : batch.submittedBy(),
+				batch == null ? null : batch.rangeStart(),
+				batch == null ? null : batch.rangeEndExclusive(),
+				withoutBatch ? Boolean.TRUE : null,
+				f.getReviewedFrom() == null ? null : f.getReviewedFrom().atStartOfDay(),
+				f.getReviewedTo() == null ? null : f.getReviewedTo().plusDays(1).atStartOfDay(),
+				Boolean.TRUE.equals(f.getNeverExported()) ? Boolean.TRUE : null);
+	}
+
+	/**
+	 * GET /api/products/submission-batches：送審批次下拉選項（2026-09 CSV 匯出）。
+	 *
+	 * 依（送審人, 送審日期）分組，新到舊排序；有沒有批次資料的商品時，最後補一筆
+	 * batchId="NONE"「（無批次資料）」，讓這批商品在下拉裡看得到、選得到，
+	 * 而不是從篩選結果裡憑空消失。只計入正式候選（CANDIDATE），與主清單預設範圍一致。
+	 */
+	@Transactional(readOnly = true)
+	public List<SubmissionBatchResponse> getSubmissionBatches() {
+		List<Object[]> rows = productRepository.countBySubmissionBatch();
+		Set<Long> submitterIds = rows.stream()
+				.map(row -> row[0] == null ? null : ((Number) row[0]).longValue())
+				.filter(Objects::nonNull)
+				.collect(Collectors.toSet());
+		Map<Long, String> nameById = submitterIds.isEmpty() ? Map.of()
+				: appUserRepository.findAllById(submitterIds).stream()
+						.collect(Collectors.toMap(AppUser::getId, user -> Objects.requireNonNullElse(user.getName(), "")));
+
+		List<SubmissionBatchResponse> result = new ArrayList<>();
+		for (Object[] row : rows) {
+			if (row[0] == null || row[1] == null) {
+				continue; // submitted_by 為 NULL 的資料理論上不存在（兩欄成對寫入），保守略過
+			}
+			Long submitterId = ((Number) row[0]).longValue();
+			java.time.LocalDate submittedDate = toLocalDate(row[1]);
+			long count = ((Number) row[2]).longValue();
+			result.add(new SubmissionBatchResponse(SubmissionBatchId.of(submittedDate, submitterId).toString(),
+					submittedDate, submitterId, nameById.get(submitterId), count));
+		}
+		long withoutBatch = productRepository.countWithoutSubmissionBatch();
+		if (withoutBatch > 0) {
+			result.add(new SubmissionBatchResponse(SubmissionBatchId.NONE, null, null, null, withoutBatch));
+		}
+		return result;
+	}
+
+	/** native query 的 DATE() 依驅動版本可能是 java.sql.Date 或 LocalDate，兩種都接。 */
+	private static java.time.LocalDate toLocalDate(Object value) {
+		if (value instanceof java.time.LocalDate localDate) {
+			return localDate;
+		}
+		if (value instanceof java.sql.Date sqlDate) {
+			return sqlDate.toLocalDate();
+		}
+		return java.time.LocalDate.parse(value.toString().substring(0, 10));
 	}
 
 	/**
@@ -473,6 +556,9 @@ public class ProductService {
 
 		product.setCreatedBy(userId);
 		product.setUpdatedBy(userId);
+		// V25：建立商品即第一次送審（見 ProductCreateRequest 類別註解）。批次新增逐列呼叫
+		// 這個方法，同一人同一天建立的商品自然落在同一個送審批次（SubmissionBatchId）。
+		product.markSubmitted(userId, LocalDateTime.now());
 
 		Product saved = productRepository.save(product);
 
@@ -672,7 +758,7 @@ public class ProductService {
 	 * REJECTED+ARCHIVED商品必須先restore()解封存，才能resubmit()， 狀態機不會再有繞過復用步驟的隱藏路徑。
 	 */
 	@Transactional
-	public ProductResponse resubmit(Long id) {
+	public ProductResponse resubmit(Long id, String username) {
 		Product product = findProductOrThrow(id);
 
 		if (product.getReviewStatus() != ProductReviewStatus.REJECTED) {
@@ -698,6 +784,8 @@ public class ProductService {
 
 		Product refreshed = findProductOrThrow(id); // clearAutomatically=true已清空Persistence Context，重查取得最新值
 		refreshed.setSubmissionCount(refreshed.getSubmissionCount() + 1);
+		// V25：重新送審會開啟新的送審批次（重送的人、重送當下），舊批次屬於上一輪送審。
+		refreshed.markSubmitted(resolveUserId(username), LocalDateTime.now());
 		return ProductResponse.from(productRepository.save(refreshed));
 	}
 

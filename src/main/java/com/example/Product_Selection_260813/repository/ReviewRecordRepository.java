@@ -17,6 +17,9 @@ public interface ReviewRecordRepository extends JpaRepository<ReviewRecord, Long
     // 單一商品審核歷史（GET /api/products/{id}/reviews）
     List<ReviewRecord> findByProductIdOrderByReviewedAtDesc(Long productId);
 
+    // 多件商品的審核紀錄一次查回（CSV 匯出取每件商品最新一筆快照，避免逐筆查詢 N+1）
+    List<ReviewRecord> findByProductIdIn(java.util.Collection<Long> productIds);
+
     /**
      * 決策紀錄列表（GET /api/reviews/decision-records，跨商品彙總查詢）。
      *

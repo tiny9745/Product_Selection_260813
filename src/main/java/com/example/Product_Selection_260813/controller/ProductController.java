@@ -11,6 +11,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -29,12 +31,15 @@ import com.example.Product_Selection_260813.service.SettingsService;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.ProductBatchCreateRequest;
 import com.example.Product_Selection_260813.dto.request.ProductCreateRequest;
+import com.example.Product_Selection_260813.dto.request.ProductFilterRequest;
 import com.example.Product_Selection_260813.dto.request.ProductUpdateRequest;
 import com.example.Product_Selection_260813.dto.response.ProductBatchCreateResponse;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
+import com.example.Product_Selection_260813.dto.response.SubmissionBatchResponse;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.service.ProductExportService;
 import com.example.Product_Selection_260813.service.ProductService;
 
 import jakarta.validation.Valid;
@@ -75,6 +80,9 @@ public class ProductController {
 	@Autowired
 	private SettingsService settingsService;
 
+	@Autowired
+	private ProductExportService productExportService;
+
 	/**
 	 * GET /api/products：品項管理主清單。 支援關鍵字、審核狀態、品項狀態、候選狀態、商品類型篩選，以及分頁/排序參數。
 	 *
@@ -94,11 +102,68 @@ public class ProductController {
 			@RequestParam(value = "updatedTo", required = false)
 			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
 			java.time.LocalDateTime updatedTo,
+			// 2026-09 CSV 匯出新增的三組篩選（語意見 ProductFilterRequest），皆選填、不帶＝不篩。
+			@RequestParam(value = "submissionBatch", required = false) String submissionBatch,
+			@RequestParam(value = "reviewedFrom", required = false)
+			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+			java.time.LocalDate reviewedFrom,
+			@RequestParam(value = "reviewedTo", required = false)
+			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+			java.time.LocalDate reviewedTo,
+			@RequestParam(value = "neverExported", required = false) Boolean neverExported,
 			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ProductResponse> result = productService.searchProducts(reviewStatus, itemStatus, candidateStatus,
-				productTypeId, keyword, updatedFrom, updatedTo, pageable);
+		ProductFilterRequest filter = new ProductFilterRequest();
+		filter.setReviewStatus(reviewStatus);
+		filter.setItemStatus(itemStatus);
+		filter.setCandidateStatus(candidateStatus);
+		filter.setProductTypeId(productTypeId);
+		filter.setKeyword(keyword);
+		filter.setUpdatedFrom(updatedFrom);
+		filter.setUpdatedTo(updatedTo);
+		filter.setSubmissionBatch(submissionBatch);
+		filter.setReviewedFrom(reviewedFrom);
+		filter.setReviewedTo(reviewedTo);
+		filter.setNeverExported(neverExported);
+		Page<ProductResponse> result = productService.searchProducts(filter, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
+
+	/**
+	 * GET /api/products/submission-batches：送審批次下拉選項（同一人、同一曆日送審＝一批）。
+	 * 讀取端點，[操作+管理]，與清單一致。
+	 */
+	@GetMapping("/submission-batches")
+	public ResponseEntity<ApiResponse<List<SubmissionBatchResponse>>> getSubmissionBatches() {
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", productService.getSubmissionBatches()));
+	}
+
+	/**
+	 * POST /api/products/export：匯出審核通過商品 CSV（[僅操作]，與品項管理頁權限一致）。
+	 *
+	 * Body 是品項管理頁目前的篩選條件（ProductFilterRequest，可省略＝全部），後端固定只取
+	 * APPROVED、不分頁。用 POST 而不是 GET：這支請求會寫入匯出紀錄（有副作用），
+	 * GET 應該是可安全重試、可被快取的讀取。
+	 *
+	 * 成功直接回 CSV 檔案（text/csv，UTF-8 含 BOM），不是 JSON 包字串；
+	 * 匯出筆數放在 X-Export-Count header，讓前端不必解析檔案就能顯示「已匯出 N 筆」。
+	 * 失敗（篩選格式錯誤 400、超過筆數上限 409）仍由 GlobalExceptionHandler 回 JSON。
+	 */
+	@PreAuthorize("hasRole('PURCHASER')")
+	@PostMapping("/export")
+	public ResponseEntity<byte[]> exportApproved(@RequestBody(required = false) ProductFilterRequest filter,
+			@AuthenticationPrincipal String username) {
+		ProductExportService.ExportResult result = productExportService.exportApproved(filter, username);
+		return ResponseEntity.ok()
+				.contentType(new MediaType("text", "csv", java.nio.charset.StandardCharsets.UTF_8))
+				.header(HttpHeaders.CONTENT_DISPOSITION,
+						ContentDisposition.attachment().filename(result.filename()).build().toString())
+				.header(EXPORT_COUNT_HEADER, String.valueOf(result.rowCount()))
+				.header(HttpHeaders.CACHE_CONTROL, "no-store")
+				.body(result.content());
+	}
+
+	/** 匯出筆數 header 名稱；前端 PRODUCT_EXPORT_COUNT_HEADER 需同步。 */
+	static final String EXPORT_COUNT_HEADER = "X-Export-Count";
 
 	/**
 	 * GET /api/products/ai-suggested：AI建議清單（candidate_status=AI_SUGGESTED）。
@@ -268,8 +333,10 @@ public class ProductController {
 	 */
 	@PreAuthorize("hasRole('PURCHASER')")
 	@PostMapping("/{id}/resubmit")
-	public ResponseEntity<ApiResponse<ProductResponse>> resubmit(@PathVariable("id") Long id) {
-		ProductResponse result = productService.resubmit(id);
+	public ResponseEntity<ApiResponse<ProductResponse>> resubmit(@PathVariable("id") Long id,
+			@AuthenticationPrincipal String username) {
+		// V25：重送的人與時間寫入 submitted_by／submitted_at（開啟新的送審批次）。
+		ProductResponse result = productService.resubmit(id, username);
 		return ResponseEntity.ok(ApiResponse.success("已重新送審", result));
 	}
 

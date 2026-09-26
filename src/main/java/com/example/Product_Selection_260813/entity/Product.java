@@ -138,6 +138,18 @@ public class Product {
 	@Column(name = "submission_count", nullable = false)
 	private Integer submissionCount = 1;
 
+	/**
+	 * 最近一次送審時間（V25）。建立商品＝第一次送審；resubmit() 時更新。
+	 * 與 updatedAt 不同：一般編輯、審核、匯出都不會改變它。
+	 * 送審批次＝(submittedBy, submittedAt 的日期)，見 SubmissionBatchFilter。
+	 */
+	@Column(name = "submitted_at")
+	private LocalDateTime submittedAt;
+
+	/** 最近一次送審的使用者（V25），與 submittedAt 同時寫入。 */
+	@Column(name = "submitted_by")
+	private Long submittedBy;
+
 	@Column(name = "created_by")
 	private Long createdBy;
 
@@ -391,6 +403,20 @@ public class Product {
 
 	public void setSubmissionCount(Integer submissionCount) {
 		this.submissionCount = submissionCount;
+	}
+
+	public LocalDateTime getSubmittedAt() {
+		return submittedAt;
+	}
+
+	public Long getSubmittedBy() {
+		return submittedBy;
+	}
+
+	/** 送審時間與送審人必定成對寫入，不提供個別 setter，避免只更新其中一個。 */
+	public void markSubmitted(Long submittedBy, LocalDateTime submittedAt) {
+		this.submittedBy = submittedBy;
+		this.submittedAt = submittedAt;
 	}
 
 	public Long getCreatedBy() {
