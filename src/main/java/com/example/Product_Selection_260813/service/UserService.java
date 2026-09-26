@@ -1,6 +1,8 @@
 package com.example.Product_Selection_260813.service;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -10,12 +12,18 @@ import org.springframework.transaction.annotation.Transactional;
 import com.example.Product_Selection_260813.dto.request.UserCreateRequest;
 import com.example.Product_Selection_260813.dto.response.UserAccountResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
+import com.example.Product_Selection_260813.enums.PasswordResetRequestStatus;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 
 /**
  * 對應 四、API總表「1-2. 帳號管理」五支端點（皆為[僅管理]）：
  * GET /api/users、POST /api/users、PUT /api/users/{id}/disable、
- * PUT /api/users/{id}/enable、PUT /api/users/{id}/reset-password（V24 新增）。
+ * PUT /api/users/{id}/enable、PUT /api/users/{id}/reset-password（V24 新增）、
+ * PUT /api/users/{id}/password-reset-request/reject（V27 新增）。
+ *
+ * <b>V27：重設密碼必須先有本人申請</b>（2026-09-26 決議）。管理者只能重設「有待處理申請」
+ * 的帳號，重設即結案；也可以駁回申請。申請入口在登入頁（見 PasswordResetRequestService）。
+ * 帳號疑似外洩等緊急情況不走申請，改用 disableUser()（停用會讓現有登入立即失效）。
  *
  * <b>與AuthService的職責分界</b>（七-5決議）：AuthService負責「驗證我是誰」
  * （登入、取得自身資料、登出），本類別負責「管理別人的帳號」（列出、新增、停用、復用）。
@@ -35,6 +43,9 @@ public class UserService {
 	@Autowired
 	private PasswordEncoder passwordEncoder;
 
+	@Autowired
+	private PasswordResetRequestService passwordResetRequestService;
+
 	/**
 	 * GET /api/users：列出所有帳號（含已停用者）。
 	 *
@@ -45,7 +56,11 @@ public class UserService {
 	 */
 	@Transactional(readOnly = true)
 	public List<UserAccountResponse> getAllUsers() {
-		return appUserRepository.findAll().stream().map(UserAccountResponse::from).toList();
+		// V27：一次取出所有待處理的重設密碼申請，標在對應帳號上（不逐帳號查詢）。
+		Map<Long, LocalDateTime> requestedAtByUser = passwordResetRequestService.pendingRequestedAtByUser();
+		return appUserRepository.findAll().stream()
+				.map(user -> UserAccountResponse.from(user).withPasswordResetRequestedAt(requestedAtByUser.get(user.getId())))
+				.toList();
 	}
 
 	/**
@@ -97,6 +112,10 @@ public class UserService {
 		}
 
 		user.setEnabled(false);
+		// 2026-09-26 修正（High）：停用原本不會讓對方現有的登入失效，被停用的人手上的 token
+		// 在剩餘效期（最長 8 小時）內仍可呼叫 API。比照重設密碼遞增 session version，
+		// JwtAuthenticationFilter 比對不符即視為登入失效。停用也是帳號疑似外洩時的緊急處理手段。
+		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
 		AppUser saved = appUserRepository.save(user);
 		return UserAccountResponse.from(saved);
 	}
@@ -139,10 +158,30 @@ public class UserService {
 		if (user.getUsername().equals(currentUsername)) {
 			throw new IllegalStateException("不可重設自己的密碼，請改用個人資料頁的「修改密碼」");
 		}
+		// V27：必須有本人的待處理申請，重設成功即結案（同一筆交易）；沒有申請回 409。
+		passwordResetRequestService.closePending(user.getId(), PasswordResetRequestStatus.COMPLETED,
+				resolveManagerId(currentUsername));
 		assignManagerIssuedPassword(user, newPassword);
 		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
 		AppUser saved = appUserRepository.save(user);
 		return UserAccountResponse.from(saved);
+	}
+
+	/**
+	 * PUT /api/users/{id}/password-reset-request/reject：駁回重設密碼申請（V27）。
+	 * 例如管理者無法確認是本人提出。密碼不變；使用者之後可以再申請。沒有待處理申請回 409。
+	 */
+	@Transactional
+	public UserAccountResponse rejectPasswordResetRequest(Long id, String currentUsername) {
+		AppUser user = appUserRepository.findById(id)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+		passwordResetRequestService.closePending(user.getId(), PasswordResetRequestStatus.REJECTED,
+				resolveManagerId(currentUsername));
+		return UserAccountResponse.from(user);
+	}
+
+	private Long resolveManagerId(String username) {
+		return appUserRepository.findByUsername(username).map(AppUser::getId).orElse(null);
 	}
 
 	/**

@@ -8,6 +8,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -19,10 +22,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.dto.request.DecisionRecordExportRequest;
 import com.example.Product_Selection_260813.dto.request.ReviewSubmitRequest;
 import com.example.Product_Selection_260813.dto.response.ProductResponse;
 import com.example.Product_Selection_260813.dto.response.ReviewDetailResponse;
 import com.example.Product_Selection_260813.dto.response.ReviewRecordResponse;
+import com.example.Product_Selection_260813.service.DecisionRecordExportService;
 import com.example.Product_Selection_260813.service.ReviewService;
 
 import jakarta.validation.Valid;
@@ -51,6 +56,9 @@ public class ReviewController {
 
 	@Autowired
 	private ReviewService reviewService;
+
+	@Autowired
+	private DecisionRecordExportService decisionRecordExportService;
 
 	/**
 	 * GET /api/reviews/pending：待審清單，固定「未審核＋使用中＋正式候選」。
@@ -121,6 +129,28 @@ public class ReviewController {
 		Page<ReviewRecordResponse> result = reviewService.getDecisionRecords(reviewResult, keyword, reviewedFrom,
 				reviewedTo, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * POST /api/reviews/decision-records/export：管理層唯讀匯出決策紀錄 CSV（2026-09-26）。
+	 *
+	 * body 為決策紀錄頁目前的篩選條件（可省略＝全部），不分頁、審核時間新到舊。
+	 * 只讀：不寫入任何匯出紀錄，不影響品項管理「只看未曾匯出」的交接判斷（見
+	 * DecisionRecordExportService）。用 POST 是為了與品項匯出一致、且條件放 body；
+	 * 回應格式與品項匯出相同（text/csv、UTF-8 含 BOM、筆數在 X-Export-Count）。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PostMapping("/api/reviews/decision-records/export")
+	public ResponseEntity<byte[]> exportDecisionRecords(
+			@RequestBody(required = false) DecisionRecordExportRequest request) {
+		DecisionRecordExportService.ExportResult result = decisionRecordExportService.export(request);
+		return ResponseEntity.ok()
+				.contentType(new MediaType("text", "csv", java.nio.charset.StandardCharsets.UTF_8))
+				.header(HttpHeaders.CONTENT_DISPOSITION,
+						ContentDisposition.attachment().filename(result.filename()).build().toString())
+				.header("X-Export-Count", String.valueOf(result.rowCount()))
+				.header(HttpHeaders.CACHE_CONTROL, "no-store")
+				.body(result.content());
 	}
 
 	/**

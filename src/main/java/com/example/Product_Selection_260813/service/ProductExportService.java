@@ -1,9 +1,7 @@
 package com.example.Product_Selection_260813.service;
 
-import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -21,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.Product_Selection_260813.common.CsvSupport;
 import com.example.Product_Selection_260813.dto.request.ProductFilterRequest;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
@@ -58,9 +57,6 @@ public class ProductExportService {
 	/** 同步匯出的筆數上限。超過時請使用者縮小篩選範圍，避免單一請求過久或記憶體過大。 */
 	static final int MAX_EXPORT_ROWS = 5000;
 
-	/** Excel 開啟 UTF-8 CSV 需要 BOM，否則中文會變亂碼。 */
-	private static final byte[] UTF8_BOM = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
-	private static final String LINE_BREAK = "\r\n";
 	private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 	private static final DateTimeFormatter FILE_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
@@ -198,43 +194,20 @@ public class ProductExportService {
 	}
 
 	private static String number(BigDecimal value) {
-		return value == null ? "" : value.stripTrailingZeros().toPlainString();
+		return CsvSupport.number(value);
 	}
 
-	/**
-	 * 文字欄位防 CSV 公式注入：以 = + - @ 或 Tab／CR 開頭的內容，Excel 開啟時會當成公式執行。
-	 * 商品名稱、供應商等都是使用者輸入，前面補一個單引號讓 Excel 當成純文字。
-	 * 只套用在文字欄位；數字欄位（例如負毛利率）不經過這裡，維持可計算的數值。
-	 */
+	/** 規則見 CsvSupport.text()（2026-09-26 抽出共用）；保留此入口供既有測試與本類別使用。 */
 	static String text(String value) {
-		if (value == null) {
-			return "";
-		}
-		if (!value.isEmpty() && "=+-@\t\r".indexOf(value.charAt(0)) >= 0) {
-			return "'" + value;
-		}
-		return value;
+		return CsvSupport.text(value);
 	}
 
-	/** RFC 4180：含逗號、雙引號或換行的欄位以雙引號包住，內部雙引號重複一次。 */
+	/** 規則見 CsvSupport.escape()。 */
 	static String escape(String field) {
-		if (field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r")) {
-			return "\"" + field.replace("\"", "\"\"") + "\"";
-		}
-		return field;
+		return CsvSupport.escape(field);
 	}
 
 	static byte[] toBytes(List<List<String>> rows) {
-		StringBuilder csv = new StringBuilder();
-		appendLine(csv, HEADERS);
-		rows.forEach(row -> appendLine(csv, row));
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		out.writeBytes(UTF8_BOM);
-		out.writeBytes(csv.toString().getBytes(StandardCharsets.UTF_8));
-		return out.toByteArray();
-	}
-
-	private static void appendLine(StringBuilder csv, List<String> fields) {
-		csv.append(fields.stream().map(ProductExportService::escape).collect(Collectors.joining(","))).append(LINE_BREAK);
+		return CsvSupport.toBytes(HEADERS, rows);
 	}
 }

@@ -21,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.example.Product_Selection_260813.dto.request.UserCreateRequest;
 import com.example.Product_Selection_260813.dto.response.UserAccountResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
+import com.example.Product_Selection_260813.enums.PasswordResetRequestStatus;
 import com.example.Product_Selection_260813.enums.UserRole;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 
@@ -36,6 +37,9 @@ class UserServicePasswordLifecycleTest {
 
 	@Mock
 	private PasswordEncoder passwordEncoder;
+
+	@Mock
+	private PasswordResetRequestService passwordResetRequestService;
 
 	@InjectMocks
 	private UserService userService;
@@ -56,6 +60,7 @@ class UserServicePasswordLifecycleTest {
 	@Test
 	void resetPassword_設定新密碼並強制下次修改_同時讓現有登入失效() {
 		when(appUserRepository.findById(2L)).thenReturn(Optional.of(buyer));
+		when(appUserRepository.findByUsername("manager01")).thenReturn(Optional.of(manager()));
 		when(passwordEncoder.encode("Temp-1234")).thenReturn("temp-hash");
 		when(appUserRepository.save(buyer)).thenReturn(buyer);
 
@@ -65,6 +70,51 @@ class UserServicePasswordLifecycleTest {
 		assertThat(buyer.getMustChangePassword()).isTrue();
 		assertThat(buyer.getActiveSessionVersion()).isEqualTo(4);
 		assertThat(result.getMustChangePassword()).isTrue();
+		// V27：重設即結案本人的申請
+		verify(passwordResetRequestService).closePending(2L, PasswordResetRequestStatus.COMPLETED, 1L);
+	}
+
+	@Test
+	void resetPassword_沒有本人申請時拒絕且密碼不變_V27() {
+		when(appUserRepository.findById(2L)).thenReturn(Optional.of(buyer));
+		when(appUserRepository.findByUsername("manager01")).thenReturn(Optional.of(manager()));
+		when(passwordResetRequestService.closePending(2L, PasswordResetRequestStatus.COMPLETED, 1L))
+				.thenThrow(new IllegalStateException("此帳號沒有待處理的重設密碼申請"));
+
+		assertThatThrownBy(() -> userService.resetPassword(2L, "Temp-1234", "manager01"))
+				.isInstanceOf(IllegalStateException.class);
+		verify(appUserRepository, never()).save(any());
+		verify(passwordEncoder, never()).encode(any());
+	}
+
+	@Test
+	void rejectPasswordResetRequest_駁回申請且不動密碼_V27() {
+		when(appUserRepository.findById(2L)).thenReturn(Optional.of(buyer));
+		when(appUserRepository.findByUsername("manager01")).thenReturn(Optional.of(manager()));
+
+		userService.rejectPasswordResetRequest(2L, "manager01");
+
+		verify(passwordResetRequestService).closePending(2L, PasswordResetRequestStatus.REJECTED, 1L);
+		assertThat(buyer.getPassword()).isEqualTo("old-hash");
+	}
+
+	@Test
+	void disableUser_讓對方現有登入立即失效() {
+		when(appUserRepository.findById(2L)).thenReturn(Optional.of(buyer));
+		when(appUserRepository.save(buyer)).thenReturn(buyer);
+
+		userService.disableUser(2L, "manager01");
+
+		assertThat(buyer.getEnabled()).isFalse();
+		assertThat(buyer.getActiveSessionVersion()).isEqualTo(4);
+	}
+
+	private AppUser manager() {
+		AppUser manager = new AppUser();
+		ReflectionTestUtils.setField(manager, "id", 1L);
+		ReflectionTestUtils.setField(manager, "username", "manager01");
+		ReflectionTestUtils.setField(manager, "role", UserRole.MANAGER);
+		return manager;
 	}
 
 	@Test

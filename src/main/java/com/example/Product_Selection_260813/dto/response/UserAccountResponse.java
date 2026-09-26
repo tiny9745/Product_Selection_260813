@@ -27,6 +27,11 @@ public class UserAccountResponse {
 	private Boolean enabled;
 	/** V24：管理者設定的密碼尚未被使用者換掉（帳號管理表格顯示「待修改密碼」用）。 */
 	private Boolean mustChangePassword;
+	/**
+	 * V27：使用者本人提出、尚待處理的重設密碼申請時間；沒有申請為 null。
+	 * 只有這個欄位有值的帳號才能被管理者重設密碼（後端 UserService.resetPassword() 會擋）。
+	 */
+	private LocalDateTime passwordResetRequestedAt;
 	private LocalDateTime createdAt;
 
 	public static UserAccountResponse from(AppUser user) {
@@ -87,6 +92,16 @@ public class UserAccountResponse {
 
 	public void setMustChangePassword(Boolean mustChangePassword) {
 		this.mustChangePassword = mustChangePassword;
+	}
+
+	/** 補上待處理的重設密碼申請時間（批次查詢後填入），回傳 this 方便鏈式呼叫。 */
+	public UserAccountResponse withPasswordResetRequestedAt(LocalDateTime requestedAt) {
+		this.passwordResetRequestedAt = requestedAt;
+		return this;
+	}
+
+	public LocalDateTime getPasswordResetRequestedAt() {
+		return passwordResetRequestedAt;
 	}
 
 	public LocalDateTime getCreatedAt() {

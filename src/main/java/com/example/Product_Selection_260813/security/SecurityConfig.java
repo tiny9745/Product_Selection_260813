@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.security;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -50,6 +51,9 @@ public class SecurityConfig {
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/api/auth/login").permitAll()
+				// V27：忘記密碼的人無法登入，申請重設必須是公開端點；只允許 POST。
+				// 防濫用見 PasswordResetRequestService（不透露帳號是否存在、同帳號只保留一筆申請）。
+				.requestMatchers(HttpMethod.POST, "/api/auth/password-reset-requests").permitAll()
 				.anyRequest().authenticated()
 			)
 			// 未登入(401)／權限不足(403)一律回傳ApiResponse JSON格式，而非Spring Security預設行為，

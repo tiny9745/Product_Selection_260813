@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -16,10 +17,12 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.ChangePasswordRequest;
 import com.example.Product_Selection_260813.dto.request.LoginRequest;
+import com.example.Product_Selection_260813.dto.request.PasswordResetApplyRequest;
 import com.example.Product_Selection_260813.dto.request.UpdateProfileRequest;
 import com.example.Product_Selection_260813.dto.response.LoginResult;
 import com.example.Product_Selection_260813.dto.response.UserResponse;
 import com.example.Product_Selection_260813.service.AuthService;
+import com.example.Product_Selection_260813.service.PasswordResetRequestService;
 
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -39,6 +42,26 @@ public class AuthController {
 
 	@Autowired
 	private AuthService authService;
+
+	@Autowired
+	private PasswordResetRequestService passwordResetRequestService;
+
+	/**
+	 * POST /api/auth/password-reset-requests：申請重設密碼（V27，不需登入）。
+	 *
+	 * 忘記密碼的人無法登入，所以這支是公開端點（SecurityConfig permitAll）。為了不被用來試出
+	 * 系統有哪些帳號，不論帳號是否存在、是否停用、是否已申請過，一律回 202 與同一段訊息。
+	 * 管理者處理後會透過其他管道（口頭、通訊軟體）把臨時密碼交給使用者。
+	 */
+	@PostMapping("/password-reset-requests")
+	public ResponseEntity<ApiResponse<Void>> applyPasswordReset(@Valid @RequestBody PasswordResetApplyRequest request) {
+		passwordResetRequestService.apply(request.getUsername());
+		return ResponseEntity.status(HttpStatus.ACCEPTED)
+				.body(ApiResponse.success(PASSWORD_RESET_APPLIED_MESSAGE));
+	}
+
+	/** 申請重設密碼的固定回應訊息（不透露帳號是否存在）；前端直接顯示這段文字。 */
+	static final String PASSWORD_RESET_APPLIED_MESSAGE = "已送出申請。若帳號存在，管理者處理後會提供臨時密碼給您。";
 
 	/**
 	 * Cookie的Secure屬性，由設定檔決定而非寫死。

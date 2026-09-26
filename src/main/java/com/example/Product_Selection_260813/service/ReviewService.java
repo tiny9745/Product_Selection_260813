@@ -323,7 +323,7 @@ public class ReviewService {
 	 * 讓英文商品名大小寫不敏感），並跳脫 LIKE 萬用字元，避免使用者輸入
 	 * 「100%」這類字串時 % 被當成萬用字元。MySQL 預設跳脫字元為反斜線。
 	 */
-	private static String toLikeKeyword(String keyword) {
+	static String toLikeKeyword(String keyword) {
 		if (keyword == null || keyword.isBlank()) {
 			return null;
 		}

@@ -92,6 +92,7 @@ public class UserController {
 	 * PUT /api/users/{id}/reset-password：管理者代重設密碼（V24）。
 	 *
 	 * 重設後該帳號現有登入立即失效，使用者以新密碼登入後會被強制先修改密碼。
+	 * V27：只能重設「本人已在登入頁申請」的帳號，沒有待處理申請回 409。
 	 * 需帶入目前登入者 username，供 Service 層擋下「重設自己」（理由見 UserService.resetPassword()）。
 	 */
 	@PreAuthorize("hasRole('MANAGER')")
@@ -100,5 +101,17 @@ public class UserController {
 			@Valid @RequestBody UserPasswordResetRequest request, @AuthenticationPrincipal String username) {
 		UserAccountResponse result = userService.resetPassword(id, request.getNewPassword(), username);
 		return ResponseEntity.ok(ApiResponse.success("密碼已重設，該使用者下次登入時需先修改密碼", result));
+	}
+
+	/**
+	 * PUT /api/users/{id}/password-reset-request/reject：駁回重設密碼申請（V27）。
+	 * 重設密碼（上方）現在必須先有本人申請；無法確認是本人時用這支駁回。
+	 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@PutMapping("/{id}/password-reset-request/reject")
+	public ResponseEntity<ApiResponse<UserAccountResponse>> rejectPasswordResetRequest(@PathVariable("id") Long id,
+			@AuthenticationPrincipal String username) {
+		UserAccountResponse result = userService.rejectPasswordResetRequest(id, username);
+		return ResponseEntity.ok(ApiResponse.success("已駁回重設密碼申請", result));
 	}
 }
