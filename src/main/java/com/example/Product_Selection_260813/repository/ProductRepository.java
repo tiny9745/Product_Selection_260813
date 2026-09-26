@@ -133,6 +133,39 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             ProductCandidateStatus candidateStatus, Pageable pageable);
 
     /**
+     * 選品審核待審清單（2026-09-26 起的實際查詢）：狀態條件同上，另加可選的
+     * 關鍵字／分類／送審日期，全部在資料庫篩選，分頁資訊才會與畫面一致。
+     *
+     * 「送審人」與「送審時間」的判斷對齊畫面顯示的退回規則：
+     * - 送審人＝submittedBy，沒有時退回 createdBy（V25 前重新送審過、無法回填的商品）
+     * - 送審時間＝submittedAt，沒有時退回 updatedAt
+     * 關鍵字比對商品名稱或送審人姓名。所有參數 null＝不篩選。
+     */
+    @Query("""
+            SELECT p FROM Product p
+            WHERE p.reviewStatus = :reviewStatus
+              AND p.itemStatus = :itemStatus
+              AND p.candidateStatus = :candidateStatus
+              AND (:keyword IS NULL
+                   OR p.name LIKE CONCAT('%', :keyword, '%')
+                   OR EXISTS (SELECT u.id FROM AppUser u
+                              WHERE u.id = COALESCE(p.submittedBy, p.createdBy)
+                                AND u.name LIKE CONCAT('%', :keyword, '%')))
+              AND (:productTypeId IS NULL OR p.productTypeId = :productTypeId)
+              AND (:submittedFrom IS NULL OR COALESCE(p.submittedAt, p.updatedAt) >= :submittedFrom)
+              AND (:submittedToExclusive IS NULL OR COALESCE(p.submittedAt, p.updatedAt) < :submittedToExclusive)
+            """)
+    Page<Product> searchPending(
+            @Param("reviewStatus") ProductReviewStatus reviewStatus,
+            @Param("itemStatus") ProductItemStatus itemStatus,
+            @Param("candidateStatus") ProductCandidateStatus candidateStatus,
+            @Param("keyword") String keyword,
+            @Param("productTypeId") Long productTypeId,
+            @Param("submittedFrom") java.time.LocalDateTime submittedFrom,
+            @Param("submittedToExclusive") java.time.LocalDateTime submittedToExclusive,
+            Pageable pageable);
+
+    /**
      * 選品轉換率分母：submission_count>0（曾送審過）的不重複商品數。
      */
     long countBySubmissionCountGreaterThan(int submissionCount);

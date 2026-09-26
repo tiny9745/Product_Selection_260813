@@ -53,13 +53,27 @@ public class ReviewController {
 	private ReviewService reviewService;
 
 	/**
-	 * GET /api/reviews/pending：待審清單，預設「未審核＋使用中」。
+	 * GET /api/reviews/pending：待審清單，固定「未審核＋使用中＋正式候選」。
+	 *
+	 * 2026-09-26 修正（待審清單分頁錯亂）：搜尋、分類、送審日期原本只在前端對「當頁 20 筆」
+	 * 篩選，但分頁資訊（總頁數／總筆數）來自未篩選的全量結果，造成「第 1 頁不足 20 筆
+	 * 卻還有第 2 頁、而且第 2 頁有資料」。改由後端篩選，以下參數皆選填、不帶＝不篩選：
+	 * - keyword：比對商品名稱或送審人姓名（部分比對）
+	 * - productTypeId：商品分類（子類 id）
+	 * - submittedFrom／submittedTo：送審日期 yyyy-MM-dd，兩端皆含當天
 	 */
 	@PreAuthorize("hasRole('MANAGER')")
 	@GetMapping("/api/reviews/pending")
 	public ResponseEntity<ApiResponse<Page<ProductResponse>>> getPendingReviews(
+			@RequestParam(value = "keyword", required = false) String keyword,
+			@RequestParam(value = "productTypeId", required = false) Long productTypeId,
+			@RequestParam(value = "submittedFrom", required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate submittedFrom,
+			@RequestParam(value = "submittedTo", required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate submittedTo,
 			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ProductResponse> result = reviewService.getPendingReviews(pageable);
+		Page<ProductResponse> result = reviewService.getPendingReviews(keyword, productTypeId, submittedFrom,
+				submittedTo, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

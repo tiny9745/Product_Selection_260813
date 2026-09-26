@@ -113,12 +113,23 @@ public class ReviewService {
 	// ========================= 查詢 =========================
 
 	/**
-	 * GET /api/reviews/pending：待審清單，預設「未審核＋使用中」。
+	 * GET /api/reviews/pending：待審清單，固定「未審核＋使用中＋正式候選」。
+	 *
+	 * 2026-09-26：搜尋／分類／送審日期改由後端篩選（原本前端只篩當頁，分頁資訊對不上），
+	 * 條件語意見 ProductRepository.searchPending()。日期為閉區間，換算成
+	 * [起日 00:00, 迄日隔天 00:00)；起日晚於迄日回 400，不默默回傳 0 筆。
 	 */
 	@Transactional(readOnly = true)
-	public Page<ProductResponse> getPendingReviews(Pageable pageable) {
-		Page<Product> page = productRepository.findByReviewStatusAndItemStatusAndCandidateStatus(
-				ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE, ProductCandidateStatus.CANDIDATE, pageable);
+	public Page<ProductResponse> getPendingReviews(String keyword, Long productTypeId, LocalDate submittedFrom,
+			LocalDate submittedTo, Pageable pageable) {
+		if (submittedFrom != null && submittedTo != null && submittedFrom.isAfter(submittedTo)) {
+			throw new IllegalArgumentException("送審日期起日不可晚於迄日");
+		}
+		String trimmedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+		Page<Product> page = productRepository.searchPending(ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE,
+				ProductCandidateStatus.CANDIDATE, trimmedKeyword, productTypeId,
+				submittedFrom == null ? null : submittedFrom.atStartOfDay(),
+				submittedTo == null ? null : submittedTo.plusDays(1).atStartOfDay(), pageable);
 
 		// 批次查一次 createdBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		// app_users 是使用者帳號本身的資料，不屬於評分／AI 網域，不算跨越

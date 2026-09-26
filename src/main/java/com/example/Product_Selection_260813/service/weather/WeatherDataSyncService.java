@@ -35,8 +35,10 @@ import com.example.Product_Selection_260813.service.campaign.FestiveCampaignsCha
  *
  * <b>抓取範圍（規格 1.2 A）：</b>
  * <ul>
- * <li>冷啟動：某區在過去 historyDays 天內累積的歷史天數少於門檻（預設 27 天，保留緩衝）時，
- * 用 past_days=historyDays 一次補齊。</li>
+ * <li>補齊：某區在過去 historyDays 天內累積的歷史天數少於門檻時，用 past_days=historyDays
+ * 一次補齊。2026-09-26 起門檻預設＝historyDays（30 天）：只要歷史窗口有任何一天缺漏就補齊，
+ * 原本 27 天的緩衝會讓缺 1～3 天的區域一直帶著缺口計算。補齊與平常同步的 API 呼叫次數
+ * 相同（一個代表城市一次請求），只是回應多幾十天的資料，成本可以忽略。</li>
  * <li>平常：past_days=2（昨天與前天，涵蓋排程偶爾漏跑一天）＋完整預報天數。</li>
  * </ul>
  * 四區各自判斷冷啟動，一區補資料不會拖累其他區只抓少量。
@@ -63,9 +65,13 @@ public class WeatherDataSyncService {
 	@Value("${weather.forecast-days:14}")
 	private int forecastDays = 14;
 
-	/** 歷史天數少於此值視為冷啟動（規格範例值 27，可設定）。 */
-	@Value("${weather.history-cold-start-threshold-days:27}")
-	private int coldStartThresholdDays = 27;
+	/**
+	 * 歷史天數少於此值就補齊整段歷史窗口。預設跟著 weather.history-days（30 天）：窗口不滿就補。
+	 * 設定值大於 historyDays 沒有意義（永遠達不到，每天都會全量補抓），一律以 historyDays 為上限，
+	 * 見 effectiveColdStartThreshold()。
+	 */
+	@Value("${weather.history-cold-start-threshold-days:${weather.history-days:30}}")
+	private int coldStartThresholdDays = 30;
 
 	public WeatherDataSyncService(WeatherClient weatherClient, DailyWeatherRecordRepository dailyWeatherRecordRepository,
 			ApplicationEventPublisher eventPublisher) {
@@ -91,7 +97,7 @@ public class WeatherDataSyncService {
 		for (Map.Entry<String, List<WeatherRegionConfig.City>> entry : WeatherRegionConfig.REGION_CITIES.entrySet()) {
 			String region = entry.getKey();
 			boolean coldStart = dailyWeatherRecordRepository.countHistoryDays(region, today.minusDays(historyDays),
-					today) < coldStartThresholdDays;
+					today) < effectiveColdStartThreshold();
 			int pastDays = coldStart ? historyDays : ROUTINE_PAST_DAYS;
 
 			List<DailyWeatherMetrics> perCityDays = fetchRegionCities(region, entry.getValue(), pastDays);
@@ -140,7 +146,12 @@ public class WeatherDataSyncService {
 			regions.add(new WeatherDataStatusResponse.RegionStatus(region, WeatherRegionConfig.regionLabel(region),
 					historyCount, forecastCount, fetchedAt));
 		}
-		return new WeatherDataStatusResponse(historyDays, forecastDays, coldStartThresholdDays, latest, regions);
+		return new WeatherDataStatusResponse(historyDays, forecastDays, effectiveColdStartThreshold(), latest, regions);
+	}
+
+	/** 實際採用的補齊門檻：設定值與 historyDays 取小（理由見 coldStartThresholdDays 說明）。 */
+	int effectiveColdStartThreshold() {
+		return Math.min(coldStartThresholdDays, historyDays);
 	}
 
 	private int upsert(String region, Map<LocalDate, DailyWeatherMetrics> byDate, LocalDateTime fetchedAt) {

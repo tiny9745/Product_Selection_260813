@@ -58,6 +58,18 @@ class WeatherDataSyncServiceTest {
 	}
 
 	@Test
+	void 歷史窗口缺一天也會補齊_門檻為30天() {
+		// 2026-09-26：原門檻 27 天時，29 天不會補齊；改為 30 天後缺任何一天都補。
+		when(dailyWeatherRecordRepository.countHistoryDays(anyString(), any(), any())).thenReturn(29L);
+		when(weatherClient.fetchDaily(anyDouble(), anyDouble(), eq(30), eq(14))).thenReturn(oneDay());
+
+		WeatherSyncResponse result = syncService.syncWeatherData();
+
+		assertThat(result.coldStartRegions()).hasSize(WeatherRegionConfig.REGION_CITIES.size());
+		assertThat(syncService.effectiveColdStartThreshold()).isEqualTo(30);
+	}
+
+	@Test
 	void 歷史天數足夠時只補最近兩天() {
 		when(dailyWeatherRecordRepository.countHistoryDays(anyString(), any(), any())).thenReturn(30L);
 		when(weatherClient.fetchDaily(anyDouble(), anyDouble(), eq(2), eq(14))).thenReturn(oneDay());
