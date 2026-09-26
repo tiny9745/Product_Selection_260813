@@ -60,6 +60,10 @@ public class ProductEvaluation {
 	@Column(name = "festival_boost", precision = 5, scale = 2)
 	private BigDecimal festivalBoost = BigDecimal.ZERO;
 
+	/** 天氣加成（V26）：與節慶加成並列，final_score＝total＋festival＋weather。 */
+	@Column(name = "weather_boost", nullable = false, precision = 5, scale = 2)
+	private BigDecimal weatherBoost = BigDecimal.ZERO;
+
 	@Column(name = "matched_campaign_id")
 	private Long matchedCampaignId;
 
@@ -179,6 +183,14 @@ public class ProductEvaluation {
 
 	public void setFestivalBoost(BigDecimal festivalBoost) {
 		this.festivalBoost = festivalBoost;
+	}
+
+	public BigDecimal getWeatherBoost() {
+		return weatherBoost;
+	}
+
+	public void setWeatherBoost(BigDecimal weatherBoost) {
+		this.weatherBoost = weatherBoost;
 	}
 
 	public Long getMatchedCampaignId() {

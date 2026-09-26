@@ -20,8 +20,10 @@ import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
+import com.example.Product_Selection_260813.service.weather.WeatherBoostService;
 
 /**
  * 2026-09-24（Bug B）：getFestivalBoostDetail() 的 LIVE 分支，festivalBoost 必須由同一份即時
@@ -40,6 +42,10 @@ class ScoringServiceFestivalBoostDetailTest {
 	@Mock
 	private ProductEvaluationRepository productEvaluationRepository;
 
+	/** V26：spy 會直接替換 buildWeatherBoostSnapshot()，這個 mock 只是讓 @InjectMocks 填滿欄位。 */
+	@Mock
+	private WeatherBoostService weatherBoostService;
+
 	@Spy
 	@InjectMocks
 	private ScoringService scoringService;
@@ -52,6 +58,14 @@ class ScoringServiceFestivalBoostDetailTest {
 		product.setId(PRODUCT_ID);
 		product.setReviewStatus(ProductReviewStatus.PENDING);
 		when(productRepository.findById(PRODUCT_ID)).thenReturn(Optional.of(product));
+		// V26：預設沒有天氣加成，既有案例的最終分數不變。
+		doReturn(weather("0.00")).when(scoringService).buildWeatherBoostSnapshot(product);
+	}
+
+	private static WeatherBoostSnapshot weather(String boost) {
+		WeatherBoostSnapshot snapshot = new WeatherBoostSnapshot();
+		snapshot.setWeatherBoost(new BigDecimal(boost));
+		return snapshot;
 	}
 
 	private static MatchedCampaignSnapshot snapshot(String matchWeight, String urgencyFactor) {
@@ -103,5 +117,19 @@ class ScoringServiceFestivalBoostDetailTest {
 
 		assertThat(response.getFestivalBoost()).isEqualByComparingTo("1.50");
 		assertThat(response.getFinalScore()).isNull();
+	}
+
+	@Test
+	void 最終分數包含天氣加成_V26() {
+		doReturn(snapshot("1.0", "1.0")).when(scoringService).buildMatchedCampaignSnapshot(product);
+		doReturn(weather("1.20")).when(scoringService).buildWeatherBoostSnapshot(product);
+		when(productEvaluationRepository.findByProductId(PRODUCT_ID)).thenReturn(Optional.of(staleEvaluation("80.00")));
+
+		FestivalBoostResponse response = scoringService.getFestivalBoostDetail(PRODUCT_ID);
+
+		assertThat(response.getWeatherBoost()).isEqualByComparingTo("1.20");
+		assertThat(response.getWeatherBoostDetail()).isNotNull();
+		// 80 ＋ 節慶 5.00 ＋ 天氣 1.20
+		assertThat(response.getFinalScore()).isEqualByComparingTo("86.20");
 	}
 }

@@ -10,6 +10,7 @@ import org.hibernate.type.SqlTypes;
 
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.json.ProductSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
@@ -62,6 +63,15 @@ public class ReviewRecord {
 
     @Column(name = "festival_boost_snapshot", precision = 5, scale = 2)
     private BigDecimal festivalBoostSnapshot;
+
+    /** 審核當時的天氣加成（V26）；V26 前的紀錄為 null。 */
+    @Column(name = "weather_boost_snapshot", precision = 5, scale = 2)
+    private BigDecimal weatherBoostSnapshot;
+
+    /** 審核當時的天氣加成明細（V26），不可覆寫；日後比重或上限變更不影響重現。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "weather_boost_detail_snapshot", columnDefinition = "json")
+    private WeatherBoostSnapshot weatherBoostDetailSnapshot;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "matched_campaign_snapshot", columnDefinition = "json")
@@ -217,6 +227,22 @@ public class ReviewRecord {
 
     public void setFestivalBoostSnapshot(BigDecimal festivalBoostSnapshot) {
         this.festivalBoostSnapshot = festivalBoostSnapshot;
+    }
+
+    public BigDecimal getWeatherBoostSnapshot() {
+        return weatherBoostSnapshot;
+    }
+
+    public void setWeatherBoostSnapshot(BigDecimal weatherBoostSnapshot) {
+        this.weatherBoostSnapshot = weatherBoostSnapshot;
+    }
+
+    public WeatherBoostSnapshot getWeatherBoostDetailSnapshot() {
+        return weatherBoostDetailSnapshot;
+    }
+
+    public void setWeatherBoostDetailSnapshot(WeatherBoostSnapshot weatherBoostDetailSnapshot) {
+        this.weatherBoostDetailSnapshot = weatherBoostDetailSnapshot;
     }
 
     public MatchedCampaignSnapshot getMatchedCampaignSnapshot() {

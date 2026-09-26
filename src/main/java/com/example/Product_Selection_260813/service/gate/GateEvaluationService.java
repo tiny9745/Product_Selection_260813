@@ -5,7 +5,6 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -13,13 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
 import com.example.Product_Selection_260813.constants.BusinessTimeZone;
-import com.example.Product_Selection_260813.entity.FestiveCampaign;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.enums.ShelfLifeTier;
 import com.example.Product_Selection_260813.enums.SupplierLeadTimeTier;
 import com.example.Product_Selection_260813.enums.TemperatureZone;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
-import com.example.Product_Selection_260813.repository.FestiveCampaignRepository;
 import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.service.resolver.MoqResolver;
@@ -65,19 +62,16 @@ public class GateEvaluationService {
 	private final MoqResolver moqResolver;
 	private final AlgorithmSettings algorithmSettings;
 	private final GroupBuyRecordRepository groupBuyRecordRepository;
-	private final FestiveCampaignRepository festiveCampaignRepository;
 
 	@Autowired
 	public GateEvaluationService(ProductTypeAttributeResolver attributeResolver,
 			MoqResolver moqResolver,
 			AlgorithmSettings algorithmSettings,
-			GroupBuyRecordRepository groupBuyRecordRepository,
-			FestiveCampaignRepository festiveCampaignRepository) {
+			GroupBuyRecordRepository groupBuyRecordRepository) {
 		this.attributeResolver = attributeResolver;
 		this.moqResolver = moqResolver;
 		this.algorithmSettings = algorithmSettings;
 		this.groupBuyRecordRepository = groupBuyRecordRepository;
-		this.festiveCampaignRepository = festiveCampaignRepository;
 	}
 
 	/**
@@ -197,13 +191,10 @@ public class GateEvaluationService {
 					"供應商備貨前置期的值無法辨識：" + rawTier);
 		}
 
-		// 2026-09-24（V21，修正 B3）：節慶／季節型的 start_date 已是 NULL，改讀快照裡命中當期的開始日；
-		// 快照沒有這個值（V21 之前產生的舊快照）才退回查檔期資料表（只有天氣型還有 start_date）。
+		// 2026-09-24（V21，修正 B3）：讀快照裡命中當期的開始日。V26 起 festive_campaigns 已無
+		// start_date 欄位（原本只剩天氣檔期使用），不再有退回查表的路徑；快照一律由
+		// ScoringService.matchCampaign() 當下產生，必定帶有本期開始日。
 		LocalDate startDate = matchedCampaign.occurrenceStartLocalDate();
-		if (startDate == null) {
-			Optional<FestiveCampaign> campaignOpt = festiveCampaignRepository.findById(matchedCampaign.getCampaignId());
-			startDate = campaignOpt.map(FestiveCampaign::getStartDate).orElse(null);
-		}
 		if (startDate == null) {
 			return GateResult.insufficientData(GATE_LEAD_TIME, RISK_SUPPLY,
 					"命中的檔期查無起始日期，無法計算剩餘備貨天數");

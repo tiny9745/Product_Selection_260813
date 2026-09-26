@@ -1,7 +1,5 @@
 package com.example.Product_Selection_260813.service.campaign;
 
-import java.time.LocalDate;
-
 import com.example.Product_Selection_260813.enums.CampaignDateRuleType;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.ObservedHolidayRule;
@@ -14,7 +12,7 @@ import com.example.Product_Selection_260813.enums.SolarTerm;
  * 的情況下單元測試；建立前的即時預覽（occurrence-preview）也沒有 Entity 可用。
  * 由 {@link CampaignDateRules} 從 Entity 或 Request 轉換而來。
  *
- * weatherStartDate／weatherEndDate 只在 category=WEATHER 時使用（同步服務寫入的實際日期）。
+ * V26：天氣檔期移除後，原本只給天氣用的 weatherStartDate／weatherEndDate 一併移除。
  */
 public record CampaignDateRule(
 		FestiveCategory category,
@@ -29,11 +27,5 @@ public record CampaignDateRule(
 		Integer endMonth,
 		Integer endDay,
 		ObservedHolidayRule observedHolidayRule,
-		boolean expandLongWeekend,
-		LocalDate weatherStartDate,
-		LocalDate weatherEndDate) {
-
-	public boolean isWeather() {
-		return category == FestiveCategory.WEATHER;
-	}
+		boolean expandLongWeekend) {
 }

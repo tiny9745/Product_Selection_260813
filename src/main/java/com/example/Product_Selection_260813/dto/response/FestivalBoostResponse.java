@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.dto.response;
 import java.math.BigDecimal;
 
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 
 /**
  * GET /api/products/{id}/festival-boost：該商品目前命中的檔期、Match Weight、
@@ -22,6 +23,11 @@ public class FestivalBoostResponse {
 	private MatchedCampaignSnapshot matchedCampaign;
 
 	private BigDecimal festivalBoost;
+
+	/** 天氣加成（V26）與其明細；finalScore 已包含這一項。SNAPSHOT 且為 V26 前的紀錄時兩者皆為 null。 */
+	private BigDecimal weatherBoost;
+
+	private WeatherBoostSnapshot weatherBoostDetail;
 
 	private BigDecimal finalScore;
 
@@ -47,6 +53,22 @@ public class FestivalBoostResponse {
 
 	public void setFestivalBoost(BigDecimal festivalBoost) {
 		this.festivalBoost = festivalBoost;
+	}
+
+	public BigDecimal getWeatherBoost() {
+		return weatherBoost;
+	}
+
+	public void setWeatherBoost(BigDecimal weatherBoost) {
+		this.weatherBoost = weatherBoost;
+	}
+
+	public WeatherBoostSnapshot getWeatherBoostDetail() {
+		return weatherBoostDetail;
+	}
+
+	public void setWeatherBoostDetail(WeatherBoostSnapshot weatherBoostDetail) {
+		this.weatherBoostDetail = weatherBoostDetail;
 	}
 
 	public BigDecimal getFinalScore() {

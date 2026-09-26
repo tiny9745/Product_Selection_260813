@@ -32,6 +32,7 @@ import com.example.Product_Selection_260813.constants.BusinessTimeZone;
 import com.example.Product_Selection_260813.service.campaign.ActiveCampaignWindow;
 import com.example.Product_Selection_260813.service.campaign.CampaignUrgencyCalculator;
 import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
+import com.example.Product_Selection_260813.service.weather.WeatherBoostService;
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.dto.response.EvaluationResponse;
@@ -53,6 +54,7 @@ import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
@@ -136,6 +138,13 @@ public class ScoringService {
 	/** 2026-09-24 V21：計分候選檔期改由規則推算（取代 FestiveCampaignRepository.findByCampaignStatusIn）。 */
 	@Autowired
 	private FestiveCampaignRuleService festiveCampaignRuleService;
+
+	/**
+	 * V26：天氣加成（與節慶加成並列）。最終分數＝加權總分＋節慶加成＋天氣加成；
+	 * 計算規則見 WeatherBoostService 類別說明。
+	 */
+	@Autowired
+	private WeatherBoostService weatherBoostService;
 
 	@Autowired
 	private FestiveCampaignTagRepository festiveCampaignTagRepository;
@@ -497,16 +506,32 @@ public class ScoringService {
 		snapshot.setRegions(new ArrayList<>(bestWindow.regions()));
 		snapshot.setRegionCoverageRatio(bestUrgency.regionCoverage());
 		snapshot.setTimeFactor(bestUrgency.timeFactor());
-		snapshot.setWeatherConfidenceFactor(bestUrgency.weatherConfidenceFactor());
 		return snapshot;
 	}
 
-	/** 急迫係數與其三個乘數，公式見 CampaignUrgencyCalculator（修正 B2）。 */
+	/** 急迫係數與其乘數，公式見 CampaignUrgencyCalculator（修正 B2；V26 移除天氣可信度乘數）。 */
 	private CampaignUrgencyCalculator.Result calculateUrgencyFactor(ActiveCampaignWindow window, LocalDate today) {
 		FestiveCampaign campaign = window.campaign();
 		return CampaignUrgencyCalculator.calculate(campaign.getCategory(), window.status(),
-				campaign.getPreparationLeadDays(), window.occurrence().startDate(), today,
-				campaign.getWeatherConfidence(), window.regionCoverage());
+				campaign.getPreparationLeadDays(), window.occurrence().startDate(), today, window.regionCoverage());
+	}
+
+	/**
+	 * 商品目前的天氣加成明細（V26）。審核快照（ReviewService.submitReview）與 LIVE 明細共用，
+	 * 確保快照裡的天氣加成與畫面即時明細是同一套計算。
+	 */
+	@Transactional(readOnly = true)
+	public WeatherBoostSnapshot buildWeatherBoostSnapshot(Product product) {
+		return weatherBoostService.evaluateNow(splitTags(product.getCampaignTags()));
+	}
+
+	/** 最終分數＝加權總分＋節慶加成＋天氣加成（V26）；加權總分為 null 時維持 null（不以 0 誤導）。 */
+	public static BigDecimal composeFinalScore(BigDecimal totalScore, BigDecimal festivalBoost, BigDecimal weatherBoost) {
+		if (totalScore == null) {
+			return null;
+		}
+		return totalScore.add(festivalBoost == null ? BigDecimal.ZERO : festivalBoost)
+				.add(weatherBoost == null ? BigDecimal.ZERO : weatherBoost).setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
@@ -549,6 +574,7 @@ public class ScoringService {
 		response.setTotalScore(record.getTotalScore());
 		response.setDataCompleteness(record.getDataCompleteness());
 		response.setFestivalBoost(record.getFestivalBoostSnapshot());
+		response.setWeatherBoost(record.getWeatherBoostSnapshot());
 		response.setFinalScore(record.getFinalScoreSnapshot());
 		return response;
 	}
@@ -577,6 +603,7 @@ public class ScoringService {
 			response.setTotalScore(evaluation.getTotalScore());
 			response.setDataCompleteness(evaluation.getDataCompleteness());
 			response.setFestivalBoost(evaluation.getFestivalBoost());
+			response.setWeatherBoost(evaluation.getWeatherBoost());
 			response.setFinalScore(evaluation.getFinalScore());
 		});
 		return response;
@@ -601,6 +628,8 @@ public class ScoringService {
 				response.setDataSource("SNAPSHOT");
 				response.setMatchedCampaign(record.getMatchedCampaignSnapshot());
 				response.setFestivalBoost(record.getFestivalBoostSnapshot());
+				response.setWeatherBoost(record.getWeatherBoostSnapshot());
+				response.setWeatherBoostDetail(record.getWeatherBoostDetailSnapshot());
 				response.setFinalScore(record.getFinalScoreSnapshot());
 				return response;
 			}
@@ -624,13 +653,15 @@ public class ScoringService {
 		// 那是排程重算的議題（獨立 backlog），不在本次範圍。
 		BigDecimal freshFestivalBoost = calculateFestivalBoost(campaignSnapshot);
 		response.setFestivalBoost(freshFestivalBoost);
+		// V26：天氣加成同樣即時計算，與節慶加成、命中明細基於同一時間點。
+		WeatherBoostSnapshot weather = buildWeatherBoostSnapshot(product);
+		response.setWeatherBoost(weather.getWeatherBoost());
+		response.setWeatherBoostDetail(weather);
 		getCurrentEvaluation(productId).ifPresent(evaluation -> {
 			// totalScore 為 null（資料完整度未達門檻、從未成功計分）時 finalScore 維持 null，
 			// 前端顯示「—」，不用 0 誤導。
-			if (evaluation.getTotalScore() != null) {
-				response.setFinalScore(evaluation.getTotalScore().add(freshFestivalBoost)
-						.setScale(2, RoundingMode.HALF_UP));
-			}
+			response.setFinalScore(
+					composeFinalScore(evaluation.getTotalScore(), freshFestivalBoost, weather.getWeatherBoost()));
 		});
 		return response;
 	}
@@ -654,8 +685,9 @@ public class ScoringService {
 	// ============================================================
 
 	/**
-	 * 只重算 product_evaluations 裡「會隨日期與檔期設定變動」的三欄：festival_boost、
-	 * matched_campaign_id、final_score（＝已存 total_score＋新加成）。加權總分等其餘欄位不動，
+	 * 只重算 product_evaluations 裡「會隨日期與檔期設定變動」的欄位：festival_boost、
+	 * matched_campaign_id、weather_boost（V26）、final_score（＝已存 total_score＋兩種加成）。
+	 * V26 起天氣資料同步、天氣加成設定、天氣標籤對照變更也會觸發這裡（同一個事件）。加權總分等其餘欄位不動，
 	 * calculated_at 也不動（它代表完整評分的計算時間）。
 	 *
 	 * <b>為什麼需要：</b>urgencyFactor 以「天」為單位隨檔期接近而上升、檔期狀態會轉換，但
@@ -697,6 +729,8 @@ public class ScoringService {
 		List<ActiveCampaignWindow> candidates = festiveCampaignRuleService.findLiveWindows(today);
 		Map<Long, List<FestiveCampaignTag>> tagsByCampaign = candidates.isEmpty() ? Map.of()
 				: loadCampaignTags(candidates);
+		// V26：天氣資料、對照表與設定同樣整批只載入一次。
+		WeatherBoostService.Context weatherContext = weatherBoostService.loadContext(today);
 
 		List<ProductEvaluation> changed = new ArrayList<>();
 		for (Product product : products) {
@@ -709,20 +743,23 @@ public class ScoringService {
 					: matchCampaign(productTags, candidates, tagsByCampaign, today);
 			BigDecimal festivalBoost = calculateFestivalBoost(snapshot);
 			Long matchedCampaignId = snapshot != null ? snapshot.getCampaignId() : null;
-			BigDecimal finalScore = evaluation.getTotalScore().add(festivalBoost).setScale(2, RoundingMode.HALF_UP);
+			BigDecimal weatherBoost = WeatherBoostService.evaluate(weatherContext, productTags).getWeatherBoost();
+			BigDecimal finalScore = composeFinalScore(evaluation.getTotalScore(), festivalBoost, weatherBoost);
 
 			if (sameValue(evaluation.getFestivalBoost(), festivalBoost)
+					&& sameValue(evaluation.getWeatherBoost(), weatherBoost)
 					&& sameValue(evaluation.getFinalScore(), finalScore)
 					&& Objects.equals(evaluation.getMatchedCampaignId(), matchedCampaignId)) {
 				continue; // 沒變就不寫，避免每天整批無意義 UPDATE
 			}
 			evaluation.setFestivalBoost(festivalBoost);
 			evaluation.setMatchedCampaignId(matchedCampaignId);
+			evaluation.setWeatherBoost(weatherBoost);
 			evaluation.setFinalScore(finalScore);
 			changed.add(evaluation);
 		}
 		productEvaluationRepository.saveAll(changed);
-		log.info("節慶加成重算完成：檢查 {} 個未核准商品，更新 {} 筆", products.size(), changed.size());
+		log.info("節慶／天氣加成重算完成：檢查 {} 個未核准商品，更新 {} 筆", products.size(), changed.size());
 		return changed.size();
 	}
 
@@ -840,6 +877,7 @@ public class ScoringService {
 
 		MatchedCampaignSnapshot campaignSnapshot = buildMatchedCampaignSnapshot(product);
 		BigDecimal festivalBoost = calculateFestivalBoost(campaignSnapshot);
+		BigDecimal weatherBoost = buildWeatherBoostSnapshot(product).getWeatherBoost();
 
 		evaluation.setBusinessScore(businessScore);
 		evaluation.setAudienceScore(audienceScore);
@@ -850,7 +888,8 @@ public class ScoringService {
 		evaluation.setTotalScore(totalScore);
 		evaluation.setFestivalBoost(festivalBoost);
 		evaluation.setMatchedCampaignId(campaignSnapshot != null ? campaignSnapshot.getCampaignId() : null);
-		evaluation.setFinalScore(totalScore.add(festivalBoost).setScale(2, RoundingMode.HALF_UP));
+		evaluation.setWeatherBoost(weatherBoost);
+		evaluation.setFinalScore(composeFinalScore(totalScore, festivalBoost, weatherBoost));
 		evaluation.setCalculatedAt(LocalDateTime.now());
 
 		productEvaluationRepository.save(evaluation);

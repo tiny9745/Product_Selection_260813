@@ -1,22 +1,17 @@
 package com.example.Product_Selection_260813.service.weather;
 
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import com.example.Product_Selection_260813.dto.weather.WeatherSignal;
-import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 import com.example.Product_Selection_260813.enums.WeatherSignalType;
 
 /**
- * 把（已跨代表城市平均過的）每日氣象數值，分類成WeatherSignalType，再把
- * 連續天數分組成WeatherSignal窗口——對應規劃文件第23節分層裡的
- * 「Normalizer」這一層。
+ * 把（已跨代表城市平均過的）每日氣象數值，分類成WeatherSignalType——對應規劃文件
+ * 第23節分層裡的「Normalizer」這一層。
+ *
+ * V26（2026-09-25）：天氣檔期移除後，原本「把連續天數分組成訊號窗口、推算預報可信度」
+ * 的部分一併移除；分類結果改由 WeatherBoostService 逐日對照商品標籤、計算天氣加成。
  *
  * 刻意寫成純靜態方法、不注入任何Spring Bean：分類門檻與分組演算法是這支
  * 服務裡「業務規則最集中」的地方，比照ScoringAlgorithms（見該類別的
@@ -28,8 +23,7 @@ import com.example.Product_Selection_260813.enums.WeatherSignalType;
  * COLD／COOL／DRY_COOL，互斥，一天最多一種）、降雨（RAINY／HEAVY_RAIN，
  * 互斥）、強風（STRONG_WIND）是三條獨立判斷軸線，例如「濕冷又颳大風」的
  * 一天會同時產生COLD與STRONG_WIND兩個訊號——這是刻意設計，不是漏寫if/else：
- * WeatherCampaignSyncService.buildCampaignCode()把type included進campaign
- * code，同一天的不同類型本來就會變成不同的festive_campaigns記錄，不衝突。
+ * 天氣加成逐日取「所有訊號對應標籤中的最高權重」，多個訊號同時成立不會衝突。
  */
 final class WeatherNormalizer {
 
@@ -65,19 +59,26 @@ final class WeatherNormalizer {
 	private static final double STRONG_WIND_THRESHOLD = 50.0;
 
 	/**
-	 * 依單日（已跨城市平均）氣象數值，判斷當天符合哪些天氣訊號類型。
+	 * 依單日（已跨城市平均）氣象數值，判斷當天符合哪些天氣訊號類型（預報日）。
 	 * 某個判斷軸線缺資料（例如濕度為null）時，該軸線直接不產生訊號，
 	 * 不用其他欄位去猜——寧可漏判，也不要用不完整的資料誤判。
 	 *
-	 * @return 當天符合的訊號類型；完全不符合任何門檻（含NORMAL情境）時回傳
-	 *         空集合，呼叫端不需要特別處理NORMAL——NORMAL本來就不在
-	 *         WeatherCampaignSyncService.WEATHER_TAG_MAPPING裡，回傳空集合
-	 *         等同該類別註解說的「一般天氣不該命中任何商品」。
+	 * @return 當天符合的訊號類型；完全不符合任何門檻時回傳空集合（等同 NORMAL，
+	 *         一般天氣不該命中任何商品）。
 	 */
 	static Set<WeatherSignalType> classifyDay(DailyWeatherMetrics metrics) {
+		return classifyDay(metrics, false);
+	}
+
+	/**
+	 * @param observed true＝已經過去的日期（歷史）。Open-Meteo 以 past_days 回傳的過去日期，
+	 *                 降雨機率常為 null（雨已經下完，沒有「機率」可言），此時只看實際雨量判斷
+	 *                 降雨訊號；預報日則維持「機率與雨量都達門檻」的原規則。
+	 */
+	static Set<WeatherSignalType> classifyDay(DailyWeatherMetrics metrics, boolean observed) {
 		Set<WeatherSignalType> types = new LinkedHashSet<>();
 		classifyTemperatureHumidity(metrics).ifPresent(types::add);
-		classifyRain(metrics).ifPresent(types::add);
+		classifyRain(metrics, observed).ifPresent(types::add);
 		if (metrics.windSpeedMax() != null && metrics.windSpeedMax() >= STRONG_WIND_THRESHOLD) {
 			types.add(WeatherSignalType.STRONG_WIND);
 		}
@@ -111,9 +112,11 @@ final class WeatherNormalizer {
 		return Optional.empty();
 	}
 
-	private static Optional<WeatherSignalType> classifyRain(DailyWeatherMetrics m) {
-		Double probability = m.precipitationProbabilityMax();
+	private static Optional<WeatherSignalType> classifyRain(DailyWeatherMetrics m, boolean observed) {
 		Double amount = m.precipitationSum();
+		// 歷史日期沒有降雨機率時視為 100%（雨量是實際觀測值），只依雨量判斷。
+		Double probability = m.precipitationProbabilityMax() == null && observed ? Double.valueOf(100)
+				: m.precipitationProbabilityMax();
 		if (probability == null || amount == null) {
 			return Optional.empty();
 		}
@@ -134,94 +137,5 @@ final class WeatherNormalizer {
 			return a;
 		}
 		return (a + b) / 2.0;
-	}
-
-	/**
-	 * 把「每日符合哪些類型」的結果，依類型分組成連續天數的窗口（WeatherSignal），
-	 * 對應WeatherSignal.windowStart/windowEnd的語意：「這個訊號預期發生的
-	 * 時間窗口起訖日」，不是逐日各開一筆——例如某區域連續5天都符合RAINY，
-	 * 會組成1筆windowStart~windowEnd橫跨5天的WeatherSignal，而不是5筆
-	 * 各1天的訊號（後者會讓WeatherCampaignSyncService.buildCampaignCode()
-	 * 因為windowStart不同而每天都新開一筆festive_campaigns，不符合「檔期」
-	 * 的語意）。
-	 *
-	 * @param dailyTypes 每日分類結果，key為日期，須已排序或呼叫端不關心順序
-	 *                   （本方法內部會依日期排序後才分組）
-	 * @param today      用來計算WeatherForecastConfidence的基準日，通常是
-	 *                   LocalDate.now()；獨立傳入是為了讓測試可以固定基準日，
-	 *                   不用依賴系統時鐘
-	 */
-	static List<WeatherSignal> buildSignals(String region, Map<LocalDate, Set<WeatherSignalType>> dailyTypes,
-			LocalDate today) {
-		List<WeatherSignal> signals = new ArrayList<>();
-		for (WeatherSignalType type : WeatherSignalType.values()) {
-			if (type == WeatherSignalType.NORMAL) {
-				continue;
-			}
-			List<LocalDate> matchingDates = dailyTypes.entrySet().stream()
-					.filter(entry -> entry.getValue().contains(type))
-					.map(Map.Entry::getKey)
-					.sorted()
-					.toList();
-			signals.addAll(groupIntoWindows(region, type, matchingDates, today));
-		}
-		return signals;
-	}
-
-	private static List<WeatherSignal> groupIntoWindows(String region, WeatherSignalType type,
-			List<LocalDate> sortedDates, LocalDate today) {
-		List<WeatherSignal> result = new ArrayList<>();
-		LocalDate windowStart = null;
-		LocalDate windowEnd = null;
-
-		for (LocalDate date : sortedDates) {
-			if (windowStart == null) {
-				windowStart = date;
-				windowEnd = date;
-			} else if (date.equals(windowEnd.plusDays(1))) {
-				windowEnd = date;
-			} else {
-				result.add(toSignal(region, type, windowStart, windowEnd, today));
-				windowStart = date;
-				windowEnd = date;
-			}
-		}
-		if (windowStart != null) {
-			result.add(toSignal(region, type, windowStart, windowEnd, today));
-		}
-		return result;
-	}
-
-	private static WeatherSignal toSignal(String region, WeatherSignalType type, LocalDate start, LocalDate end,
-			LocalDate today) {
-		WeatherSignal signal = new WeatherSignal();
-		signal.setRegion(region);
-		signal.setType(type);
-		signal.setWindowStart(start);
-		signal.setWindowEnd(end);
-		signal.setConfidence(resolveConfidence(start, today));
-		return signal;
-	}
-
-	/**
-	 * 依窗口起始日距離今天的天數，決定信心層級（WeatherForecastConfidence
-	 * enum本身刻意不寫死天數門檻，理由見該enum的Javadoc）。
-	 *
-	 * 0~7天＝HIGH、8~14天＝MEDIUM——這兩層是這次MVP範圍內唯一會用到的
-	 * （OpenMeteoWeatherSignalProvider目前只跟Open-Meteo要0~14天的資料，
-	 * 見weather.forecast-days設定），15天以上的LOW分支保留在這裡是因為
-	 * enum本身已經定義了這個層級，日後若weather.forecast-days調高到
-	 * Open-Meteo上限16天，第15、16天會自然落入這個分支，不需要再改
-	 * 這支方法。
-	 */
-	static WeatherForecastConfidence resolveConfidence(LocalDate windowStart, LocalDate today) {
-		long daysFromNow = ChronoUnit.DAYS.between(today, windowStart);
-		if (daysFromNow <= 7) {
-			return WeatherForecastConfidence.HIGH;
-		}
-		if (daysFromNow <= 14) {
-			return WeatherForecastConfidence.MEDIUM;
-		}
-		return WeatherForecastConfidence.LOW;
 	}
 }

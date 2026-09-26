@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.LinkedHashSet;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +44,7 @@ import com.example.Product_Selection_260813.enums.ReviewRiskSource;
 import com.example.Product_Selection_260813.service.gate.GateEvaluationService;
 import com.example.Product_Selection_260813.service.gate.GateResult;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
 import com.example.Product_Selection_260813.json.ProductSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
@@ -212,7 +212,9 @@ public class ReviewService {
 		return ReviewDetailResponse.build(ProductResponse.from(product), product.getSubmissionCount(),
 				evaluationOpt.orElse(null), evaluationModeOpt.orElse(null),
 				scoringService.buildWeightSnapshot(evaluationModeId), matchedCampaign,
-				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions, gateSummary);
+				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions, gateSummary)
+				// V26：審核頁顯示天氣加成的即時明細（歷史／預測分、命中標籤、資料更新時間）。
+				.withWeatherBoostDetail(scoringService.buildWeatherBoostSnapshot(product));
 	}
 
 	/**
@@ -397,11 +399,16 @@ public class ReviewService {
 		// 讓快照裡的命中明細、加成、最終分數都基於審核當下同一時間點（與 LIVE 明細同一公式）。
 		// totalScore 為 null（完整度未達門檻）時 finalScore 維持 null，不以 0 誤導。
 		BigDecimal reviewFestivalBoost = ScoringService.calculateFestivalBoost(matchedCampaign);
+		// V26：天氣加成同樣以審核當下即時計算並凍結（含明細：比重、上限、資料期間），
+		// 最終分數快照＝加權總分＋節慶加成＋天氣加成。
+		WeatherBoostSnapshot reviewWeather = scoringService.buildWeatherBoostSnapshot(product);
+		record.setWeatherBoostDetailSnapshot(reviewWeather);
 		evaluationOpt.ifPresent(evaluation -> {
 			record.setTotalScore(evaluation.getTotalScore());
 			record.setFestivalBoostSnapshot(reviewFestivalBoost);
-			record.setFinalScoreSnapshot(evaluation.getTotalScore() == null ? null
-					: evaluation.getTotalScore().add(reviewFestivalBoost).setScale(2, RoundingMode.HALF_UP));
+			record.setWeatherBoostSnapshot(reviewWeather.getWeatherBoost());
+			record.setFinalScoreSnapshot(ScoringService.composeFinalScore(evaluation.getTotalScore(),
+					reviewFestivalBoost, reviewWeather.getWeatherBoost()));
 			record.setDataCompleteness(evaluation.getDataCompleteness());
 			record.setBusinessScore(evaluation.getBusinessScore());
 			record.setAudienceScore(evaluation.getAudienceScore());

@@ -18,7 +18,7 @@ public final class CampaignDateRules {
 				campaign.getDurationDays(), campaign.getEndMonth(), campaign.getEndDay(),
 				campaign.getObservedHolidayRule() == null ? ObservedHolidayRule.NONE
 						: campaign.getObservedHolidayRule(),
-				Boolean.TRUE.equals(campaign.getExpandLongWeekend()), campaign.getStartDate(), campaign.getEndDate());
+				Boolean.TRUE.equals(campaign.getExpandLongWeekend()));
 	}
 
 	/** 預覽用：Request 需先經過 FestiveCampaignRuleService.validateRule() 與正規化。 */
@@ -28,7 +28,7 @@ public final class CampaignDateRules {
 				effectiveOffset(fields.getCategory(), fields.getRuleOffsetDays()), fields.getDurationDays(),
 				fields.getEndMonth(), fields.getEndDay(),
 				fields.getObservedHolidayRule() == null ? ObservedHolidayRule.NONE : fields.getObservedHolidayRule(),
-				Boolean.TRUE.equals(fields.getExpandLongWeekend()), null, null);
+				Boolean.TRUE.equals(fields.getExpandLongWeekend()));
 	}
 
 	/**

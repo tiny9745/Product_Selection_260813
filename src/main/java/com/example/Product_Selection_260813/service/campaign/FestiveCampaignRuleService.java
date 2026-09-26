@@ -104,9 +104,6 @@ public class FestiveCampaignRuleService {
 	 */
 	public void validateRule(FestiveCampaignRuleFields fields) {
 		FestiveCategory category = fields.getCategory();
-		if (category == FestiveCategory.WEATHER) {
-			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_WEATHER_NOT_EDITABLE);
-		}
 		if (category == null) {
 			throw new IllegalArgumentException("檔期類別不可為空");
 		}
@@ -234,7 +231,7 @@ public class FestiveCampaignRuleService {
 	// ==================================================================
 
 	/**
-	 * 把已驗證的規則寫進 Entity；start_date／end_date 寫 NULL（僅天氣型使用）。
+	 * 把已驗證的規則寫進 Entity。
 	 * 若既有的手動覆蓋已不屬於新規則的本期（週期不符），一併清除（D10：失效的旗標在下次寫入時清除）。
 	 */
 	public void applyRule(FestiveCampaign campaign, FestiveCampaignRuleFields fields) {
@@ -251,14 +248,12 @@ public class FestiveCampaignRuleService {
 		campaign.setEndDay(fields.getEndDay());
 		campaign.setObservedHolidayRule(fields.getObservedHolidayRule());
 		campaign.setExpandLongWeekend(fields.getExpandLongWeekend());
-		campaign.setStartDate(null);
-		campaign.setEndDate(null);
 		clearStaleManualOverride(campaign);
 	}
 
 	/** 手動覆蓋的週期已不是本期時清除旗標（寫入時才做；讀取時只是忽略）。 */
 	public void clearStaleManualOverride(FestiveCampaign campaign) {
-		if (!Boolean.TRUE.equals(campaign.getIsManualOverride()) || campaign.getCategory() == FestiveCategory.WEATHER) {
+		if (!Boolean.TRUE.equals(campaign.getIsManualOverride())) {
 			return;
 		}
 		Integer currentCycle = currentOccurrence(campaign).map(CampaignOccurrence::cycleYear).orElse(null);
@@ -288,7 +283,7 @@ public class FestiveCampaignRuleService {
 
 	/**
 	 * 「恢復自動判斷」時要寫回資料表的狀態。節慶／季節型的讀取本來就即時推算，這個值只是讓資料表
-	 * 不留下過期的手動值；天氣型沿用原本「依實際起訖日與準備天數」的計算。
+	 * 不留下過期的手動值。
 	 */
 	public FestiveCampaignStatus resolveAutomaticStatus(FestiveCampaign campaign) {
 		return currentOccurrence(campaign)
@@ -298,14 +293,13 @@ public class FestiveCampaignRuleService {
 	}
 
 	/**
-	 * 計分用：取出所有節慶／季節檔期與 PREPARING／ACTIVE 的天氣檔期，批次載入區域與覆寫後逐一推算，
+	 * 計分用：取出所有節慶／季節檔期（V26 起已無天氣檔期），批次載入區域與覆寫後逐一推算，
 	 * 只回傳推算後為 PREPARING／ACTIVE 的檔期（修正 B1：不再依賴資料表裡從不推進的狀態）。
 	 */
 	@Transactional(readOnly = true)
 	public List<ActiveCampaignWindow> findLiveWindows(LocalDate today) {
 		List<FestiveCampaign> campaigns = new ArrayList<>(
 				campaignRepository.findByCategoryIn(List.of(FestiveCategory.FESTIVAL, FestiveCategory.SEASON)));
-		campaigns.addAll(campaignRepository.findByCategoryAndCampaignStatusIn(FestiveCategory.WEATHER, LIVE_STATUSES));
 		if (campaigns.isEmpty()) {
 			return List.of();
 		}
@@ -321,12 +315,6 @@ public class FestiveCampaignRuleService {
 					overridesById.getOrDefault(campaign.getId(), Map.of()), today);
 			if (occurrence.isEmpty()) {
 				continue; // 規則不完整或超出內建表範圍：略過，不讓一筆異常資料影響整批計分
-			}
-			if (rule.isWeather()) {
-				String region = campaign.getRegion();
-				result.add(new ActiveCampaignWindow(campaign, occurrence.get(), campaign.getCampaignStatus(),
-						campaign.getRegionCoverageRatio(), region == null ? List.of() : List.of(region)));
-				continue;
 			}
 			FestiveCampaignStatus status = resolver.deriveStatus(Boolean.TRUE.equals(campaign.getIsManualOverride()),
 					campaign.getManualOverrideCycle(), campaign.getCampaignStatus(), campaign.getPreparationLeadDays(),
@@ -381,7 +369,6 @@ public class FestiveCampaignRuleService {
 		dto.setPreparationLeadDays(campaign.getPreparationLeadDays());
 		dto.setIsManualOverride(campaign.getIsManualOverride());
 		dto.setManualOverrideCycle(campaign.getManualOverrideCycle());
-		dto.setRegion(campaign.getRegion());
 		dto.setTags(tags);
 		dto.setDateRuleType(campaign.getDateRuleType());
 		dto.setRuleMonth(campaign.getRuleMonth());
@@ -396,20 +383,6 @@ public class FestiveCampaignRuleService {
 		dto.setObservedHolidayRule(campaign.getObservedHolidayRule());
 		dto.setExpandLongWeekend(campaign.getExpandLongWeekend());
 		dto.setRuleDescription(CampaignRuleDescriber.describe(rule));
-
-		if (rule.isWeather()) {
-			dto.setStartDate(campaign.getStartDate());
-			dto.setEndDate(campaign.getEndDate());
-			dto.setCycleYear(campaign.getStartDate() == null ? null : campaign.getStartDate().getYear());
-			dto.setOccurrenceOverridden(false);
-			dto.setObservedHolidays(List.of());
-			dto.setCampaignStatus(campaign.getCampaignStatus());
-			dto.setStatusSource(CampaignStatusSource.SYNC);
-			dto.setRegions(campaign.getRegion() == null ? List.of() : List.of(campaign.getRegion()));
-			dto.setRegionCoverageRatio(campaign.getRegionCoverageRatio());
-			dto.setWeatherConfidence(campaign.getWeatherConfidence());
-			return dto;
-		}
 
 		dto.setRegions(regions);
 		dto.setRegionCoverageRatio(regionCoverageService.coverageOf(regions, weights));
@@ -463,9 +436,6 @@ public class FestiveCampaignRuleService {
 	public FestiveCampaignOccurrenceOverrideResponse upsertOverride(Long campaignId, int cycleYear,
 			FestiveCampaignOccurrenceOverrideRequest request, Long operatorId) {
 		FestiveCampaign campaign = findCampaignOrThrow(campaignId);
-		if (campaign.getCategory() == FestiveCategory.WEATHER) {
-			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_WEATHER_NOT_EDITABLE);
-		}
 		LocalDate start = request.getStartDate();
 		LocalDate end = request.getEndDate();
 		if (cycleYear < 2000 || cycleYear > 2099 || start == null || end == null || end.isBefore(start)

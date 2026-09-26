@@ -7,6 +7,7 @@ import java.util.List;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.enums.ReviewRecordReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.json.ProductSnapshot;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
@@ -46,6 +47,9 @@ public class ReviewRecordResponse {
 
 	private BigDecimal festivalBoostSnapshot;
 	private MatchedCampaignSnapshot matchedCampaignSnapshot;
+	/** V26：審核當時的天氣加成與明細；V26 前的紀錄為 null（畫面顯示「—」，不是 0）。 */
+	private BigDecimal weatherBoostSnapshot;
+	private WeatherBoostSnapshot weatherBoostDetailSnapshot;
 	private BigDecimal finalScoreSnapshot;
 	private BigDecimal dataCompleteness;
 
@@ -90,6 +94,8 @@ public class ReviewRecordResponse {
 
 		dto.festivalBoostSnapshot = record.getFestivalBoostSnapshot();
 		dto.matchedCampaignSnapshot = record.getMatchedCampaignSnapshot();
+		dto.weatherBoostSnapshot = record.getWeatherBoostSnapshot();
+		dto.weatherBoostDetailSnapshot = record.getWeatherBoostDetailSnapshot();
 		dto.finalScoreSnapshot = record.getFinalScoreSnapshot();
 		dto.dataCompleteness = record.getDataCompleteness();
 
@@ -283,6 +289,14 @@ public class ReviewRecordResponse {
 
 	public void setTotalScore(BigDecimal totalScore) {
 		this.totalScore = totalScore;
+	}
+
+	public BigDecimal getWeatherBoostSnapshot() {
+		return weatherBoostSnapshot;
+	}
+
+	public WeatherBoostSnapshot getWeatherBoostDetailSnapshot() {
+		return weatherBoostDetailSnapshot;
 	}
 
 	public BigDecimal getFestivalBoostSnapshot() {

@@ -8,6 +8,7 @@ import com.example.Product_Selection_260813.entity.EvaluationMode;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.service.gate.GateResult;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 
 /**
@@ -43,6 +44,9 @@ public class ReviewDetailResponse {
 
 	private BigDecimal festivalBoost;
 	private MatchedCampaignSnapshot matchedCampaign;
+	/** 天氣加成（V26，讀 product_evaluations）與即時明細（由 ReviewService 以 withWeatherBoostDetail 補上）。 */
+	private BigDecimal weatherBoost;
+	private WeatherBoostSnapshot weatherBoostDetail;
 	private BigDecimal finalScore;
 
 	private String aiSummary;
@@ -94,6 +98,7 @@ public class ReviewDetailResponse {
 			dto.forecastScore = evaluation.getForecastScore();
 			dto.totalScore = evaluation.getTotalScore();
 			dto.festivalBoost = evaluation.getFestivalBoost();
+			dto.weatherBoost = evaluation.getWeatherBoost();
 			dto.finalScore = evaluation.getFinalScore();
 		}
 
@@ -222,6 +227,20 @@ public class ReviewDetailResponse {
 
 	public void setTotalScore(BigDecimal totalScore) {
 		this.totalScore = totalScore;
+	}
+
+	/** 補上審核頁即時計算的天氣加成明細，回傳 this 方便鏈式呼叫。 */
+	public ReviewDetailResponse withWeatherBoostDetail(WeatherBoostSnapshot weatherBoostDetail) {
+		this.weatherBoostDetail = weatherBoostDetail;
+		return this;
+	}
+
+	public BigDecimal getWeatherBoost() {
+		return weatherBoost;
+	}
+
+	public WeatherBoostSnapshot getWeatherBoostDetail() {
+		return weatherBoostDetail;
 	}
 
 	public BigDecimal getFestivalBoost() {

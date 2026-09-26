@@ -498,13 +498,8 @@ public class SettingsController {
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
-	// [操作+管理]，不加@PreAuthorize：唯讀清單，比照 GET /festive-campaigns。
-	// 切換狀態仍走 POST /festive-campaigns/{id}/manual-status [僅管理]。
-	@GetMapping("/weather-campaigns/current")
-	public ResponseEntity<ApiResponse<List<FestiveCampaignResponse>>> getCurrentWeatherCampaigns() {
-		List<FestiveCampaignResponse> result = settingsService.getCurrentWeatherCampaigns();
-		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
-	}
+	// V26：GET /weather-campaigns/current（天氣檔期唯讀清單）隨天氣檔期一併移除；
+	// 天氣資料狀態改由 GET /api/settings/weather/status 提供（WeatherController）。
 
 	@PreAuthorize("hasRole('MANAGER')")
 	@PostMapping("/festive-campaigns")

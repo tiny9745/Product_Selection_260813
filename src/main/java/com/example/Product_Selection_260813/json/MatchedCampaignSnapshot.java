@@ -8,8 +8,8 @@ import java.util.List;
  * 命中檔期快照（review_records.matched_campaign_snapshot，Hibernate JSON 欄位）。
  *
  * 2026-09-24（V21 檔期規則改版）新增 category 以下 9 個欄位，全部允許 null：舊快照沒有這些 key，
- * 反序列化時就是 null，不會失敗。urgencyFactor 維持為 timeFactor × weatherConfidenceFactor ×
- * regionCoverageRatio 的乘積，既有前端與既有計算不受影響。
+ * 反序列化時就是 null，不會失敗。urgencyFactor 為 timeFactor × regionCoverageRatio 的乘積
+ * （V26 起不再有天氣檔期與其可信度乘數）。
  *
  * ⚠️ occurrenceStartDate／occurrenceEndDate 刻意用 ISO-8601 字串（yyyy-MM-dd），不用 LocalDate：
  * 與 TrendSnapshot.collectedAt 同一個理由——Hibernate JSON 欄位的 Jackson 沒有註冊
@@ -28,7 +28,7 @@ public class MatchedCampaignSnapshot {
 
     private BigDecimal urgencyFactor;
 
-    /** FESTIVAL／SEASON／WEATHER。 */
+    /** FESTIVAL／SEASON（V26 前的舊快照可能是 WEATHER，保留原值不改寫）。 */
     private String category;
 
     /** 命中當期的週期年。 */
@@ -43,16 +43,19 @@ public class MatchedCampaignSnapshot {
     /** 本期起訖日是否為人工逐年覆寫。 */
     private Boolean occurrenceOverridden;
 
-    /** 受影響區域；空＝全國；WEATHER 放 [region]。 */
+    /** 受影響區域；空＝全國。 */
     private List<String> regions;
 
     /** 當次使用的地域覆蓋率。 */
     private BigDecimal regionCoverageRatio;
 
-    /** 乘上可信度與覆蓋率之前的時間係數。 */
+    /** 乘上覆蓋率之前的時間係數。 */
     private BigDecimal timeFactor;
 
-    /** 僅 WEATHER 有值：天氣預報可信度係數。 */
+    /**
+     * V26 前的天氣檔期快照才有值（天氣預報可信度係數）。V26 起不再寫入，保留欄位只為了讓
+     * 既有審核快照 JSON 能完整反序列化、畫面照常顯示當時的明細（審核快照不可改寫）。
+     */
     private BigDecimal weatherConfidenceFactor;
 
     public MatchedCampaignSnapshot() {

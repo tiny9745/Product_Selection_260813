@@ -35,6 +35,8 @@ public class EvaluationResponse {
 	private BigDecimal dataCompleteness;
 
 	private BigDecimal festivalBoost;
+	/** 天氣加成（V26）。LIVE 讀 product_evaluations.weather_boost；SNAPSHOT 讀審核快照（V26 前的紀錄為 null）。 */
+	private BigDecimal weatherBoost;
 	private BigDecimal finalScore;
 
 	public String getDataSource() {
@@ -147,6 +149,14 @@ public class EvaluationResponse {
 
 	public void setFestivalBoost(BigDecimal festivalBoost) {
 		this.festivalBoost = festivalBoost;
+	}
+
+	public BigDecimal getWeatherBoost() {
+		return weatherBoost;
+	}
+
+	public void setWeatherBoost(BigDecimal weatherBoost) {
+		this.weatherBoost = weatherBoost;
 	}
 
 	public BigDecimal getFinalScore() {

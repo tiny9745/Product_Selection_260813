@@ -43,18 +43,18 @@ class CampaignSupportTest {
 	void 規則描述() {
 		assertThat(CampaignRuleDescriber.describe(new CampaignDateRule(FestiveCategory.FESTIVAL,
 				CampaignDateRuleType.LUNAR_DATE, 5, 5, null, null, null, 0, 3, null, null, ObservedHolidayRule.NONE,
-				false, null, null))).isEqualTo("每年農曆 5 月 5 日起 3 天");
+				false))).isEqualTo("每年農曆 5 月 5 日起 3 天");
 		assertThat(CampaignRuleDescriber.describe(new CampaignDateRule(FestiveCategory.FESTIVAL,
 				CampaignDateRuleType.NTH_WEEKDAY, 5, null, 2, 7, null, 0, 1, null, null, ObservedHolidayRule.NONE,
-				false, null, null))).isEqualTo("每年 5 月第 2 個星期日");
+				false))).isEqualTo("每年 5 月第 2 個星期日");
 		assertThat(CampaignRuleDescriber.describe(new CampaignDateRule(FestiveCategory.SEASON,
 				CampaignDateRuleType.FIXED_DATE, 12, 1, null, null, null, 0, null, 2, 31, ObservedHolidayRule.NONE,
-				false, null, null))).isEqualTo("每年 12/1 至隔年 2 月底");
+				false))).isEqualTo("每年 12/1 至隔年 2 月底");
 		assertThat(CampaignRuleDescriber.describe(new CampaignDateRule(FestiveCategory.FESTIVAL,
 				CampaignDateRuleType.LUNAR_DATE, 1, 1, null, null, null, -1, 1, null, null, ObservedHolidayRule.NONE,
-				false, null, null))).isEqualTo("每年農曆 1 月 1 日前 1 天");
+				false))).isEqualTo("每年農曆 1 月 1 日前 1 天");
 		assertThat(CampaignRuleDescriber.describe(new CampaignDateRule(FestiveCategory.FESTIVAL,
 				CampaignDateRuleType.FIXED_DATE, 2, 28, null, null, null, 0, 1, null, null,
-				ObservedHolidayRule.TW_STATUTORY, true, null, null))).isEqualTo("每年 2/28，依國定假日補假並併入連假");
+				ObservedHolidayRule.TW_STATUTORY, true))).isEqualTo("每年 2/28，依國定假日補假並併入連假");
 	}
 }

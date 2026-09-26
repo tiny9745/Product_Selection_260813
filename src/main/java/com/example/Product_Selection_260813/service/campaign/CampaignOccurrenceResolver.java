@@ -44,18 +44,11 @@ public class CampaignOccurrenceResolver {
 	 * 目前或下一期：在週期年 Y-1、Y、Y+1（Y＝今天的國曆年）三個候選中，取「結束日 ≥ 今天」
 	 * 且開始日最早的一期。Y-1 涵蓋跨年季節（去年 12/1 開始的冬季），Y+1 涵蓋今年已結束時的下一期。
 	 *
-	 * 天氣型直接回傳同步服務寫入的實際日期。規則不完整或超出內建表範圍的候選會被略過；
+	 * 規則不完整或超出內建表範圍的候選會被略過；
 	 * 三個候選都算不出來時回傳 empty，由呼叫端決定如何處理（計分時略過該檔期）。
 	 */
 	public Optional<CampaignOccurrence> resolveCurrentOrNext(CampaignDateRule rule,
 			Map<Integer, OccurrenceOverride> overridesByCycle, LocalDate today) {
-		if (rule.isWeather()) {
-			if (rule.weatherStartDate() == null || rule.weatherEndDate() == null) {
-				return Optional.empty();
-			}
-			return Optional.of(new CampaignOccurrence(rule.weatherStartDate().getYear(), rule.weatherStartDate(),
-					rule.weatherEndDate(), false, List.of()));
-		}
 		int year = today.getYear();
 		return candidates(rule, overridesByCycle, year - 1, year + 1).stream()
 				.filter(occurrence -> !occurrence.endDate().isBefore(today))
@@ -68,7 +61,7 @@ public class CampaignOccurrenceResolver {
 	public List<CampaignOccurrence> previewOccurrences(CampaignDateRule rule,
 			Map<Integer, OccurrenceOverride> overridesByCycle, LocalDate today, int count) {
 		Optional<CampaignOccurrence> first = resolveCurrentOrNext(rule, overridesByCycle, today);
-		if (first.isEmpty() || rule.isWeather()) {
+		if (first.isEmpty()) {
 			return first.map(List::of).orElse(List.of());
 		}
 		List<CampaignOccurrence> result = new ArrayList<>();

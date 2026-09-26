@@ -3,21 +3,16 @@ package com.example.Product_Selection_260813.service.weather;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import com.example.Product_Selection_260813.dto.weather.WeatherSignal;
-import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 import com.example.Product_Selection_260813.enums.WeatherSignalType;
 
 /**
- * WeatherNormalizer是天氣訊號分類與窗口分組的業務規則核心，這支測試把
- * classifyDay()／buildSignals()／resolveConfidence()的邊界行為釘死，
+ * WeatherNormalizer是天氣訊號分類的業務規則核心，這支測試把classifyDay()的邊界行為釘死
+ * （V26 起窗口分組與預報可信度隨天氣檔期移除），
  * 避免之後調整門檻常數時，悄悄改變了分類或分組的結果（比照
  * ScoringAlgorithmsTest之於ScoringAlgorithms的既有慣例）。
  */
@@ -109,86 +104,29 @@ class WeatherNormalizerTest {
 		}
 	}
 
+	/** V26：歷史日（observed）的降雨判斷——過去日期常沒有降雨機率，只看實際雨量。 */
 	@Nested
-	class BuildSignals {
+	class ObservedDay {
 
 		@Test
-		void 連續天數同類型組成單一窗口() {
-			LocalDate today = LocalDate.of(2026, 9, 21);
-			Map<LocalDate, Set<WeatherSignalType>> dailyTypes = new TreeMap<>();
-			dailyTypes.put(today, Set.of(WeatherSignalType.RAINY));
-			dailyTypes.put(today.plusDays(1), Set.of(WeatherSignalType.RAINY));
-			dailyTypes.put(today.plusDays(2), Set.of(WeatherSignalType.RAINY));
-
-			List<WeatherSignal> signals = WeatherNormalizer.buildSignals("SOUTH", dailyTypes, today);
-
-			assertThat(signals).hasSize(1);
-			WeatherSignal signal = signals.get(0);
-			assertThat(signal.getRegion()).isEqualTo("SOUTH");
-			assertThat(signal.getType()).isEqualTo(WeatherSignalType.RAINY);
-			assertThat(signal.getWindowStart()).isEqualTo(today);
-			assertThat(signal.getWindowEnd()).isEqualTo(today.plusDays(2));
+		void 歷史日沒有降雨機率時只依雨量判定() {
+			DailyWeatherMetrics rainy = metrics(LocalDate.now().minusDays(1), 26.0, 22.0, 65.0, 10.0, null, null);
+			assertThat(WeatherNormalizer.classifyDay(rainy, true)).containsExactly(WeatherSignalType.RAINY);
+			// 預報日沒有機率時維持原規則：不猜測，不產生降雨訊號。
+			assertThat(WeatherNormalizer.classifyDay(rainy, false)).isEmpty();
 		}
 
 		@Test
-		void 不連續天數同類型組成兩個窗口() {
-			LocalDate today = LocalDate.of(2026, 9, 21);
-			Map<LocalDate, Set<WeatherSignalType>> dailyTypes = new TreeMap<>();
-			dailyTypes.put(today, Set.of(WeatherSignalType.HOT));
-			dailyTypes.put(today.plusDays(1), Set.of(WeatherSignalType.HOT));
-			dailyTypes.put(today.plusDays(5), Set.of(WeatherSignalType.HOT));
-
-			List<WeatherSignal> signals = WeatherNormalizer.buildSignals("SOUTH", dailyTypes, today);
-
-			assertThat(signals).hasSize(2);
-			assertThat(signals).extracting(WeatherSignal::getWindowStart)
-					.containsExactlyInAnyOrder(today, today.plusDays(5));
+		void 歷史日雨量達大雨門檻判定為HEAVY_RAIN() {
+			DailyWeatherMetrics heavy = metrics(LocalDate.now().minusDays(1), 26.0, 22.0, 65.0, 45.0, null, null);
+			assertThat(WeatherNormalizer.classifyDay(heavy, true)).containsExactly(WeatherSignalType.HEAVY_RAIN);
 		}
 
 		@Test
-		void 空集合的日期不會產生任何訊號() {
-			LocalDate today = LocalDate.of(2026, 9, 21);
-			Map<LocalDate, Set<WeatherSignalType>> dailyTypes = new TreeMap<>();
-			dailyTypes.put(today, Set.of());
-
-			List<WeatherSignal> signals = WeatherNormalizer.buildSignals("SOUTH", dailyTypes, today);
-
-			assertThat(signals).isEmpty();
-		}
-	}
-
-	@Nested
-	class ResolveConfidence {
-
-		private final LocalDate today = LocalDate.of(2026, 9, 21);
-
-		@Test
-		void 窗口起始日就是今天判定為HIGH() {
-			assertThat(WeatherNormalizer.resolveConfidence(today, today)).isEqualTo(WeatherForecastConfidence.HIGH);
-		}
-
-		@Test
-		void 窗口起始日距今第7天仍判定為HIGH() {
-			assertThat(WeatherNormalizer.resolveConfidence(today.plusDays(7), today))
-					.isEqualTo(WeatherForecastConfidence.HIGH);
-		}
-
-		@Test
-		void 窗口起始日距今第8天判定為MEDIUM() {
-			assertThat(WeatherNormalizer.resolveConfidence(today.plusDays(8), today))
-					.isEqualTo(WeatherForecastConfidence.MEDIUM);
-		}
-
-		@Test
-		void 窗口起始日距今第14天仍判定為MEDIUM() {
-			assertThat(WeatherNormalizer.resolveConfidence(today.plusDays(14), today))
-					.isEqualTo(WeatherForecastConfidence.MEDIUM);
-		}
-
-		@Test
-		void 窗口起始日距今第15天判定為LOW() {
-			assertThat(WeatherNormalizer.resolveConfidence(today.plusDays(15), today))
-					.isEqualTo(WeatherForecastConfidence.LOW);
+		void 歷史日若有降雨機率仍依原規則() {
+			DailyWeatherMetrics lowProbability = metrics(LocalDate.now().minusDays(1), 26.0, 22.0, 65.0, 10.0, 30.0,
+					null);
+			assertThat(WeatherNormalizer.classifyDay(lowProbability, true)).isEmpty();
 		}
 	}
 }

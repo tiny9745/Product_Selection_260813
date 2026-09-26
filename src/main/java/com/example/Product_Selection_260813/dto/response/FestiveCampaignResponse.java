@@ -10,7 +10,6 @@ import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.ObservedHolidayRule;
 import com.example.Product_Selection_260813.enums.SolarTerm;
-import com.example.Product_Selection_260813.enums.WeatherForecastConfidence;
 
 /**
  * 檔期回應。
@@ -26,19 +25,16 @@ public class FestiveCampaignResponse {
 	private String campaignCode;
 	private String campaignName;
 	private FestiveCategory category;
-	/** 目前或下一期 occurrence 的開始日（V21 起語意變更）；WEATHER 為同步寫入的實際日期。 */
+	/** 目前或下一期 occurrence 的開始日（V21 起語意變更）。 */
 	private LocalDate startDate;
-	/** 目前或下一期 occurrence 的結束日；WEATHER 為實際日期。 */
+	/** 目前或下一期 occurrence 的結束日。 */
 	private LocalDate endDate;
 	private Integer preparationLeadDays;
 	/** 推算後的有效狀態（見 statusSource）；V21 前是資料表存的值。 */
 	private FestiveCampaignStatus campaignStatus;
 	private Boolean isManualOverride;
-	/** 僅 WEATHER：命中區域代碼。節慶／季節型的區域見 regions。 */
-	private String region;
-	/** 僅 WEATHER：預報可信度（2026-09-24 新增，供「天氣連動 › 目前的天氣檔期」顯示）；其餘類別為 null。 */
-	private WeatherForecastConfidence weatherConfidence;
-	/** WEATHER 為同步當下凍結值；季節型依 regions 與 region_weights 當下計算；節慶型一律 1.0。 */
+	// V26：天氣檔期移除，region／weatherConfidence（僅天氣檔期使用）一併移除；區域見 regions。
+	/** 季節型依 regions 與 region_weights 當下計算；節慶型一律 1.0。 */
 	private BigDecimal regionCoverageRatio;
 	private List<FestiveCampaignTagView> tags;
 	private CampaignDateRuleType dateRuleType;
@@ -136,22 +132,6 @@ public class FestiveCampaignResponse {
 
 	public void setIsManualOverride(Boolean isManualOverride) {
 		this.isManualOverride = isManualOverride;
-	}
-
-	public WeatherForecastConfidence getWeatherConfidence() {
-		return weatherConfidence;
-	}
-
-	public void setWeatherConfidence(WeatherForecastConfidence weatherConfidence) {
-		this.weatherConfidence = weatherConfidence;
-	}
-
-	public String getRegion() {
-		return region;
-	}
-
-	public void setRegion(String region) {
-		this.region = region;
 	}
 
 	public BigDecimal getRegionCoverageRatio() {

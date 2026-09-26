@@ -83,10 +83,24 @@ public class WeatherClient {
 	 * @throws IllegalStateException                                回應內容無法解析為預期的JSON結構
 	 */
 	public Map<LocalDate, DailyWeatherMetrics> fetchDaily(double latitude, double longitude, int forecastDays) {
+		return fetchDaily(latitude, longitude, 0, forecastDays);
+	}
+
+	/**
+	 * V26：同一次呼叫取得「過去 {@code pastDays} 天＋未來 {@code forecastDays} 天」的每日數值。
+	 *
+	 * 規格決議不另外整合 Historical Weather API（archive-api），直接用 Forecast API 的
+	 * past_days 參數（0~92）。已知取捨：past_days 來自高解析度局部模型，可能隨模型版本更新
+	 * 對同一天的值微調，不像 ERA5 再分析是穩定的最終值——使用者已接受，畫面只顯示資料更新時間。
+	 * 過去日期的 precipitation_probability_max 常為 null，分類時由 WeatherNormalizer 特別處理。
+	 */
+	public Map<LocalDate, DailyWeatherMetrics> fetchDaily(double latitude, double longitude, int pastDays,
+			int forecastDays) {
 		URI uri = UriComponentsBuilder.fromUriString(BASE_URL)
 				.queryParam("latitude", latitude)
 				.queryParam("longitude", longitude)
 				.queryParam("timezone", "Asia/Taipei")
+				.queryParam("past_days", pastDays)
 				.queryParam("forecast_days", forecastDays)
 				.queryParam("daily", DAILY_VARIABLES)
 				.build()

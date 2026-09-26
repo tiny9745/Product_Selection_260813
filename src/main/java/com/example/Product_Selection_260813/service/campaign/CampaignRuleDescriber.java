@@ -19,9 +19,6 @@ public final class CampaignRuleDescriber {
 	}
 
 	public static String describe(CampaignDateRule rule) {
-		if (rule.isWeather()) {
-			return "依天氣預報";
-		}
 		if (rule.ruleType() == null) {
 			return "尚未設定日期規則";
 		}

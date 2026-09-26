@@ -27,7 +27,7 @@ class CampaignOccurrenceResolverTest {
 	private static CampaignDateRule festival(CampaignDateRuleType type, Integer month, Integer day, Integer ordinal,
 			Integer weekday, SolarTerm term, int offset, int duration, ObservedHolidayRule observed, boolean expand) {
 		return new CampaignDateRule(FestiveCategory.FESTIVAL, type, month, day, ordinal, weekday, term, offset,
-				duration, null, null, observed, expand, null, null);
+				duration, null, null, observed, expand);
 	}
 
 	private static CampaignDateRule fixed(int month, int day, int duration, ObservedHolidayRule observed,
@@ -42,7 +42,7 @@ class CampaignOccurrenceResolverTest {
 
 	private static CampaignDateRule season(int month, int day, int endMonth, int endDay) {
 		return new CampaignDateRule(FestiveCategory.SEASON, CampaignDateRuleType.FIXED_DATE, month, day, null, null,
-				null, 0, null, endMonth, endDay, ObservedHolidayRule.NONE, false, null, null);
+				null, 0, null, endMonth, endDay, ObservedHolidayRule.NONE, false);
 	}
 
 	private CampaignOccurrence current(CampaignDateRule rule, LocalDate today) {

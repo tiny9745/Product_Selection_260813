@@ -66,7 +66,6 @@ import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
 import com.example.Product_Selection_260813.enums.CustomFieldType;
 import com.example.Product_Selection_260813.enums.FactorDataSource;
 import com.example.Product_Selection_260813.enums.FactorStrategyCode;
-import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
 import com.example.Product_Selection_260813.service.campaign.FestiveCampaignsChangedEvent;
@@ -1297,6 +1296,8 @@ public class SettingsService {
 		mapping.setCreatedBy(userId);
 
 		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		// V26：對照表直接影響天氣加成，變更後立即重算（原本要等下一次天氣檔期同步才生效）。
+		publishCampaignsChanged("天氣標籤對照變更");
 		log.info("天氣訊號標籤對照已新增：{} -> {}（{}），操作者={}", request.getWeatherSignalType(), request.getTag(),
 				request.getMatchTier(), username);
 		return WeatherSignalTagMappingResponse.from(saved);
@@ -1332,6 +1333,8 @@ public class SettingsService {
 		mapping.setMatchTier(request.getMatchTier());
 		mapping.setUpdatedBy(userId);
 		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		// V26：對照表直接影響天氣加成，變更後立即重算（原本要等下一次天氣檔期同步才生效）。
+		publishCampaignsChanged("天氣標籤對照變更");
 		return WeatherSignalTagMappingResponse.from(saved);
 	}
 
@@ -1351,6 +1354,8 @@ public class SettingsService {
 		mapping.setIsActive(false);
 		mapping.setUpdatedBy(resolveUserId(username));
 		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		// V26：對照表直接影響天氣加成，變更後立即重算（原本要等下一次天氣檔期同步才生效）。
+		publishCampaignsChanged("天氣標籤對照變更");
 		return WeatherSignalTagMappingResponse.from(saved);
 	}
 
@@ -1373,6 +1378,8 @@ public class SettingsService {
 		mapping.setIsActive(true);
 		mapping.setUpdatedBy(resolveUserId(username));
 		WeatherSignalTagMapping saved = weatherSignalTagMappingRepository.save(mapping);
+		// V26：對照表直接影響天氣加成，變更後立即重算（原本要等下一次天氣檔期同步才生效）。
+		publishCampaignsChanged("天氣標籤對照變更");
 		return WeatherSignalTagMappingResponse.from(saved);
 	}
 
@@ -1697,8 +1704,8 @@ public class SettingsService {
 	public List<FestiveCampaignResponse> getAllFestiveCampaigns(List<FestiveCategory> categories) {
 		// 2026-09-24（V21）：標籤、區域、逐年覆寫一次批次載入後在記憶體分組，不再每筆各查一次（N+1）；
 		// startDate／endDate／campaignStatus 為推算後的本期值（見 FestiveCampaignRuleService）。
-		// 2026-09-24：categories 為選填篩選。未帶＝全部類別（商品表單的可選標籤仍依賴這個行為）；
-		// 節慶檔期頁帶 FESTIVAL、SEASON，天氣檔期改由 getCurrentWeatherCampaigns() 提供。
+		// 2026-09-24：categories 為選填篩選。未帶＝全部類別（商品表單的可選標籤仍依賴這個行為）。
+		// V26 起只有 FESTIVAL／SEASON 兩類（天氣檔期移除）。
 		List<FestiveCampaign> campaigns = categories == null || categories.isEmpty()
 				? festiveCampaignRepository.findAll()
 				: festiveCampaignRepository.findByCategoryIn(categories.stream().distinct().toList());
@@ -1706,22 +1713,9 @@ public class SettingsService {
 	}
 
 	/**
-	 * GET /api/settings/weather-campaigns/current：「天氣連動」分頁的目前天氣檔期清單（唯讀）。
-	 *
-	 * 範圍＝準備期／進行中的天氣檔期，加上所有手動覆蓋中的天氣檔期（含被設成 EXPIRED 的，
-	 * 才能在畫面上恢復自動判斷）。已自然結束、且沒有手動覆蓋的歷史列不回傳。
-	 * 切換狀態沿用既有 POST /api/settings/festive-campaigns/{id}/manual-status，不另開端點。
-	 */
-	@Transactional(readOnly = true)
-	public List<FestiveCampaignResponse> getCurrentWeatherCampaigns() {
-		return festiveCampaignRuleService.toResponses(festiveCampaignRepository.findCurrentOrManualByCategory(
-				FestiveCategory.WEATHER, List.of(FestiveCampaignStatus.PREPARING, FestiveCampaignStatus.ACTIVE)));
-	}
-
-	/**
 	 * POST /api/settings/festive-campaigns：新增檔期。
 	 *
-	 * 2026-09-24（V21 檔期規則改版）：只接受 FESTIVAL／SEASON（WEATHER 回 400，D1），改存日期規則，
+	 * 2026-09-24（V21 檔期規則改版）：只接受 FESTIVAL／SEASON（V26 起列舉本身已無 WEATHER），改存日期規則，
 	 * start_date／end_date 寫 NULL（D2）；代碼不可帶年份（D5）。規則驗證的單一入口是
 	 * FestiveCampaignRuleService.validateRule()，與預覽端點共用。
 	 */
@@ -1750,7 +1744,7 @@ public class SettingsService {
 
 	/**
 	 * PUT /api/settings/festive-campaigns/{id}：編輯檔期基本資料、日期規則、標籤與區域。
-	 * 標籤與區域皆整份覆蓋。既有資料或這次帶的類別是 WEATHER 一律 400（D1：天氣檔期只能切換狀態）。
+	 * 標籤與區域皆整份覆蓋。
 	 *
 	 * ⚠️ 必須先 saveAndFlush 再刪標籤／區域：兩支 deleteByCampaignId() 都會清空 Persistence Context，
 	 * 沒 flush 的檔期異動會被丟掉（2026-09-24「編輯檔期儲存後無效」的根本原因，見
@@ -1759,9 +1753,6 @@ public class SettingsService {
 	@Transactional
 	public FestiveCampaignResponse updateFestiveCampaign(Long id, FestiveCampaignUpdateRequest request) {
 		FestiveCampaign campaign = findFestiveCampaignOrThrow(id);
-		if (campaign.getCategory() == FestiveCategory.WEATHER) {
-			throw new IllegalArgumentException(ValidationMessage.CAMPAIGN_WEATHER_NOT_EDITABLE);
-		}
 		festiveCampaignRuleService.validateRule(request);
 
 		campaign.setCampaignName(request.getCampaignName());
@@ -1786,17 +1777,12 @@ public class SettingsService {
 	 * - FESTIVAL／SEASON：overrideEnabled=true 時寫入狀態，並把 manual_override_cycle 設成「當下本期」
 	 *   的週期年——覆蓋只對本期有效，進入下一期自動失效（讀取時判斷）；false 時清除旗標與週期。
 	 *   EXPIRED 只能以這個方式設定，意思是「本期停用」。
-	 * - WEATHER：行為不變（覆蓋期間同步服務不動這筆；恢復時依實際起訖日重算一次）。
 	 */
 	@Transactional
 	public FestiveCampaignResponse switchManualStatus(Long id, FestiveCampaignManualStatusRequest request) {
 		FestiveCampaign campaign = findFestiveCampaignOrThrow(id);
 		boolean overrideEnabled = Boolean.TRUE.equals(request.getOverrideEnabled());
-		if (campaign.getCategory() == FestiveCategory.WEATHER) {
-			campaign.setCampaignStatus(overrideEnabled ? request.getStatus()
-					: festiveCampaignRuleService.resolveAutomaticStatus(campaign));
-			campaign.setIsManualOverride(overrideEnabled);
-		} else if (overrideEnabled) {
+		if (overrideEnabled) {
 			Integer currentCycle = festiveCampaignRuleService.currentOccurrence(campaign)
 					.map(occurrence -> occurrence.cycleYear())
 					.orElseThrow(() -> new IllegalArgumentException("無法推算本期日期，不能手動指定狀態"));
@@ -1824,7 +1810,7 @@ public class SettingsService {
 		return festiveCampaignRuleService.listOverrides(id);
 	}
 
-	/** PUT /api/settings/festive-campaigns/{id}/occurrence-overrides/{cycleYear}；WEATHER 回 400。 */
+	/** PUT /api/settings/festive-campaigns/{id}/occurrence-overrides/{cycleYear} */
 	@Transactional
 	public FestiveCampaignOccurrenceOverrideResponse upsertFestiveCampaignOccurrenceOverride(Long id, int cycleYear,
 			FestiveCampaignOccurrenceOverrideRequest request, String username) {

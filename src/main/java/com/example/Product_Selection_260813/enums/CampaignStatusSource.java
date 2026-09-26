@@ -6,11 +6,10 @@ package com.example.Product_Selection_260813.enums;
  * <ul>
  * <li>AUTO：節慶／季節型依本期起訖日與準備天數即時推算。</li>
  * <li>MANUAL：節慶／季節型的手動覆蓋，只對「當期」有效，進入下一期自動失效。</li>
- * <li>SYNC：天氣型，狀態由 WeatherCampaignSyncService 同步寫入（或其手動覆蓋）。</li>
  * </ul>
+ * V26：天氣檔期移除，原本的 SYNC（天氣同步寫入）一併移除。
  */
 public enum CampaignStatusSource {
 	AUTO,
-	MANUAL,
-	SYNC
+	MANUAL
 }

@@ -13,6 +13,8 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,12 +31,14 @@ import com.example.Product_Selection_260813.enums.FestiveCampaignStatus;
 import com.example.Product_Selection_260813.enums.FestiveCampaignTagMatchTier;
 import com.example.Product_Selection_260813.enums.FestiveCategory;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
+import com.example.Product_Selection_260813.enums.WeatherSignalType;
 import com.example.Product_Selection_260813.repository.FestiveCampaignTagRepository;
 import com.example.Product_Selection_260813.repository.ProductEvaluationRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.service.campaign.ActiveCampaignWindow;
 import com.example.Product_Selection_260813.service.campaign.CampaignOccurrence;
 import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
+import com.example.Product_Selection_260813.service.weather.WeatherBoostService;
 
 /**
  * 2026-09-24（方案 2）：refreshFestivalBoosts() 只重算加成三欄，讓 product_evaluations
@@ -57,6 +61,9 @@ class ScoringServiceRefreshFestivalBoostsTest {
 	@Mock
 	private FestiveCampaignRuleService festiveCampaignRuleService;
 
+	@Mock
+	private WeatherBoostService weatherBoostService;
+
 	@InjectMocks
 	private ScoringService scoringService;
 
@@ -76,6 +83,16 @@ class ScoringServiceRefreshFestivalBoostsTest {
 		evaluation.setFinalScore(finalScore == null ? null : new BigDecimal(finalScore));
 		evaluation.setMatchedCampaignId(boost == null ? null : CAMPAIGN_ID);
 		return evaluation;
+	}
+
+	/** V26：天氣資料與對照（預設空＝沒有天氣加成，既有案例不受影響）。 */
+	private static WeatherBoostService.Context weatherContext(
+			Map<String, Map<LocalDate, Set<WeatherSignalType>>> dailyTypes,
+			Map<WeatherSignalType, Map<String, BigDecimal>> tagWeights) {
+		LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
+		return new WeatherBoostService.Context(today, today.minusDays(30), today.plusDays(13), dailyTypes, tagWeights,
+				Map.of("NORTH", new BigDecimal("100")), new BigDecimal("60"), new BigDecimal("40"),
+				new BigDecimal("5"), null);
 	}
 
 	/** 進行中的端午檔期，核心標籤「粽子」：matchWeight 1.0 × urgency 1.0 × 5 = 5.00。 */
@@ -110,6 +127,7 @@ class ScoringServiceRefreshFestivalBoostsTest {
 				List.of(product(1L, "粽子"), product(2L, null), product(3L, "粽子"), product(4L, "粽子")));
 		when(productEvaluationRepository.findByProductIdIn(anyCollection()))
 				.thenReturn(new ArrayList<>(List.of(stale, noTags, neverScored, alreadyFresh)));
+		when(weatherBoostService.loadContext(any())).thenReturn(weatherContext(Map.of(), Map.of()));
 
 		int updated = scoringService.refreshFestivalBoosts();
 
@@ -124,7 +142,28 @@ class ScoringServiceRefreshFestivalBoostsTest {
 		ArgumentCaptor<List<ProductEvaluation>> saved = ArgumentCaptor.forClass(List.class);
 		verify(productEvaluationRepository).saveAll(saved.capture());
 		assertThat(saved.getValue()).containsExactly(stale, noTags);
-		// 整批只查一次候選檔期
+		// 整批只查一次候選檔期與天氣資料
 		verify(festiveCampaignRuleService, times(1)).findLiveWindows(any());
+		verify(weatherBoostService, times(1)).loadContext(any());
+	}
+
+	@Test
+	void 天氣加成與節慶加成並列相加_V26() {
+		when(festiveCampaignRuleService.findLiveWindows(any())).thenReturn(List.of());
+		ProductEvaluation cooling = evaluation(5L, "70.00", "0.00", "70.00");
+		when(productRepository.findByReviewStatusNot(ProductReviewStatus.APPROVED))
+				.thenReturn(List.of(product(5L, "涼感")));
+		when(productEvaluationRepository.findByProductIdIn(anyCollection())).thenReturn(new ArrayList<>(List.of(cooling)));
+		// 北區（占比 100%）昨天與今天都是 HOT，「涼感」為 CORE 1.0：歷史分 100、預測分 100 → 天氣分 100 → 加成 5。
+		LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
+		when(weatherBoostService.loadContext(any())).thenReturn(weatherContext(
+				Map.of("NORTH", Map.of(today.minusDays(1), Set.of(WeatherSignalType.HOT), today,
+						Set.of(WeatherSignalType.HOT))),
+				Map.of(WeatherSignalType.HOT, Map.of("涼感", new BigDecimal("1.0")))));
+
+		assertThat(scoringService.refreshFestivalBoosts()).isEqualTo(1);
+		assertThat(cooling.getWeatherBoost()).isEqualByComparingTo("5.00");
+		assertThat(cooling.getFestivalBoost()).isEqualByComparingTo("0");
+		assertThat(cooling.getFinalScore()).isEqualByComparingTo("75.00");
 	}
 }

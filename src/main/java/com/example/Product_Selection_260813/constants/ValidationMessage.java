@@ -49,7 +49,6 @@ public class ValidationMessage {
 	public static final String CAMPAIGN_CODE_TOO_LONG = "檔期代碼長度不可超過50字元";
 	public static final String CAMPAIGN_NAME_TOO_LONG = "檔期名稱長度不可超過100字元";
 	// 檔期規則改版（V21，2026-09-24）：訊息文字與前端表單驗證一致，修改時兩邊一起改
-	public static final String CAMPAIGN_WEATHER_NOT_EDITABLE = "天氣型檔期由系統依天氣預報自動產生，不可手動建立或修改";
 	public static final String CAMPAIGN_CODE_FORMAT_INVALID = "檔期代碼須為大寫英數與底線，且不可包含年份";
 	public static final String CAMPAIGN_RULE_TYPE_REQUIRED = "請選擇日期規則類型";
 	public static final String CAMPAIGN_SEASON_RULE_TYPE_INVALID = "季節型檔期只能使用固定國曆日期";
