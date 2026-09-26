@@ -22,6 +22,7 @@ import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductEvaluation;
 import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.repository.SystemSettingRepository;
+import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -63,6 +64,14 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 
 	@Autowired
 	private SystemSettingRepository systemSettingRepository;
+
+	// ⚠️ 2026-09-25 新增：見 appendTrendContext()／appendWeatherContext()。
+	// ScoringService 不依賴本類別（已確認無循環依賴），注入安全。
+	@Autowired
+	private TrendSignalRepository trendSignalRepository;
+
+	@Autowired
+	private ScoringService scoringService;
 
 	// 月額度保護：MVP版本，key依月份自動輪替（如gemini_calls_2026-08），
 	// 不需要額外的排程去重置計數——換月自然就是全新的一筆。上限可在
@@ -175,6 +184,60 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 	 *                   刻意解開，而非忘記判斷null——與LlmAnalysisService介面
 	 *                   要求呼叫端顯式處理Optional的精神一致。
 	 */
+	/**
+	 * 把最新一筆 PTT／模擬趨勢資料寫進 prompt。只用最新一筆（跟品項詳情頁
+	 * 「市場趨勢／熱門度」面板顯示的是同一筆），不把整段歷史塞進 prompt——
+	 * AI 分析要的是「現在的狀況」，不是要模型自己做時間序列分析，那件事
+	 * 交給既有的 trendDirection（連續比較後的結果）就夠了。
+	 *
+	 * ⚠️ 資料來源是 SIMULATED 時明確告知模型「非真實市場數據」，避免模型
+	 * 把模擬分數當成真實市場情報講得煞有其事。
+	 */
+	private void appendTrendContext(StringBuilder sb, Long productId) {
+		trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(productId).ifPresent(signal -> {
+			sb.append("\n【市場熱度訊號】\n");
+			if ("PTT".equals(signal.getSource())) {
+				sb.append("來源：PTT 討論量（真實資料）\n");
+			} else {
+				sb.append("來源：模擬資料（非真實市場數據，分析時不要當作真實市場情報描述）\n");
+			}
+			appendIfPresent(sb, "搜尋關鍵字", signal.getKeyword());
+			appendIfPresent(sb, "熱度分數", signal.getPopularityScore());
+			if (signal.getTrendDirection() != null) {
+				// enum 本身已經帶中文標籤（getTrendSignalTrendDirection()），
+				// 不要自己重新定義一份對照表，避免日後 enum 加值時這裡忘記同步。
+				sb.append("趨勢方向：").append(signal.getTrendDirection().getTrendSignalTrendDirection()).append('\n');
+			}
+		});
+	}
+
+	/**
+	 * 把命中的節慶／天氣檔期寫進 prompt，只在有命中時才附加這段——沒有
+	 * 命中任何檔期是常態（大多數商品、大多數日子都不在任何檔期範圍內），
+	 * 不需要在 prompt 裡特別說明「沒有命中」，避免無謂拉長 prompt。
+	 *
+	 * 三種檔期類別（FESTIVAL／SEASON／WEATHER）都附加，不是只有天氣——
+	 * 模型講「近期天氣轉涼，適合這類商品」或「即將進入中秋檔期」都是
+	 * 有憑有據的情境化建議，跟這次任務名稱「天氣」只是其中一種情境來源。
+	 */
+	private void appendWeatherContext(StringBuilder sb, Product product) {
+		com.example.Product_Selection_260813.json.MatchedCampaignSnapshot snapshot;
+		try {
+			snapshot = scoringService.buildMatchedCampaignSnapshot(product);
+		} catch (RuntimeException ex) {
+			// 檔期比對邏輯本身有例外時，AI 分析不該因此整個失敗——這段資訊
+			// 是錦上添花，不是必要資料，記錄下來即可，其餘 prompt 內容照常送出。
+			log.warn("buildMatchedCampaignSnapshot 失敗，AI 分析將不含檔期情境資訊，productId={}", product.getId(), ex);
+			return;
+		}
+		if (snapshot == null || snapshot.getCampaignName() == null) {
+			return;
+		}
+		sb.append("\n【命中檔期】\n");
+		sb.append("檔期名稱：").append(snapshot.getCampaignName()).append('\n');
+		appendIfPresent(sb, "檔期類別", snapshot.getCategory());
+	}
+
 	private String buildPrompt(Product product, java.util.Optional<ProductEvaluation> evaluationOpt) {
 		ProductEvaluation evaluation = evaluationOpt.orElse(null);
 		StringBuilder sb = new StringBuilder();
@@ -221,6 +284,15 @@ public class GeminiAnalysisServiceImpl implements LlmAnalysisService {
 					+ "必須明確寫出「目前資料不足，以下分析僅供初步參考」，不可以假裝資料充足，"
 					+ "不可以編造或推測任何未提供的具體數據、市場資訊。\n");
 		}
+
+		// ⚠️ 2026-09-25 新增：這裡加入 PTT 討論量與天氣情境的具體數字，讓
+		// 生成的 reasons 能講出「近期 PTT 討論量上升」這種具體、有憑有據
+		// 的話，而不是只靠上面那個抽象的「市場趨勢分數」。這裡只餵入
+		// 事實資料，不要求模型自己去解讀「討論多=好」——好壞判斷仍然
+		// 交給模型自己根據 direction／分數區間做出合理推論，避免我們
+		// 在 prompt 裡先幫模型下結論、模型只是複誦。
+		appendTrendContext(sb, product.getId());
+		appendWeatherContext(sb, product);
 
 		sb.append("\n請以JSON格式回傳，包含三個欄位：\n");
 		sb.append("- summary：2到3句話的整體摘要\n");

@@ -1,5 +1,7 @@
 package com.example.Product_Selection_260813.controller;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -8,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
+import com.example.Product_Selection_260813.json.TrendHistoryPoint;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.service.TrendService;
 
@@ -45,6 +48,19 @@ public class TrendController {
 	@GetMapping("/api/products/{id}/trend")
 	public ResponseEntity<ApiResponse<TrendSnapshot>> getLatestTrend(@PathVariable("id") Long id) {
 		TrendSnapshot result = trendService.getLatestTrend(id);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * GET /api/products/{id}/trend/history：最近 30 天的趨勢歷史序列，
+	 * 依時間正序回傳，供品項詳情頁畫趨勢圖用。
+	 *
+	 * ⚠️ 2026-09-25 新增：跟上面 getLatestTrend()（只拿最新一筆）刻意
+	 * 區隔，這支拿完整序列，見 ScoringService.buildTrendHistory() 說明。
+	 */
+	@GetMapping("/api/products/{id}/trend/history")
+	public ResponseEntity<ApiResponse<List<TrendHistoryPoint>>> getTrendHistory(@PathVariable("id") Long id) {
+		List<TrendHistoryPoint> result = trendService.getHistory(id);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 }

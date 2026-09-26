@@ -14,6 +14,7 @@ import com.example.Product_Selection_260813.dto.response.DashboardConversionRate
 import com.example.Product_Selection_260813.dto.response.DashboardRecommendationItem;
 import com.example.Product_Selection_260813.dto.response.DashboardRiskAlertItem;
 import com.example.Product_Selection_260813.dto.response.DashboardStatisticsResponse;
+import com.example.Product_Selection_260813.dto.response.DashboardTrendLeaderboardItem;
 import com.example.Product_Selection_260813.service.DashboardService;
 
 /**
@@ -72,6 +73,21 @@ public class DashboardController {
 	public ResponseEntity<ApiResponse<DashboardConversionRateResponse>> getConversionRate(
 			@AuthenticationPrincipal String username) {
 		DashboardConversionRateResponse result = dashboardService.getConversionRate(username);
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
+	}
+
+	/**
+	 * GET /api/dashboard/trend-leaderboard：熱度排行榜，依趨勢單一因子的
+	 * 最新分數排序，跟 /recommendations（綜合總分）刻意區隔，見
+	 * DashboardTrendLeaderboardItem 類別註解。
+	 *
+	 * ⚠️ 2026-09-25 新增：企劃書十二-13的Controller對應表沒有列出本端點
+	 * （這支本來就不在原始規格裡，是後續補的），依專案既有命名慣例、跟
+	 * 同一個 Controller 其餘三支端點一樣不加 @PreAuthorize（已登入即可）。
+	 */
+	@GetMapping("/trend-leaderboard")
+	public ResponseEntity<ApiResponse<List<DashboardTrendLeaderboardItem>>> getTrendLeaderboard() {
+		List<DashboardTrendLeaderboardItem> result = dashboardService.getTrendLeaderboard();
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 }

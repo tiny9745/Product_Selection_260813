@@ -19,11 +19,13 @@ import com.example.Product_Selection_260813.dto.response.DashboardConversionRate
 import com.example.Product_Selection_260813.dto.response.DashboardRecommendationItem;
 import com.example.Product_Selection_260813.dto.response.DashboardRiskAlertItem;
 import com.example.Product_Selection_260813.dto.response.DashboardStatisticsResponse;
+import com.example.Product_Selection_260813.dto.response.DashboardTrendLeaderboardItem;
 import com.example.Product_Selection_260813.entity.AiAnalysis;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ReviewRecord;
 import com.example.Product_Selection_260813.entity.RiskOption;
+import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
@@ -35,6 +37,7 @@ import com.example.Product_Selection_260813.repository.ProductEvaluationReposito
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
 import com.example.Product_Selection_260813.repository.RiskOptionRepository;
+import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 
 /**
  * 對應 API總表「2. 儀表板」四支端點。企劃書十二-13的Controller對應表本身
@@ -49,6 +52,10 @@ public class DashboardService {
 
 	// GET /api/dashboard/recommendations 固定回傳前10筆（企劃書明訂「前10項商品」）
 	private static final int RECOMMENDATIONS_LIMIT = 10;
+	// ⚠️ 2026-09-25 新增：熱度排行榜刻意只取前 5 名，比 AI推薦Top10 的 10 筆
+	// 少——這張表資訊密度高（每列只有名稱/分數/方向），榜單太長反而失去
+	// 「一眼看出誰在飆升」的價值，5 筆足夠當作儀表板的快速總覽。
+	private static final int TREND_LEADERBOARD_LIMIT = 5;
 
 	@Autowired
 	private ProductRepository productRepository;
@@ -67,6 +74,9 @@ public class DashboardService {
 
 	@Autowired
 	private AppUserRepository appUserRepository;
+
+	@Autowired
+	private TrendSignalRepository trendSignalRepository;
 
 	/**
 	 * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數。
@@ -106,6 +116,43 @@ public class DashboardService {
 				ProductCandidateStatus.CANDIDATE, ProductItemStatus.ACTIVE, PageRequest.of(0, RECOMMENDATIONS_LIMIT));
 
 		return topProducts.stream().map(this::toRecommendationItem).toList();
+	}
+
+	/**
+	 * GET /api/dashboard/trend-leaderboard：熱度排行榜。
+	 *
+	 * ⚠️ 2026-09-25 新增，見 DashboardTrendLeaderboardItem 類別註解——跟
+	 * getRecommendations() 刻意區隔，只看趨勢單一因子，不是重複的 Top 10。
+	 */
+	public List<DashboardTrendLeaderboardItem> getTrendLeaderboard() {
+		List<TrendSignal> signals = trendSignalRepository.findLatestSignalsRankedByScore(TREND_LEADERBOARD_LIMIT);
+		if (signals.isEmpty()) {
+			return List.of();
+		}
+
+		// 一次批次查出商品名稱，不要在迴圈裡逐筆查（N+1）。
+		List<Long> productIds = signals.stream().map(TrendSignal::getProductId).toList();
+		Map<Long, Product> productById = productRepository.findAllById(productIds).stream()
+				.collect(Collectors.toMap(Product::getId, product -> product));
+
+		List<DashboardTrendLeaderboardItem> result = new ArrayList<>();
+		for (TrendSignal signal : signals) {
+			Product product = productById.get(signal.getProductId());
+			// 理論上不會發生（trend_signals 對 product_id 有外鍵約束），
+			// 但防禦性地跳過，不要讓單一筆髒資料炸掉整支 API。
+			if (product == null) {
+				continue;
+			}
+			DashboardTrendLeaderboardItem item = new DashboardTrendLeaderboardItem();
+			item.setProductId(product.getId());
+			item.setProductName(product.getName());
+			item.setPopularityScore(signal.getPopularityScore());
+			item.setTrendDirection(signal.getTrendDirection());
+			item.setSource(signal.getSource());
+			item.setKeyword(signal.getKeyword());
+			result.add(item);
+		}
+		return result;
 	}
 
 	private DashboardRecommendationItem toRecommendationItem(Product product) {

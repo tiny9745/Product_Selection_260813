@@ -53,6 +53,7 @@ import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.ProductPricingType;
 import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.json.MatchedCampaignSnapshot;
+import com.example.Product_Selection_260813.json.TrendHistoryPoint;
 import com.example.Product_Selection_260813.json.TrendSnapshot;
 import com.example.Product_Selection_260813.json.WeatherBoostSnapshot;
 import com.example.Product_Selection_260813.json.WeightFactorSnapshot;
@@ -362,6 +363,32 @@ public class ScoringService {
 			snapshot.setCollectedAt(signal.getCollectedAt() != null ? signal.getCollectedAt().toString() : null);
 			return snapshot;
 		}).orElse(null);
+	}
+
+	/**
+	 * GET /api/products/{id}/trend/history 用：品項詳情頁「熱度趨勢圖」。
+	 *
+	 * ⚠️ 2026-09-25 新增。跟 buildTrendSnapshot()（只拿最新一筆）不同，這支
+	 * 拿「最近 N 天」的完整序列給前端畫折線圖。N 固定 30 天，沒有做成可
+	 * 傳入參數——文件（十二-九）只要求「過去 7/30 天」擇一，30 天涵蓋 7 天，
+	 * 前端要縮小範圍可以自己在陣列裡篩選，不需要多一支查詢或多一個參數。
+	 *
+	 * 依時間正序（由舊到新）回傳，符合折線圖橫軸由左到右前進的直覺。
+	 */
+	private static final int TREND_HISTORY_DAYS = 30;
+
+	public List<TrendHistoryPoint> buildTrendHistory(Long productId) {
+		java.time.LocalDateTime since = java.time.LocalDateTime.now().minusDays(TREND_HISTORY_DAYS);
+		return trendSignalRepository
+				.findByProductIdAndCollectedAtAfterOrderByCollectedAtAsc(productId, since).stream()
+				.map(signal -> {
+					TrendHistoryPoint point = new TrendHistoryPoint();
+					point.setCollectedAt(signal.getCollectedAt() != null ? signal.getCollectedAt().toString() : null);
+					point.setPopularityScore(signal.getPopularityScore());
+					point.setTrendDirection(
+							signal.getTrendDirection() != null ? signal.getTrendDirection().name() : null);
+					return point;
+				}).toList();
 	}
 
 	/**

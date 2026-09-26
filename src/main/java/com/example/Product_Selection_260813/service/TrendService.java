@@ -123,6 +123,18 @@ public class TrendService {
 		return scoringService.buildTrendSnapshot(productId);
 	}
 
+	/**
+	 * GET /api/products/{id}/trend/history：最近 30 天的趨勢歷史序列，供
+	 * 品項詳情頁畫趨勢圖用。⚠️ 2026-09-25 新增，見 ScoringService.
+	 * buildTrendHistory() 的完整說明。
+	 */
+	public List<com.example.Product_Selection_260813.json.TrendHistoryPoint> getHistory(Long productId) {
+		if (!productRepository.existsById(productId)) {
+			throw new IllegalArgumentException("商品不存在");
+		}
+		return scoringService.buildTrendHistory(productId);
+	}
+
 	/** 全商品同步的統計結果；processed = 已處理（成功＋備援＋失敗）的商品數。 */
 	public record SyncAllResult(int total, int realCount, int fallbackCount, int failedCount) {
 		public int processed() {
