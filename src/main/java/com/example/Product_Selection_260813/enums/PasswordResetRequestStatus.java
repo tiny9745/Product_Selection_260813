@@ -7,5 +7,7 @@ public enum PasswordResetRequestStatus {
 	/** 管理者已重設密碼。 */
 	COMPLETED,
 	/** 管理者駁回（例如無法確認是本人申請）。 */
-	REJECTED
+	REJECTED,
+	/** 使用者在管理者處理前，就用原本的密碼成功登入：已不需要重設，自動取消（V28）。 */
+	CANCELLED
 }

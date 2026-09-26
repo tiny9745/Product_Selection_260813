@@ -61,7 +61,7 @@ public class AuthController {
 	}
 
 	/** 申請重設密碼的固定回應訊息（不透露帳號是否存在）；前端直接顯示這段文字。 */
-	static final String PASSWORD_RESET_APPLIED_MESSAGE = "已送出申請。若帳號存在，管理者處理後會提供臨時密碼給您。";
+	static final String PASSWORD_RESET_APPLIED_MESSAGE = "已送出申請";
 
 	/**
 	 * Cookie的Secure屬性，由設定檔決定而非寫死。

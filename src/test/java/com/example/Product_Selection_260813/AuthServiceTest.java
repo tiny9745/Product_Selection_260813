@@ -2,6 +2,9 @@ package com.example.Product_Selection_260813;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -23,6 +26,7 @@ import com.example.Product_Selection_260813.enums.UserRole;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import com.example.Product_Selection_260813.security.JwtTokenProvider;
 import com.example.Product_Selection_260813.service.AuthService;
+import com.example.Product_Selection_260813.service.PasswordResetRequestService;
 
 /**
  * 這支測試完全不需要啟動Spring Context或Servlet環境，
@@ -42,6 +46,9 @@ class AuthServiceTest {
 
 	@Mock
 	private JwtTokenProvider jwtTokenProvider;
+
+	@Mock
+	private PasswordResetRequestService passwordResetRequestService;
 
 	@InjectMocks
 	private AuthService authService;
@@ -74,6 +81,8 @@ class AuthServiceTest {
 		assertThat(result.getExpiresInSeconds()).isEqualTo(28800L);
 		assertThat(result.getUser().getUsername()).isEqualTo("purchaser01");
 		assertThat(result.getUser().getRole()).isEqualTo(UserRole.PURCHASER);
+		// V28：用密碼成功登入時，自動取消本人待處理的重設密碼申請
+		verify(passwordResetRequestService).cancelPendingOnLogin(1L);
 	}
 
 	@Test
@@ -91,6 +100,8 @@ class AuthServiceTest {
 
 		assertThatThrownBy(() -> authService.login("purchaser01", "wrong-password"))
 				.isInstanceOf(InvalidCredentialsException.class);
+		// 密碼錯誤不能取消申請（否則任何人猜錯密碼都能把別人的申請取消掉）
+		verify(passwordResetRequestService, never()).cancelPendingOnLogin(any());
 	}
 
 	@Test
@@ -101,6 +112,7 @@ class AuthServiceTest {
 
 		assertThatThrownBy(() -> authService.login("purchaser01", "correct-password"))
 				.isInstanceOf(AccountDisabledException.class);
+		verify(passwordResetRequestService, never()).cancelPendingOnLogin(any());
 	}
 
 	@Test

@@ -67,6 +67,30 @@ public class PasswordResetRequestService {
 		requestRepository.save(new PasswordResetRequest(user.getId(), LocalDateTime.now(BusinessTimeZone.TAIPEI)));
 	}
 
+	/**
+	 * 使用者用密碼成功登入時呼叫（V28，2026-09-26 決議）：能用原本的密碼登入，代表已經想起密碼、
+	 * 不需要重設，把該帳號的待處理申請結案為 CANCELLED（handled_by 為 null）。
+	 *
+	 * 沒有待處理申請時什麼都不做（正常登入的絕大多數情況）。只由 AuthService.login() 呼叫——
+	 * 帶著舊 token 的請求不算「登入」，不會觸發；管理者重設後用臨時密碼登入時，申請早已是
+	 * COMPLETED，也不受影響。
+	 *
+	 * @return 被取消的申請筆數（供日誌與測試）
+	 */
+	@Transactional
+	public int cancelPendingOnLogin(Long userId) {
+		List<PasswordResetRequest> pending = requestRepository.findByUserIdAndStatus(userId,
+				PasswordResetRequestStatus.PENDING);
+		if (pending.isEmpty()) {
+			return 0;
+		}
+		LocalDateTime now = LocalDateTime.now(BusinessTimeZone.TAIPEI);
+		pending.forEach(request -> request.close(PasswordResetRequestStatus.CANCELLED, null, now));
+		requestRepository.saveAll(pending);
+		log.info("使用者已用原密碼登入，自動取消 {} 筆待處理的重設密碼申請 userId={}", pending.size(), userId);
+		return pending.size();
+	}
+
 	/** 帳號管理清單用：userId → 最早一筆待處理申請的申請時間（一次查詢）。 */
 	@Transactional(readOnly = true)
 	public Map<Long, LocalDateTime> pendingRequestedAtByUser() {
@@ -86,7 +110,8 @@ public class PasswordResetRequestService {
 		List<PasswordResetRequest> pending = requestRepository.findByUserIdAndStatus(userId,
 				PasswordResetRequestStatus.PENDING);
 		if (pending.isEmpty()) {
-			throw new IllegalStateException("此帳號沒有待處理的重設密碼申請，請先由使用者在登入頁提出申請");
+			// V28：也可能是使用者已用原密碼登入、申請自動取消，所以訊息提示重新整理確認。
+			throw new IllegalStateException("此帳號沒有待處理的重設密碼申請（可能已由使用者登入而自動取消），請重新整理帳號清單");
 		}
 		LocalDateTime now = LocalDateTime.now(BusinessTimeZone.TAIPEI);
 		pending.forEach(request -> request.close(result, managerId, now));

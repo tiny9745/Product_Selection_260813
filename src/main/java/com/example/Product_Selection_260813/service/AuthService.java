@@ -44,6 +44,9 @@ public class AuthService {
 	@Autowired
 	private JwtTokenProvider jwtTokenProvider;
 
+	@Autowired
+	private PasswordResetRequestService passwordResetRequestService;
+
 	/**
 	 * POST /api/auth/login 業務邏輯：驗證帳密、建立JWT、回傳使用者角色。
 	 *
@@ -77,6 +80,10 @@ public class AuthService {
 		user.setActiveSessionVersion(user.getActiveSessionVersion() + 1);
 		AppUser saved = appUserRepository.save(user);
 
+		// V28（2026-09-26）：能用密碼成功登入＝已不需要重設，自動取消本人待處理的重設密碼申請，
+		// 管理者端的「申請重設密碼」標示隨之消失。放在帳密與停用檢查都通過之後、同一筆交易內。
+		passwordResetRequestService.cancelPendingOnLogin(saved.getId());
+
 		String token = jwtTokenProvider.generateToken(saved);
 		log.info("使用者登入成功 username={} role={} sessionVersion={}",
 				saved.getUsername(), saved.getRole(), saved.getActiveSessionVersion());
@@ -93,9 +100,9 @@ public class AuthService {
 	 * （最長8小時）才會生效。多一次以username查PK索引的查詢，換取這支API的即時性，
 	 * 這個成本可接受（/me呼叫頻率不像列表類API那麼高）。
 	 *
-	 * 注意：這個即時性保證僅限於/me這支API本身，其餘受JwtAuthenticationFilter保護的API
-	 * 為了效能，並未在每個請求都重查資料庫，因此帳號停用對其餘API的生效時間仍是
-	 * 最長8小時（見JwtAuthenticationFilter註解），這是六-4決議「不做黑名單機制」下的必然結果。
+	 * 2026-09-26 更新：停用帳號（UserService.disableUser()）現在會遞增 activeSessionVersion，
+	 * JwtAuthenticationFilter 比對版本不符即視為登入失效，所以停用對所有 API 都是立即生效，
+	 * 不再是「最長 8 小時」。
 	 */
 	@Transactional(readOnly = true)
 	public UserResponse getCurrentUser(String username) {

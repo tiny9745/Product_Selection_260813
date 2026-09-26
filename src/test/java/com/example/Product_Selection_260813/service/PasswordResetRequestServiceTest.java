@@ -118,6 +118,28 @@ class PasswordResetRequestServiceTest {
 	}
 
 	@Test
+	void 使用者登入成功時自動取消待處理申請_V28() {
+		PasswordResetRequest pending = new PasswordResetRequest(2L, LocalDateTime.of(2026, 9, 26, 9, 0));
+		when(requestRepository.findByUserIdAndStatus(2L, PasswordResetRequestStatus.PENDING))
+				.thenReturn(List.of(pending));
+
+		int cancelled = service.cancelPendingOnLogin(2L);
+
+		assertThat(cancelled).isEqualTo(1);
+		assertThat(pending.getStatus()).isEqualTo(PasswordResetRequestStatus.CANCELLED);
+		assertThat(pending.getHandledBy()).isNull();
+		assertThat(pending.getHandledAt()).isNotNull();
+	}
+
+	@Test
+	void 沒有待處理申請時登入不做任何事_V28() {
+		when(requestRepository.findByUserIdAndStatus(2L, PasswordResetRequestStatus.PENDING)).thenReturn(List.of());
+
+		assertThat(service.cancelPendingOnLogin(2L)).isEqualTo(0);
+		verify(requestRepository, never()).saveAll(any());
+	}
+
+	@Test
 	void 已結案的申請不可再結案() {
 		PasswordResetRequest request = new PasswordResetRequest(2L, LocalDateTime.now());
 		request.close(PasswordResetRequestStatus.REJECTED, 1L, LocalDateTime.now());

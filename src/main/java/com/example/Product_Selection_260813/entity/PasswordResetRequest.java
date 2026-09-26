@@ -52,7 +52,10 @@ public class PasswordResetRequest {
 		this.requestedAt = requestedAt;
 	}
 
-	/** 結案：管理者重設完成（COMPLETED）或駁回（REJECTED）。只允許從 PENDING 結案。 */
+	/**
+	 * 結案：管理者重設完成（COMPLETED）、駁回（REJECTED），或使用者本人登入成功自動取消
+	 * （CANCELLED，managerId 為 null）。只允許從 PENDING 結案。
+	 */
 	public void close(PasswordResetRequestStatus result, Long managerId, LocalDateTime at) {
 		if (status != PasswordResetRequestStatus.PENDING || result == PasswordResetRequestStatus.PENDING) {
 			throw new IllegalStateException("此重設密碼申請已結案");
