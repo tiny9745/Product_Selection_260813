@@ -971,6 +971,13 @@ public class ProductService {
 		if (oldImageUrl == null || oldImageUrl.isBlank()) {
 			return;
 		}
+		// 2026-09-27：再販售商品建立時會沿用參考商品的圖片路徑（前端 prefillFromReference），
+		// 同一個檔案可能被多件商品共用。這件商品換圖時，若還有其他商品指向舊檔就不刪，
+		// 否則會把對方的圖一起刪掉。呼叫端已先把本商品改指向新檔並存檔，這裡查到的一定是別人。
+		if (productRepository.existsByImageUrl(oldImageUrl)) {
+			log.info("舊圖片仍被其他商品使用，保留不刪除：{}", oldImageUrl);
+			return;
+		}
 		String oldFilename = oldImageUrl.substring(oldImageUrl.lastIndexOf('/') + 1);
 		try {
 			Files.deleteIfExists(resolveUploadDir().resolve(oldFilename));

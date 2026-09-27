@@ -165,6 +165,39 @@ public final class ScoringAlgorithms {
 		return clamp(score, BigDecimal.ZERO, HUNDRED).setScale(CALC_SCALE, RoundingMode.HALF_UP);
 	}
 
+	/**
+	 * 同 {@link #normalizeByBand}，但用對數曲線映射，適合長尾分布的「次數型」原始值
+	 * （例如社群提及次數：多數商品個位數、少數爆紅商品上百）。
+	 *
+	 * <pre>
+	 * score = clamp(ln(1 + (實際值 − 下界)) / ln(1 + (上界 − 下界)) × 100, 0, 100)
+	 * </pre>
+	 *
+	 * 端點與線性版相同：等於下界 0 分、等於上界 100 分、高於上界一律 100 分。
+	 * 差別在中間：線性時上界 300 會讓提及 10 次只拿 3.3 分，一般商品全擠在 0 分附近，
+	 * 分數拉不開；對數時 10 次約 42 分、30 次約 60 分、100 次約 81 分，上界不必為了
+	 * 讓一般商品有分數而硬壓低（壓低反而讓中等熱度以上全部滿分，一樣失真）。
+	 */
+	public static BigDecimal normalizeByBandLog(BigDecimal value, BigDecimal lowerBound, BigDecimal upperBound) {
+		if (value == null) {
+			return null;
+		}
+		if (lowerBound == null || upperBound == null) {
+			throw new IllegalArgumentException("目標區間的上下界不可為 null");
+		}
+		double range = upperBound.subtract(lowerBound).doubleValue();
+		if (range <= 0) {
+			throw new IllegalArgumentException(
+					"目標區間上界必須大於下界，目前為：" + lowerBound + " ~ " + upperBound);
+		}
+		double offset = value.subtract(lowerBound).doubleValue();
+		if (offset <= 0) {
+			return BigDecimal.ZERO.setScale(CALC_SCALE, RoundingMode.HALF_UP);
+		}
+		BigDecimal score = BigDecimal.valueOf(Math.log1p(offset) / Math.log1p(range) * 100);
+		return clamp(score, BigDecimal.ZERO, HUNDRED).setScale(CALC_SCALE, RoundingMode.HALF_UP);
+	}
+
 	// =====================================================================
 	// 4. 分位數（設計文件 3.4）
 	// =====================================================================

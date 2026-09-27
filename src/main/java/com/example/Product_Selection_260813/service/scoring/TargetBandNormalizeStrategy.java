@@ -23,9 +23,17 @@ import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
  *
  * 查無區間時回傳 null（從加權分母排除），不自行編一組區間——理由與既有
  * normalizeWithBand() 完全相同：編出來的區間會讓分數看起來正常但實際無依據。
+ *
+ * <b>對數曲線（2026-09-27）：</b>strategyParams 帶 {@code logCurve = 1} 時改用
+ * {@link ScoringAlgorithms#normalizeByBandLog}，給「次數型」長尾資料使用（例如社群聲量
+ * 提及次數）。不另開一個 FactorStrategyCode：資料形狀一樣是「原始數字＋目標區間」，
+ * 只是換一條映射曲線，沿用同一個策略才不用改動欄位型態與運算邏輯的相容性檢查。
  */
 @Component
 public class TargetBandNormalizeStrategy implements FactorCalculationStrategy {
+
+	/** strategyParams 的鍵：值大於 0 時使用對數曲線。 */
+	public static final String LOG_CURVE_PARAM = "logCurve";
 
 	private final ScoreBandResolver scoreBandResolver;
 
@@ -50,6 +58,19 @@ public class TargetBandNormalizeStrategy implements FactorCalculationStrategy {
 		if (band.isEmpty()) {
 			return null;
 		}
-		return ScoringAlgorithms.normalizeByBand(raw, band.get().getLowerBound(), band.get().getUpperBound());
+		BigDecimal lower = band.get().getLowerBound();
+		BigDecimal upper = band.get().getUpperBound();
+		return usesLogCurve(definition)
+				? ScoringAlgorithms.normalizeByBandLog(raw, lower, upper)
+				: ScoringAlgorithms.normalizeByBand(raw, lower, upper);
+	}
+
+	static boolean usesLogCurve(FactorDefinition definition) {
+		Map<String, BigDecimal> params = definition.getStrategyParams();
+		if (params == null) {
+			return false;
+		}
+		BigDecimal flag = params.get(LOG_CURVE_PARAM);
+		return flag != null && flag.signum() > 0;
 	}
 }
