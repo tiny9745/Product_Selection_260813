@@ -1,0 +1,37 @@
+-- =====================================================================
+-- AI 團購選品決策輔助系統 — 種子資料 v6（全新產生，對應 V1~V30 schema）
+--
+-- 【前提】
+--   1. Flyway 已套用 V1~V30（本檔依賴 V15 的自訂屬性／自訂因子、V16/V17 的 9 大類、
+--      V18 的 3 筆系統風險選項、V19 的天氣標籤對照、V20 的區域占比、V26 的天氣加成設定）。
+--   2. 先執行 clear_seed_data_v7.sql 再匯入本檔。本檔所有主鍵都明確指定，資料庫裡若
+--      已有假資料（或 DevUserSeeder 建立的 manager／purchaser 測試帳號）會撞主鍵。
+--
+-- 【匯入方式】（務必 utf8mb4，否則中文會變亂碼）
+--   mysql --default-character-set=utf8mb4 -u root product_selection_260813 < seed_data_full_v6.sql
+--   整份包在單一交易（START TRANSACTION … COMMIT）裡：用 mysql CLI 匯入時遇到任何錯誤會
+--   立即停止並整批回滾，不會留下只匯入一半的資料。
+--   MySQL Workbench：請確認工具列「遇錯繼續執行」沒有開啟，否則錯誤後的語句仍會被執行並 COMMIT。
+--
+-- 【與 v5 的關係】
+--   v5 對應 V1~V16，在目前 schema 上會失敗（V26 移除了 festive_campaigns.start_date／end_date
+--   與天氣檔期、product_evaluations 外鍵連鎖失敗、ai_analyses 全數寫不進去）。這一版不是修補，
+--   而是依現行 schema 與商業規則全新產生：商品主檔、客群、檔期、開團紀錄、趨勢、評估、審核快照
+--   都重新編寫與計算。
+--
+-- 【資料的「現在」＝ 2026-09-28 08:00（台灣時間）】
+--   所有時間都落在這之前：09-28 02:00 PTT 同步、03:00 AI 選品批次、04:00 Google 趨勢排程、
+--   05:00 天氣同步都已跑完。節慶／季節狀態由日期規則即時推算，不受匯入日期影響；
+--   但趨勢熱度的新鮮度衰減、天氣窗口會隨實際日期推移，這是固定日期種子資料天生的時效性。
+--
+-- 【一致性】
+--   product_evaluations 與 review_records 的分數、Gate 判定、節慶加成、天氣加成、快照 JSON，
+--   都由產生器逐一移植後端 Java 的公式計算（ScoringService／ProductFactorScorer／
+--   HistoricalScoreCalculator／GateEvaluationService／CampaignOccurrenceResolver／
+--   WeatherBoostService），並以「審核當下／計算當下」的資料為準（as-of），不是隨機填值。
+--
+-- 【不會動到的系統預設】
+--   evaluation_modes、evaluation_factors、system_settings、product_type_score_bands、
+--   factor_definitions、custom_field_definitions、region_weights、weather_boost_settings，
+--   以及 product_types／risk_options／weather_signal_tag_mappings 裡 is_system_default=1 的列。
+-- =====================================================================

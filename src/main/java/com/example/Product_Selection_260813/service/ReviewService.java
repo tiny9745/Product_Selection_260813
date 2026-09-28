@@ -222,7 +222,9 @@ public class ReviewService {
 
 		return ReviewDetailResponse.build(ProductResponse.from(product), product.getSubmissionCount(),
 				evaluationOpt.orElse(null), evaluationModeOpt.orElse(null),
-				scoringService.buildWeightSnapshot(evaluationModeId), matchedCampaign,
+				// 與 submitReview() 使用同一個版本：主管在審核頁看到的權重／目標區間／歷史樣本數，
+				// 就是按下送出後會凍結進 review_records.weight_snapshot 的內容。
+				scoringService.buildWeightSnapshot(evaluationModeId, product), matchedCampaign,
 				aiSelectionService.getLatestAnalysis(productId).orElse(null), availableRiskOptions, gateSummary)
 				// V26：審核頁顯示天氣加成的即時明細（歷史／預測分、命中標籤、資料更新時間）。
 				.withWeatherBoostDetail(scoringService.buildWeatherBoostSnapshot(product));
@@ -431,7 +433,11 @@ public class ReviewService {
 
 		record.setMatchedCampaignSnapshot(matchedCampaign);
 		record.setSystemGateSummary(gateSummary.toDisplaySummary());
-		record.setWeightSnapshot(scoringService.buildWeightSnapshot(evaluationModeId));
+		// 2026-09-29 修正：改用含商品情境的版本。原本呼叫不帶商品的 buildWeightSnapshot(modeId)，
+		// 快照裡的 scoreBands／historySampleSizeCategory／historySampleSizeProduct／
+		// historyIncludesSimulated 永遠是 null——目標區間之後被調整，已審核商品就查不到
+		// 「當時用的是哪一組區間、歷史樣本有多少筆、是否含模擬資料」，違反快照可重現原則。
+		record.setWeightSnapshot(scoringService.buildWeightSnapshot(evaluationModeId, product));
 		record.setTrendSnapshot(scoringService.buildTrendSnapshot(product.getId()));
 		record.setProductSnapshot(buildProductSnapshot(product));
 		record.setAiSummarySnapshot(aiSelectionService.buildAiSummarySnapshot(product.getId()));
