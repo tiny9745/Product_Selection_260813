@@ -1,0 +1,18 @@
+{
+ "search_metadata": {
+  "status": "Success"
+ },
+ "search_parameters": {
+  "engine": "google_trends",
+  "q": "兒童防潑水連帽外套",
+  "hl": "zh-tw",
+  "geo": "TW",
+  "date": "today 3-m",
+  "tz": "420",
+  "data_type": "TIMESERIES"
+ },
+ "search_information": {
+  "organic_results_state": "Fully empty"
+ },
+ "error": "Google Trends hasn't returned any results for this query."
+}

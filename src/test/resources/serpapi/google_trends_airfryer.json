@@ -1,0 +1,1135 @@
+{
+ "search_metadata": {
+  "status": "Success"
+ },
+ "search_parameters": {
+  "engine": "google_trends",
+  "q": "氣炸鍋",
+  "hl": "zh-tw",
+  "geo": "TW",
+  "date": "today 3-m",
+  "tz": "420",
+  "data_type": "TIMESERIES"
+ },
+ "interest_over_time": {
+  "timeline_data": [
+   {
+    "date": "2026年6月28日",
+    "timestamp": "1782604800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "54",
+      "extracted_value": 54
+     }
+    ]
+   },
+   {
+    "date": "2026年6月29日",
+    "timestamp": "1782691200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年6月30日",
+    "timestamp": "1782777600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "32",
+      "extracted_value": 32
+     }
+    ]
+   },
+   {
+    "date": "2026年7月1日",
+    "timestamp": "1782864000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "27",
+      "extracted_value": 27
+     }
+    ]
+   },
+   {
+    "date": "2026年7月2日",
+    "timestamp": "1782950400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年7月3日",
+    "timestamp": "1783036800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年7月4日",
+    "timestamp": "1783123200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "43",
+      "extracted_value": 43
+     }
+    ]
+   },
+   {
+    "date": "2026年7月5日",
+    "timestamp": "1783209600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "46",
+      "extracted_value": 46
+     }
+    ]
+   },
+   {
+    "date": "2026年7月6日",
+    "timestamp": "1783296000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年7月7日",
+    "timestamp": "1783382400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "31",
+      "extracted_value": 31
+     }
+    ]
+   },
+   {
+    "date": "2026年7月8日",
+    "timestamp": "1783468800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "31",
+      "extracted_value": 31
+     }
+    ]
+   },
+   {
+    "date": "2026年7月9日",
+    "timestamp": "1783555200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "31",
+      "extracted_value": 31
+     }
+    ]
+   },
+   {
+    "date": "2026年7月10日",
+    "timestamp": "1783641600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "54",
+      "extracted_value": 54
+     }
+    ]
+   },
+   {
+    "date": "2026年7月11日",
+    "timestamp": "1783728000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "100",
+      "extracted_value": 100
+     }
+    ]
+   },
+   {
+    "date": "2026年7月12日",
+    "timestamp": "1783814400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "49",
+      "extracted_value": 49
+     }
+    ]
+   },
+   {
+    "date": "2026年7月13日",
+    "timestamp": "1783900800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "44",
+      "extracted_value": 44
+     }
+    ]
+   },
+   {
+    "date": "2026年7月14日",
+    "timestamp": "1783987200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年7月15日",
+    "timestamp": "1784073600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "42",
+      "extracted_value": 42
+     }
+    ]
+   },
+   {
+    "date": "2026年7月16日",
+    "timestamp": "1784160000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "38",
+      "extracted_value": 38
+     }
+    ]
+   },
+   {
+    "date": "2026年7月17日",
+    "timestamp": "1784246400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "36",
+      "extracted_value": 36
+     }
+    ]
+   },
+   {
+    "date": "2026年7月18日",
+    "timestamp": "1784332800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "49",
+      "extracted_value": 49
+     }
+    ]
+   },
+   {
+    "date": "2026年7月19日",
+    "timestamp": "1784419200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "42",
+      "extracted_value": 42
+     }
+    ]
+   },
+   {
+    "date": "2026年7月20日",
+    "timestamp": "1784505600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "40",
+      "extracted_value": 40
+     }
+    ]
+   },
+   {
+    "date": "2026年7月21日",
+    "timestamp": "1784592000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年7月22日",
+    "timestamp": "1784678400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年7月23日",
+    "timestamp": "1784764800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年7月24日",
+    "timestamp": "1784851200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "32",
+      "extracted_value": 32
+     }
+    ]
+   },
+   {
+    "date": "2026年7月25日",
+    "timestamp": "1784937600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "43",
+      "extracted_value": 43
+     }
+    ]
+   },
+   {
+    "date": "2026年7月26日",
+    "timestamp": "1785024000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "49",
+      "extracted_value": 49
+     }
+    ]
+   },
+   {
+    "date": "2026年7月27日",
+    "timestamp": "1785110400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "44",
+      "extracted_value": 44
+     }
+    ]
+   },
+   {
+    "date": "2026年7月28日",
+    "timestamp": "1785196800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年7月29日",
+    "timestamp": "1785283200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "36",
+      "extracted_value": 36
+     }
+    ]
+   },
+   {
+    "date": "2026年7月30日",
+    "timestamp": "1785369600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年7月31日",
+    "timestamp": "1785456000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年8月1日",
+    "timestamp": "1785542400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "41",
+      "extracted_value": 41
+     }
+    ]
+   },
+   {
+    "date": "2026年8月2日",
+    "timestamp": "1785628800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "47",
+      "extracted_value": 47
+     }
+    ]
+   },
+   {
+    "date": "2026年8月3日",
+    "timestamp": "1785715200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "38",
+      "extracted_value": 38
+     }
+    ]
+   },
+   {
+    "date": "2026年8月4日",
+    "timestamp": "1785801600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年8月5日",
+    "timestamp": "1785888000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年8月6日",
+    "timestamp": "1785974400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年8月7日",
+    "timestamp": "1786060800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "29",
+      "extracted_value": 29
+     }
+    ]
+   },
+   {
+    "date": "2026年8月8日",
+    "timestamp": "1786147200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "47",
+      "extracted_value": 47
+     }
+    ]
+   },
+   {
+    "date": "2026年8月9日",
+    "timestamp": "1786233600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "55",
+      "extracted_value": 55
+     }
+    ]
+   },
+   {
+    "date": "2026年8月10日",
+    "timestamp": "1786320000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年8月11日",
+    "timestamp": "1786406400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "36",
+      "extracted_value": 36
+     }
+    ]
+   },
+   {
+    "date": "2026年8月12日",
+    "timestamp": "1786492800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "32",
+      "extracted_value": 32
+     }
+    ]
+   },
+   {
+    "date": "2026年8月13日",
+    "timestamp": "1786579200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "38",
+      "extracted_value": 38
+     }
+    ]
+   },
+   {
+    "date": "2026年8月14日",
+    "timestamp": "1786665600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年8月15日",
+    "timestamp": "1786752000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "49",
+      "extracted_value": 49
+     }
+    ]
+   },
+   {
+    "date": "2026年8月16日",
+    "timestamp": "1786838400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "54",
+      "extracted_value": 54
+     }
+    ]
+   },
+   {
+    "date": "2026年8月17日",
+    "timestamp": "1786924800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年8月18日",
+    "timestamp": "1787011200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "43",
+      "extracted_value": 43
+     }
+    ]
+   },
+   {
+    "date": "2026年8月19日",
+    "timestamp": "1787097600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "41",
+      "extracted_value": 41
+     }
+    ]
+   },
+   {
+    "date": "2026年8月20日",
+    "timestamp": "1787184000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年8月21日",
+    "timestamp": "1787270400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "38",
+      "extracted_value": 38
+     }
+    ]
+   },
+   {
+    "date": "2026年8月22日",
+    "timestamp": "1787356800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "60",
+      "extracted_value": 60
+     }
+    ]
+   },
+   {
+    "date": "2026年8月23日",
+    "timestamp": "1787443200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "59",
+      "extracted_value": 59
+     }
+    ]
+   },
+   {
+    "date": "2026年8月24日",
+    "timestamp": "1787529600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "54",
+      "extracted_value": 54
+     }
+    ]
+   },
+   {
+    "date": "2026年8月25日",
+    "timestamp": "1787616000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "44",
+      "extracted_value": 44
+     }
+    ]
+   },
+   {
+    "date": "2026年8月26日",
+    "timestamp": "1787702400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年8月27日",
+    "timestamp": "1787788800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年8月28日",
+    "timestamp": "1787875200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "32",
+      "extracted_value": 32
+     }
+    ]
+   },
+   {
+    "date": "2026年8月29日",
+    "timestamp": "1787961600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "49",
+      "extracted_value": 49
+     }
+    ]
+   },
+   {
+    "date": "2026年8月30日",
+    "timestamp": "1788048000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "62",
+      "extracted_value": 62
+     }
+    ]
+   },
+   {
+    "date": "2026年8月31日",
+    "timestamp": "1788134400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "47",
+      "extracted_value": 47
+     }
+    ]
+   },
+   {
+    "date": "2026年9月1日",
+    "timestamp": "1788220800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年9月2日",
+    "timestamp": "1788307200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年9月3日",
+    "timestamp": "1788393600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年9月4日",
+    "timestamp": "1788480000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年9月5日",
+    "timestamp": "1788566400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "44",
+      "extracted_value": 44
+     }
+    ]
+   },
+   {
+    "date": "2026年9月6日",
+    "timestamp": "1788652800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "65",
+      "extracted_value": 65
+     }
+    ]
+   },
+   {
+    "date": "2026年9月7日",
+    "timestamp": "1788739200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "48",
+      "extracted_value": 48
+     }
+    ]
+   },
+   {
+    "date": "2026年9月8日",
+    "timestamp": "1788825600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "44",
+      "extracted_value": 44
+     }
+    ]
+   },
+   {
+    "date": "2026年9月9日",
+    "timestamp": "1788912000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "43",
+      "extracted_value": 43
+     }
+    ]
+   },
+   {
+    "date": "2026年9月10日",
+    "timestamp": "1788998400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年9月11日",
+    "timestamp": "1789084800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "34",
+      "extracted_value": 34
+     }
+    ]
+   },
+   {
+    "date": "2026年9月12日",
+    "timestamp": "1789171200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "51",
+      "extracted_value": 51
+     }
+    ]
+   },
+   {
+    "date": "2026年9月13日",
+    "timestamp": "1789257600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "51",
+      "extracted_value": 51
+     }
+    ]
+   },
+   {
+    "date": "2026年9月14日",
+    "timestamp": "1789344000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "38",
+      "extracted_value": 38
+     }
+    ]
+   },
+   {
+    "date": "2026年9月15日",
+    "timestamp": "1789430400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "39",
+      "extracted_value": 39
+     }
+    ]
+   },
+   {
+    "date": "2026年9月16日",
+    "timestamp": "1789516800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年9月17日",
+    "timestamp": "1789603200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年9月18日",
+    "timestamp": "1789689600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年9月19日",
+    "timestamp": "1789776000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "42",
+      "extracted_value": 42
+     }
+    ]
+   },
+   {
+    "date": "2026年9月20日",
+    "timestamp": "1789862400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "40",
+      "extracted_value": 40
+     }
+    ]
+   },
+   {
+    "date": "2026年9月21日",
+    "timestamp": "1789948800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "27",
+      "extracted_value": 27
+     }
+    ]
+   },
+   {
+    "date": "2026年9月22日",
+    "timestamp": "1790035200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "37",
+      "extracted_value": 37
+     }
+    ]
+   },
+   {
+    "date": "2026年9月23日",
+    "timestamp": "1790121600",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "35",
+      "extracted_value": 35
+     }
+    ]
+   },
+   {
+    "date": "2026年9月24日",
+    "timestamp": "1790208000",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "33",
+      "extracted_value": 33
+     }
+    ]
+   },
+   {
+    "date": "2026年9月25日",
+    "timestamp": "1790294400",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "50",
+      "extracted_value": 50
+     }
+    ]
+   },
+   {
+    "date": "2026年9月26日",
+    "timestamp": "1790380800",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "51",
+      "extracted_value": 51
+     }
+    ]
+   },
+   {
+    "date": "2026年9月27日",
+    "timestamp": "1790467200",
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "52",
+      "extracted_value": 52
+     }
+    ]
+   },
+   {
+    "date": "2026年9月28日",
+    "timestamp": "1790553600",
+    "partial_data": true,
+    "values": [
+     {
+      "query": "氣炸鍋",
+      "query_index": 0,
+      "value": "51",
+      "extracted_value": 51
+     }
+    ]
+   }
+  ]
+ }
+}

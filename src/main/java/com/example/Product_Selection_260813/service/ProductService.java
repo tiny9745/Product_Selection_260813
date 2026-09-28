@@ -126,6 +126,9 @@ public class ProductService {
 	private TrendSignalRepository trendSignalRepository;
 
 	@Autowired
+	private com.example.Product_Selection_260813.repository.GoogleTrendSignalRepository googleTrendSignalRepository;
+
+	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
 
 	@Autowired
@@ -882,6 +885,8 @@ public class ProductService {
 		productEvaluationRepository.findByProductId(id)
 				.ifPresent(productEvaluationRepository::delete);
 		trendSignalRepository.deleteByProductId(id);
+		// 2026-09-28：V30 google_trend_signals 同樣外鍵指向 products 且沒有 CASCADE
+		googleTrendSignalRepository.deleteByProductId(id);
 
 		productRepository.delete(product);
 	}

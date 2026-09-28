@@ -115,6 +115,16 @@ public class GlobalExceptionHandler {
 		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.failure(ex.getMessage()));
 	}
 
+	// ========== Google 趨勢（SerpApi）呼叫失敗 ==========
+	// 跟 LLM 一樣是上游服務的暫時性問題，回 502。訊息由 SerpApiTrendInterestProvider
+	// 自行組好（刻意不含請求網址，網址裡有 api_key），可以直接回給前端。
+	@ExceptionHandler(com.example.Product_Selection_260813.service.trends.TrendInterestUnavailableException.class)
+	public ResponseEntity<ApiResponse<Void>> handleTrendInterestUnavailable(
+			com.example.Product_Selection_260813.service.trends.TrendInterestUnavailableException ex) {
+		log.warn("Google 趨勢查詢失敗：{}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.failure(ex.getMessage()));
+	}
+
 	// ========== 不合法的請求(資料目前狀態不允許) ==========
 	@ExceptionHandler(IllegalStateException.class)
 	public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException e) {
