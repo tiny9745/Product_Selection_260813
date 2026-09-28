@@ -150,6 +150,21 @@ public class GoogleTrendService {
 		return GoogleTrendSignalResponse.from(fetchAndSave(product));
 	}
 
+	/**
+	 * 多個商品各自的最新一筆，給 AI 建議清單與儀表板熱度排行榜一次帶出（不逐筆查詢）。
+	 * 沒查過的商品不會出現在回傳的 Map 裡。
+	 */
+	public Map<Long, GoogleTrendSignalResponse> latestByProductIds(java.util.Collection<Long> productIds) {
+		if (productIds == null || productIds.isEmpty()) {
+			return Map.of();
+		}
+		return googleTrendSignalRepository.findLatestByProductIds(productIds).stream()
+				.collect(Collectors.toMap(GoogleTrendSignal::getProductId, Function.identity(),
+						(a, b) -> a.getId() >= b.getId() ? a : b))
+				.values().stream()
+				.collect(Collectors.toMap(GoogleTrendSignal::getProductId, GoogleTrendSignalResponse::from));
+	}
+
 	// ========================= 批次 =========================
 
 	/**

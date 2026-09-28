@@ -78,6 +78,9 @@ public class DashboardService {
 	@Autowired
 	private TrendSignalRepository trendSignalRepository;
 
+	@Autowired
+	private GoogleTrendService googleTrendService;
+
 	/**
 	 * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數。
 	 */
@@ -134,6 +137,9 @@ public class DashboardService {
 		List<Long> productIds = signals.stream().map(TrendSignal::getProductId).toList();
 		Map<Long, Product> productById = productRepository.findAllById(productIds).stream()
 				.collect(Collectors.toMap(Product::getId, product -> product));
+		// 2026-09-28：Google 趨勢參考，同樣一次批次查出
+		Map<Long, com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse> googleTrendById = googleTrendService
+				.latestByProductIds(productIds);
 
 		List<DashboardTrendLeaderboardItem> result = new ArrayList<>();
 		for (TrendSignal signal : signals) {
@@ -150,6 +156,7 @@ public class DashboardService {
 			item.setTrendDirection(signal.getTrendDirection());
 			item.setSource(signal.getSource());
 			item.setKeyword(signal.getKeyword());
+			item.setGoogleTrend(googleTrendById.get(product.getId()));
 			result.add(item);
 		}
 		return result;

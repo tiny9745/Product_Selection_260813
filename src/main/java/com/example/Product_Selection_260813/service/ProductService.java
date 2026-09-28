@@ -129,6 +129,9 @@ public class ProductService {
 	private com.example.Product_Selection_260813.repository.GoogleTrendSignalRepository googleTrendSignalRepository;
 
 	@Autowired
+	private GoogleTrendService googleTrendService;
+
+	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
 
 	@Autowired
@@ -339,6 +342,9 @@ public class ProductService {
 		Page<Product> page = productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
 		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
+		// 2026-09-28：Google 趨勢參考一次批次帶出，不逐筆查詢
+		Map<Long, com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse> googleTrendById = googleTrendService
+				.latestByProductIds(page.getContent().stream().map(Product::getId).toList());
 		return page.map(product -> {
 			ProductEvaluation evaluation = evaluationById.get(product.getId());
 			ProductResponse dto = ProductResponse.from(product)
@@ -348,6 +354,7 @@ public class ProductService {
 							evaluation != null ? evaluation.getFinalScore() : null,
 							evaluation != null ? evaluation.getDataCompleteness() : null);
 			applySuggestionInfo(dto, product.getId());
+			dto.setGoogleTrend(googleTrendById.get(product.getId()));
 			return dto;
 		});
 	}
@@ -383,6 +390,10 @@ public class ProductService {
 		// 「為什麼被建議」的文字說明才需要判斷門檻，兩者分開處理。
 		dto.setTrendScore(latest.getPopularityScore());
 		dto.setTrendDirection(latest.getTrendDirection());
+		// 2026-09-28：趨勢說明用——來源與最近 3 筆方向（同一次查詢的結果，不另外查）
+		dto.setTrendSource(latest.getSource());
+		dto.setRecentTrendDirections(recentSignals.stream()
+				.map(com.example.Product_Selection_260813.entity.TrendSignal::getTrendDirection).toList());
 
 		if (latest.getPopularityScore() != null
 				&& latest.getPopularityScore().compareTo(AI_SUGGEST_POPULARITY_THRESHOLD) > 0) {

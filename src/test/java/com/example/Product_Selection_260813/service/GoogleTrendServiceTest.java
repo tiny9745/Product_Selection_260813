@@ -199,6 +199,27 @@ class GoogleTrendServiceTest {
 	}
 
 	@Test
+	void 批次取得多個商品的最新一筆_同一時間兩筆時以id較大者為準() {
+		GoogleTrendSignal older = new GoogleTrendSignal();
+		older.setId(10L);
+		older.setProductId(3L);
+		older.setStatus(GoogleTrendStatus.OK);
+		older.setDirection(TrendSignalTrendDirection.STABLE);
+		GoogleTrendSignal newer = new GoogleTrendSignal();
+		newer.setId(11L);
+		newer.setProductId(3L);
+		newer.setStatus(GoogleTrendStatus.OK);
+		newer.setDirection(TrendSignalTrendDirection.UP);
+		when(googleTrendSignalRepository.findLatestByProductIds(List.of(3L, 4L))).thenReturn(List.of(older, newer));
+
+		var result = service.latestByProductIds(List.of(3L, 4L));
+
+		assertThat(result).containsOnlyKeys(3L);
+		assertThat(result.get(3L).direction()).isEqualTo(TrendSignalTrendDirection.UP);
+		assertThat(service.latestByProductIds(List.of())).isEmpty();
+	}
+
+	@Test
 	void 來源停用時排程記錄為略過() {
 		when(googleTrendSettings.isEnabled()).thenReturn(false);
 		when(googleTrendRunRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));

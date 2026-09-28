@@ -2,6 +2,7 @@ package com.example.Product_Selection_260813.dto.response;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import com.example.Product_Selection_260813.entity.Product;
@@ -153,6 +154,40 @@ public class ProductResponse {
 	 */
 	private BigDecimal trendScore;
 	private TrendSignalTrendDirection trendDirection;
+
+	/**
+	 * 2026-09-28：AI 建議清單的「趨勢說明」，語意同上（只有 GET /api/products/ai-suggested 會填值）。
+	 * trendSource：最新一筆的來源（PTT／SIMULATED），讓畫面標出是否為模擬資料；
+	 * recentTrendDirections：最近最多 3 筆的方向（新到舊），對應「連續 3 天上升」這個判定條件；
+	 * googleTrend：Google 趨勢參考的最新一筆（沒查過為 null），只作參考、不參與建議判定。
+	 */
+	private String trendSource;
+	private List<TrendSignalTrendDirection> recentTrendDirections;
+	private GoogleTrendSignalResponse googleTrend;
+
+	public String getTrendSource() {
+		return trendSource;
+	}
+
+	public void setTrendSource(String trendSource) {
+		this.trendSource = trendSource;
+	}
+
+	public List<TrendSignalTrendDirection> getRecentTrendDirections() {
+		return recentTrendDirections;
+	}
+
+	public void setRecentTrendDirections(List<TrendSignalTrendDirection> recentTrendDirections) {
+		this.recentTrendDirections = recentTrendDirections;
+	}
+
+	public GoogleTrendSignalResponse getGoogleTrend() {
+		return googleTrend;
+	}
+
+	public void setGoogleTrend(GoogleTrendSignalResponse googleTrend) {
+		this.googleTrend = googleTrend;
+	}
 
 	public String getSuggestionReason() {
 		return suggestionReason;
