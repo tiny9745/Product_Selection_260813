@@ -1,17 +1,25 @@
 -- =====================================================================
--- AI 團購選品決策輔助系統 — 種子資料 v6（全新產生，對應 V1~V30 schema）
+-- AI 團購選品決策輔助系統 — 種子資料 v6.1（全新產生，對應 V1~V32 schema）
 --
 -- 【前提】
 --   1. Flyway 已套用 V1~V30（本檔依賴 V15 的自訂屬性／自訂因子、V16/V17 的 9 大類、
 --      V18 的 3 筆系統風險選項、V19 的天氣標籤對照、V20 的區域占比、V26 的天氣加成設定）。
---   2. 先執行 clear_seed_data_v7.sql 再匯入本檔。本檔所有主鍵都明確指定，資料庫裡若
+--   2. 已套用 V31、V32。V32 解除 9 個大類與評估模式的綁定，本檔所有商品的即時評估與審核
+--      快照都依「目前生效模式」（均衡）計算。不採用 V32 的話，請改用前一版 seed_data_full_v6.sql，
+--      否則商品分數要等到下一次評分設定變更、全量重算後才會和大類綁定的模式一致。
+--   3. 先執行 clear_seed_data_v7.sql 再匯入本檔。本檔所有主鍵都明確指定，資料庫裡若
 --      已有假資料（或 DevUserSeeder 建立的 manager／purchaser 測試帳號）會撞主鍵。
 --
 -- 【匯入方式】（務必 utf8mb4，否則中文會變亂碼）
---   mysql --default-character-set=utf8mb4 -u root product_selection_260813 < seed_data_full_v6.sql
+--   mysql --default-character-set=utf8mb4 -u root product_selection_260813 < seed_data_full_v6.1.sql
 --   整份包在單一交易（START TRANSACTION … COMMIT）裡：用 mysql CLI 匯入時遇到任何錯誤會
 --   立即停止並整批回滾，不會留下只匯入一半的資料。
 --   MySQL Workbench：請確認工具列「遇錯繼續執行」沒有開啟，否則錯誤後的語句仍會被執行並 COMMIT。
+--
+-- 【與 v6 的關係】
+--   v6.1 只差在評估模式：v6 依 V16/V17 的大類綁定（衝量／均衡／高利潤）計分，v6.1 依 V32 後的
+--   全域目前生效模式（均衡）計分。商品主檔、開團紀錄、趨勢、審核決定與時間點完全相同；
+--   即時評估分數、審核快照（模式、權重、分數）與依分數產生的 AI 推薦方向隨之改變。
 --
 -- 【與 v5 的關係】
 --   v5 對應 V1~V16，在目前 schema 上會失敗（V26 移除了 festive_campaigns.start_date／end_date

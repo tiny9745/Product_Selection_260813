@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import com.example.Product_Selection_260813.algorithm.ScoringAlgorithms;
 import com.example.Product_Selection_260813.constants.FactorCode;
 import com.example.Product_Selection_260813.entity.AudienceProfile;
+import com.example.Product_Selection_260813.entity.CustomFieldDefinition;
 import com.example.Product_Selection_260813.entity.FactorDefinition;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.ProductCustomFieldValue;
@@ -25,6 +27,7 @@ import com.example.Product_Selection_260813.entity.ProductTypeScoreBand;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.PackageSizeTier;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
+import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepository;
 import com.example.Product_Selection_260813.repository.FactorDefinitionRepository;
 import com.example.Product_Selection_260813.repository.ProductCustomFieldValueRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
@@ -64,6 +67,7 @@ public class ProductFactorScorer {
 	private final FactorDefinitionRepository factorDefinitionRepository;
 	private final FactorStrategyRegistry factorStrategyRegistry;
 	private final ProductCustomFieldValueRepository productCustomFieldValueRepository;
+	private final CustomFieldDefinitionRepository customFieldDefinitionRepository;
 
 	@Autowired
 	public ProductFactorScorer(AudienceProfileRepository audienceProfileRepository,
@@ -73,7 +77,8 @@ public class ProductFactorScorer {
 			HistoricalScoreCalculator historicalScoreCalculator,
 			FactorDefinitionRepository factorDefinitionRepository,
 			FactorStrategyRegistry factorStrategyRegistry,
-			ProductCustomFieldValueRepository productCustomFieldValueRepository) {
+			ProductCustomFieldValueRepository productCustomFieldValueRepository,
+			CustomFieldDefinitionRepository customFieldDefinitionRepository) {
 		this.audienceProfileRepository = audienceProfileRepository;
 		this.trendSignalRepository = trendSignalRepository;
 		this.scoreBandResolver = scoreBandResolver;
@@ -82,6 +87,7 @@ public class ProductFactorScorer {
 		this.factorDefinitionRepository = factorDefinitionRepository;
 		this.factorStrategyRegistry = factorStrategyRegistry;
 		this.productCustomFieldValueRepository = productCustomFieldValueRepository;
+		this.customFieldDefinitionRepository = customFieldDefinitionRepository;
 	}
 
 	/**
@@ -105,16 +111,68 @@ public class ProductFactorScorer {
 		// 自訂因子共用，不要讓每個因子各自查一次 product_custom_field_values
 		// ——同一個商品可能同時有好幾個自訂因子綁不同的自訂屬性，重複查詢
 		// 沒有必要。
-		Map<Long, BigDecimal> customFieldValues = productCustomFieldValueRepository.findByProductId(product.getId())
-				.stream().filter(v -> v.getNumericValue() != null)
-				.collect(Collectors.toMap(ProductCustomFieldValue::getFieldDefinitionId,
-						ProductCustomFieldValue::getNumericValue));
+		List<FactorDefinition> activeDefinitions = factorDefinitionRepository.findByIsActiveTrue();
+		Map<Long, BigDecimal> customFieldValues = resolveCustomFieldValues(product, activeDefinitions);
 
-		for (FactorDefinition definition : factorDefinitionRepository.findByIsActiveTrue()) {
+		for (FactorDefinition definition : activeDefinitions) {
 			scores.put(definition.getFactorCode(),
 					factorStrategyRegistry.calculate(product, definition, customFieldValues));
 		}
 		return scores;
+	}
+
+	/**
+	 * 商品的數值類自訂屬性答案，key 為 fieldDefinitionId。
+	 *
+	 * 2026-09-29 修正：編輯自訂屬性會建立新版本（新 id，fieldCode 不變），
+	 * updateCustomFieldDefinition() 會把綁定的因子改指到新 id；但商品既有的答案
+	 * 仍存在舊版本的 id 底下，要等商品被重新編輯才會寫到新 id。原本只用 id 比對，
+	 * 編輯題目（連改個錯字也算）之後，所有舊商品的這個因子一律變成「無資料」、
+	 * 從總分分母被排除，而且不會有任何錯誤訊息。
+	 *
+	 * 改成：因子綁定的題目 id 若沒有直接對應的答案，改用同一個 fieldCode 的
+	 * 其他版本答案（取 id 最大、也就是最新的那個版本）。商品詳情頁本來就是用
+	 * fieldCode 顯示答案（ProductService.loadCustomFieldValues()），兩邊語意一致。
+	 *
+	 * 套件可見度是為了單元測試（ProductFactorScorerCustomFieldVersionTest）。
+	 */
+	Map<Long, BigDecimal> resolveCustomFieldValues(Product product, List<FactorDefinition> activeDefinitions) {
+		List<ProductCustomFieldValue> values = productCustomFieldValueRepository.findByProductId(product.getId())
+				.stream().filter(v -> v.getNumericValue() != null).toList();
+		Map<Long, BigDecimal> byDefinitionId = values.stream()
+				.collect(Collectors.toMap(ProductCustomFieldValue::getFieldDefinitionId,
+						ProductCustomFieldValue::getNumericValue, (first, second) -> second));
+
+		List<Long> unresolvedBoundIds = activeDefinitions.stream()
+				.map(FactorDefinition::getCustomFieldDefinitionId)
+				.filter(id -> id != null && !byDefinitionId.containsKey(id))
+				.distinct().toList();
+		if (unresolvedBoundIds.isEmpty() || values.isEmpty()) {
+			return byDefinitionId;
+		}
+
+		List<Long> lookupIds = new ArrayList<>(unresolvedBoundIds);
+		values.forEach(v -> lookupIds.add(v.getFieldDefinitionId()));
+		Map<Long, String> codeById = customFieldDefinitionRepository.findAllById(lookupIds).stream()
+				.collect(Collectors.toMap(CustomFieldDefinition::getId, CustomFieldDefinition::getFieldCode));
+
+		// fieldCode → 最新版本（id 最大）的答案
+		Map<String, Long> latestIdByCode = new HashMap<>();
+		for (ProductCustomFieldValue value : values) {
+			String code = codeById.get(value.getFieldDefinitionId());
+			if (code != null) {
+				latestIdByCode.merge(code, value.getFieldDefinitionId(), Math::max);
+			}
+		}
+
+		Map<Long, BigDecimal> result = new HashMap<>(byDefinitionId);
+		for (Long boundId : unresolvedBoundIds) {
+			Long answeredId = latestIdByCode.get(codeById.get(boundId));
+			if (answeredId != null) {
+				result.put(boundId, byDefinitionId.get(answeredId));
+			}
+		}
+		return result;
 	}
 
 	// =====================================================================

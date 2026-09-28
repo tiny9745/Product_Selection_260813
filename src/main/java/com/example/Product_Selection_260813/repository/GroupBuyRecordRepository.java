@@ -1,5 +1,6 @@
 package com.example.Product_Selection_260813.repository;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -85,6 +86,11 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 	/**
 	 * 該品類（大類）有效樣本的成本價、售價（供算毛利率用）。
 	 *
+	 * 2026-09-29 修正：參數改成品類 id 清單（大類本身＋底下所有小類）。
+	 * group_buy_records 只會記在小類上（CSV 匯入強制要選小類），目標區間卻是
+	 * 設定在大類上；原本用大類 id 單值比對，永遠查到 0 筆，「依歷史紀錄計算」
+	 * 必定回報樣本不足。呼叫端見 SettingsService.applyHistoricalBand()。
+	 *
 	 * 只取 costPriceAtTime／salePriceAtTime 皆非 null 的紀錄——這兩欄是
 	 * 後來才補上的，舊資料可能缺，缺了就不該猜測或補值，直接跳過那筆。
 	 * result 限 FULFILLED／FAILED，理由與成團率計算一致：CANCELLED 多半是
@@ -95,23 +101,36 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 	 * 精度控制在 Java 端处理更安全，也跟 ScoringAlgorithms 的其餘計算方式一致。
 	 */
 	@Query("SELECT g.costPriceAtTime, g.salePriceAtTime FROM GroupBuyRecord g "
-			+ "WHERE g.productTypeId = :productTypeId "
+			+ "WHERE g.productTypeId IN :productTypeIds "
 			+ "AND g.result IN ('FULFILLED', 'FAILED') "
 			+ "AND g.costPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
 			+ "AND g.salePriceAtTime > 0")
-	List<Object[]> findMarginRateSamplesByProductType(@Param("productTypeId") Long productTypeId);
+	List<Object[]> findMarginRateSamplesByProductTypes(@Param("productTypeIds") Collection<Long> productTypeIds);
 
 	/** 語意同上，供折扣深度使用：index 0 = marketPriceAtTime，index 1 = salePriceAtTime。 */
 	@Query("SELECT g.marketPriceAtTime, g.salePriceAtTime FROM GroupBuyRecord g "
-			+ "WHERE g.productTypeId = :productTypeId "
+			+ "WHERE g.productTypeId IN :productTypeIds "
 			+ "AND g.result IN ('FULFILLED', 'FAILED') "
 			+ "AND g.marketPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
 			+ "AND g.marketPriceAtTime > 0")
-	List<Object[]> findDiscountDepthSamplesByProductType(@Param("productTypeId") Long productTypeId);
+	List<Object[]> findDiscountDepthSamplesByProductTypes(@Param("productTypeIds") Collection<Long> productTypeIds);
 
-	/** 上述兩種樣本中，是否含模擬資料——供快照的 historyIncludesSimulated 使用。 */
+	/**
+	 * 毛利率樣本中是否含模擬資料——供目標區間的 includesSimulated 使用。
+	 * 條件與 findMarginRateSamplesByProductTypes() 相同，只多 isSimulated。
+	 */
 	@Query("SELECT COUNT(g) > 0 FROM GroupBuyRecord g "
-			+ "WHERE g.productTypeId = :productTypeId AND g.isSimulated = true "
-			+ "AND g.costPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL")
-	boolean marginRateSamplesIncludeSimulated(@Param("productTypeId") Long productTypeId);
+			+ "WHERE g.productTypeId IN :productTypeIds AND g.isSimulated = true "
+			+ "AND g.result IN ('FULFILLED', 'FAILED') "
+			+ "AND g.costPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
+			+ "AND g.salePriceAtTime > 0")
+	boolean marginRateSamplesIncludeSimulated(@Param("productTypeIds") Collection<Long> productTypeIds);
+
+	/** 折扣深度樣本中是否含模擬資料，條件與 findDiscountDepthSamplesByProductTypes() 相同。 */
+	@Query("SELECT COUNT(g) > 0 FROM GroupBuyRecord g "
+			+ "WHERE g.productTypeId IN :productTypeIds AND g.isSimulated = true "
+			+ "AND g.result IN ('FULFILLED', 'FAILED') "
+			+ "AND g.marketPriceAtTime IS NOT NULL AND g.salePriceAtTime IS NOT NULL "
+			+ "AND g.marketPriceAtTime > 0")
+	boolean discountDepthSamplesIncludeSimulated(@Param("productTypeIds") Collection<Long> productTypeIds);
 }

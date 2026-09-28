@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import build as B
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "seed_data_full_v6.sql"
+OUT = sys.argv[1] if len(sys.argv) > 1 else "seed_data_full_v6.1.sql"
 
 
 def lit(v):

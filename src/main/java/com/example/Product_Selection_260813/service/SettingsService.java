@@ -55,6 +55,8 @@ import com.example.Product_Selection_260813.entity.SystemSetting;
 import com.example.Product_Selection_260813.json.WeightSnapshot;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -145,6 +147,9 @@ public class SettingsService {
 
 	// 對應SystemSettingRepository註解裡的既定用法與四-14設計取捨
 	private static final String CURRENT_EVALUATION_MODE_KEY = "current_evaluation_mode_id";
+
+	/** 自訂因子沒有指定分組時，evaluation_factors.category（NOT NULL）填這個值；只用於顯示。 */
+	private static final String CUSTOM_FACTOR_CATEGORY = "CUSTOM";
 
 	@Autowired
 	private EvaluationModeRepository evaluationModeRepository;
@@ -304,9 +309,11 @@ public class SettingsService {
 		// 全部通過才寫入
 		Long operatorId = resolveUserId(username);
 		java.time.LocalDateTime now = java.time.LocalDateTime.now();
-		List<EvaluationFactor> factors = evaluationFactorRepository
-				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId);
+		List<EvaluationFactor> factors = new ArrayList<>(evaluationFactorRepository
+				.findByEvaluationModeIdOrderBySortOrderAsc(evaluationModeId));
+		Set<String> existingCodes = new HashSet<>();
 		for (EvaluationFactor factor : factors) {
+			existingCodes.add(factor.getFactorCode());
 			BigDecimal newWeight = incoming.get(factor.getFactorCode());
 			if (newWeight != null) {
 				factor.setWeight(newWeight);
@@ -316,11 +323,62 @@ public class SettingsService {
 				factor.setUpdatedBy(operatorId);
 			}
 		}
+		// 2026-09-29 修正（自訂模式儲存權重無效）：原本只更新「這個模式已經有的列」。
+		// 新建立的自訂因子在 evaluation_factors 裡沒有這個模式的列，前端勾選啟用、
+		// 送出權重後，驗證通過、回應 200，但那個因子的權重被安靜丟掉——下次打開
+		// 編輯器又是 0、也從未參與計分。改成補建缺少的列（upsert）。
+		factors.addAll(buildMissingFactorRows(evaluationModeId, incoming, existingCodes, factors, now, operatorId));
 		evaluationFactorRepository.saveAll(factors);
 		log.info("自訂模式權重已更新：模式 {}，操作者 {}", evaluationModeId, username);
 
 		publishEvaluationSettingsChanged("調整自訂模式權重 modeId=" + evaluationModeId);
 		return scoringService.buildWeightSnapshot(evaluationModeId);
+	}
+
+	/**
+	 * 為「送來了、但這個模式還沒有列」的因子代碼建立 evaluation_factors 列。
+	 *
+	 * 只會是自訂因子：固定七個因子在 V3 就為每個模式建好列。名稱與分組取自
+	 * 生效中的 factor_definitions；evaluation_factors.category 是 NOT NULL，
+	 * 自訂因子的 category 可以是 null（前端建立表單不送分組），這時填
+	 * CUSTOM_FACTOR_CATEGORY——這個欄位只用於顯示分組，不參與計分。
+	 * 排序接在目前最後一個之後，依送出順序遞增。
+	 */
+	private List<EvaluationFactor> buildMissingFactorRows(Long evaluationModeId, Map<String, BigDecimal> incoming,
+			Set<String> existingCodes, List<EvaluationFactor> existingRows, LocalDateTime now, Long operatorId) {
+		List<String> missingCodes = incoming.keySet().stream().filter(code -> !existingCodes.contains(code)).toList();
+		if (missingCodes.isEmpty()) {
+			return List.of();
+		}
+		Map<String, FactorDefinition> definitionsByCode = factorDefinitionRepository
+				.findByFactorCodeInAndIsActiveTrue(missingCodes).stream()
+				.collect(Collectors.toMap(FactorDefinition::getFactorCode, d -> d));
+		int nextSortOrder = existingRows.stream().map(EvaluationFactor::getSortOrder).filter(Objects::nonNull)
+				.max(Integer::compare).orElse(0) + 1;
+
+		List<EvaluationFactor> created = new ArrayList<>();
+		for (String code : missingCodes) {
+			FactorDefinition definition = definitionsByCode.get(code);
+			if (definition == null) {
+				// validateAndCollectFactors() 已確認代碼屬於「生效中的因子」，走到這裡
+				// 代表驗證與寫入之間定義被停用（並發操作）。整筆回滾，讓使用者重新整理。
+				throw new IllegalStateException(ValidationMessage.FACTOR_CODE_UNKNOWN + code);
+			}
+			EvaluationFactor row = new EvaluationFactor();
+			row.setEvaluationModeId(evaluationModeId);
+			row.setFactorCode(code);
+			row.setFactorName(definition.getFactorName());
+			row.setCategory(definition.getCategory() != null && !definition.getCategory().isBlank()
+					? definition.getCategory()
+					: CUSTOM_FACTOR_CATEGORY);
+			row.setWeight(incoming.get(code));
+			row.setSortOrder(nextSortOrder++);
+			row.setUpdatedAt(now);
+			row.setUpdatedBy(operatorId);
+			created.add(row);
+		}
+		log.info("自訂模式補建因子列：模式 {}，因子 {}", evaluationModeId, missingCodes);
+		return created;
 	}
 
 	/**
@@ -354,6 +412,7 @@ public class SettingsService {
 	@Transactional
 	public ProductTypeScoreBandResponse createProductTypeScoreBand(
 			ProductTypeScoreBandCreateRequest request, String username) {
+		validateScoreBandTarget(request.getProductTypeId(), request.getFactorCode());
 		if (productTypeScoreBandRepository.existsByProductTypeIdAndFactorCodeAndIsActiveTrue(
 				request.getProductTypeId(), request.getFactorCode())) {
 			throw new IllegalStateException(
@@ -382,6 +441,31 @@ public class SettingsService {
 				request.getProductTypeId(), request.getFactorCode(), username);
 		publishEvaluationSettingsChanged("新增品類目標區間");
 		return ProductTypeScoreBandResponse.from(band);
+	}
+
+	/**
+	 * 2026-09-29 新增：新增品類覆寫前確認這筆區間會被計分讀到，不留死資料。
+	 * <ul>
+	 * <li>商品類型必須存在且是大類——ScoreBandResolver 一律先把商品的品類換成
+	 * 大類再查區間，掛在小類上的區間永遠不會被讀到。</li>
+	 * <li>因子必須是 MARGIN_RATE／DISCOUNT_DEPTH，或生效中、策略為
+	 * TARGET_BAND_NORMALIZE 的自訂因子——只有這些因子的計分路徑會查目標區間。</li>
+	 * </ul>
+	 */
+	private void validateScoreBandTarget(Long productTypeId, String factorCode) {
+		ProductType type = productTypeRepository.findById(productTypeId).orElse(null);
+		if (type == null || !Integer.valueOf(1).equals(type.getLevel())) {
+			throw new IllegalArgumentException("目標區間只能設定在大類上（小類會沿用所屬大類的區間），商品類型 id=" + productTypeId);
+		}
+		boolean builtIn = ScoreBandResolver.FACTOR_MARGIN_RATE.equals(factorCode)
+				|| ScoreBandResolver.FACTOR_DISCOUNT_DEPTH.equals(factorCode);
+		boolean bandCustomFactor = !builtIn && factorDefinitionRepository
+				.findByFactorCodeInAndIsActiveTrue(List.of(factorCode)).stream()
+				.anyMatch(d -> d.getStrategyCode() == FactorStrategyCode.TARGET_BAND_NORMALIZE);
+		if (!builtIn && !bandCustomFactor) {
+			throw new IllegalArgumentException("因子「" + factorCode
+					+ "」的計分不會讀取目標區間，只能為毛利率、折扣深度，或策略為「目標區間正規化」的生效中自訂因子設定");
+		}
 	}
 
 	// ============================================================
@@ -477,23 +561,28 @@ public class SettingsService {
 					"歷史資料需要指定品類才能計算");
 		}
 
+		// 2026-09-29 修正：開團紀錄只記在小類上，區間設定在大類上——樣本要涵蓋
+		// 大類本身＋底下所有小類（含已停用的小類：停用不代表那些歷史開團不算數）。
+		// 原本只用大類 id 查，永遠 0 筆、永遠「樣本不足」。
+		List<Long> sampleTypeIds = collectSelfAndChildTypeIds(productTypeId);
+
 		List<BigDecimal> ratios;
 		boolean includesSimulated;
 
 		if (ScoreBandResolver.FACTOR_MARGIN_RATE.equals(band.getFactorCode())) {
-			List<Object[]> samples = groupBuyRecordRepository.findMarginRateSamplesByProductType(productTypeId);
+			List<Object[]> samples = groupBuyRecordRepository.findMarginRateSamplesByProductTypes(sampleTypeIds);
 			ratios = samples.stream()
 					.map(row -> computeRatio((BigDecimal) row[1], (BigDecimal) row[0], (BigDecimal) row[1]))
 					.filter(java.util.Objects::nonNull)
 					.toList();
-			includesSimulated = groupBuyRecordRepository.marginRateSamplesIncludeSimulated(productTypeId);
+			includesSimulated = groupBuyRecordRepository.marginRateSamplesIncludeSimulated(sampleTypeIds);
 		} else if (ScoreBandResolver.FACTOR_DISCOUNT_DEPTH.equals(band.getFactorCode())) {
-			List<Object[]> samples = groupBuyRecordRepository.findDiscountDepthSamplesByProductType(productTypeId);
+			List<Object[]> samples = groupBuyRecordRepository.findDiscountDepthSamplesByProductTypes(sampleTypeIds);
 			ratios = samples.stream()
 					.map(row -> computeRatio((BigDecimal) row[0], (BigDecimal) row[1], (BigDecimal) row[0]))
 					.filter(java.util.Objects::nonNull)
 					.toList();
-			includesSimulated = false; // 折扣深度目前未提供含模擬資料的查詢，先保守標 false 而非猜測
+			includesSimulated = groupBuyRecordRepository.discountDepthSamplesIncludeSimulated(sampleTypeIds);
 		} else {
 			throw new IllegalArgumentException(
 					"因子「" + band.getFactorCode() + "」沒有對應的歷史資料計算邏輯，僅 MARGIN_RATE／DISCOUNT_DEPTH 支援 HISTORICAL 模式");
@@ -521,6 +610,15 @@ public class SettingsService {
 		band.setSampleSize(ratios.size());
 		band.setIncludesSimulated(includesSimulated);
 		band.setComputedAt(now);
+	}
+
+	/** 品類本身＋直屬小類的 id（兩層固定深度，不需要遞迴）。 */
+	private List<Long> collectSelfAndChildTypeIds(Long productTypeId) {
+		List<Long> ids = new ArrayList<>();
+		ids.add(productTypeId);
+		productTypeRepository.findByParentIdOrderBySortOrderAsc(productTypeId).stream()
+				.map(ProductType::getId).forEach(ids::add);
+		return ids;
 	}
 
 	/** (分子1 − 分子2) / 分母，分母為 0 或任一輸入為 null 時回傳 null（跳過該筆樣本）。 */
@@ -1209,7 +1307,12 @@ public class SettingsService {
 		RiskOption option = riskOptionRepository.findById(id)
 				.orElseThrow(() -> new IllegalArgumentException("風險選項不存在"));
 		option.setName(request.getName());
-		option.setDescription(request.getDescription());
+		// 2026-09-29 修正：description 沒送（null）時沿用原值。設定頁的編輯對話框
+		// 只有名稱與示警關鍵字，從來不送 description，原本每編輯一次就把說明清成
+		// null（系統預設選項的說明也會被清掉）。要清空請送空字串。
+		if (request.getDescription() != null) {
+			option.setDescription(request.getDescription().isBlank() ? null : request.getDescription());
+		}
 		option.setAlertKeywords(request.getAlertKeywords());
 		RiskOption saved = riskOptionRepository.save(option);
 		return RiskOptionSettingResponse.from(saved);

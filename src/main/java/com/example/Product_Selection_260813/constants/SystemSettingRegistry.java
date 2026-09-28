@@ -57,13 +57,13 @@ public final class SystemSettingRegistry {
 				"控制品類自己的成團率要收斂到全體平均多快：當這個品類累積的開團樣本數等於 k 時，"
 						+ "最終比率剛好各半信自己、一半信全體平均；樣本數遠大於 k 時幾乎完全採信品類自己的數字，"
 						+ "遠小於 k 時則幾乎完全採信全體平均。數字越大，代表要更多開團樣本，系統才願意相信這個品類自己的數字。",
-				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(100), "次", "10");
+				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(100), "筆", "10");
 		register("shrinkage_k_product", "貝氏收縮", "商品層平滑常數 k",
 				"同一套收斂邏輯，作用對象換成單一商品自己的歷史，上層先驗值則是該商品所屬品類「已收縮過」的成團率"
 						+ "（商品先向品類收斂，品類再向全體收斂，兩層依序疊加）。建議設定小於品類層 k："
 						+ "品類的樣本數通常遠多於單一商品，若商品層 k 設得比品類層還大，等於要求商品自己的樣本比品類還多"
 						+ "才會被採信，商品層的收縮實質上永遠派不上用場。",
-				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(100), "次", "5");
+				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(100), "筆", "5");
 		register("neutral_baseline_score", "貝氏收縮", "中性基準分數",
 				"用在兩個情境的收斂目標：①商品或品類完全沒有任何歷史成團紀錄時，直接以此值當作保底比率／分數"
 						+ "（等同貝氏收縮公式中樣本數為 0 時的先驗值）；②市場熱度等會隨時間變舊的資料，"

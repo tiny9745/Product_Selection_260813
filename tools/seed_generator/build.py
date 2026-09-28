@@ -42,8 +42,11 @@ def ref_query(sql):
 # ============================================================================
 # 系統預設（唯讀，來自 migration）
 # ============================================================================
-MODE_OF_ROOT = {int(r[0]): int(r[1]) for r in ref_query(
+# V32 起大類不再綁定評估模式（NULL）→ 依 ScoringService.resolveEvaluationModeId() 退回全域的目前生效模式
+MODE_OF_ROOT = {int(r[0]): (int(r[1]) if r[1] != "NULL" else None) for r in ref_query(
     "SELECT id, default_evaluation_mode_id FROM product_types WHERE is_system_default=1")}
+CURRENT_MODE_ID = int(ref_query(
+    "SELECT setting_value FROM system_settings WHERE setting_key='current_evaluation_mode_id'")[0][0])
 MODES = {int(r[0]): (r[1], r[2], int(r[3])) for r in ref_query(
     "SELECT id, mode_code, mode_name, version FROM evaluation_modes")}
 FACTOR_ROWS = defaultdict(list)
@@ -878,7 +881,9 @@ CTX = E.ScoringContext(bands=BANDS, audience_keywords=AUDIENCE_KEYWORDS, group_b
 
 
 def mode_of(p):
-    return MODE_OF_ROOT[root_of(p["product_type_id"])]
+    """與 ScoringService.resolveEvaluationModeId() 相同：大類有綁定就用綁定，否則用目前生效模式。"""
+    bound = MODE_OF_ROOT[root_of(p["product_type_id"])]
+    return bound if bound is not None else CURRENT_MODE_ID
 
 
 def last_calc_time(p, t):
