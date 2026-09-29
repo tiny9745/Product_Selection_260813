@@ -12,7 +12,8 @@ import java.util.List;
  * @param running        目前是否有批次查詢正在執行
  * @param processedCount 執行中時已處理的商品數；未執行時為 null
  * @param totalCount     執行中時本次要處理的商品總數；未執行時為 null
- * @param batchSize      每次批次最多查詢的商品數（PTT 熱度前 N 名）
+ * @param batchSize      每次批次最多查詢的商品數（待審優先、PTT 熱度補位）
+ * @param recheckDays    重查間隔（天），這段期間內查過的商品批次略過（2026-09-30）
  * @param schedule       排程時間說明
  * @param recentRuns     最近 10 次執行紀錄，新到舊
  */
@@ -25,6 +26,7 @@ public record GoogleTrendStatusResponse(
 		Integer processedCount,
 		Integer totalCount,
 		int batchSize,
+		int recheckDays,
 		String schedule,
 		List<GoogleTrendRunResponse> recentRuns) {
 }

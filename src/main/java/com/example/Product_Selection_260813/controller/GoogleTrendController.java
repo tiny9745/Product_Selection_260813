@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.TrendCrawlerEnabledRequest;
+import com.example.Product_Selection_260813.dto.response.GoogleTrendCoverageResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendRunResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendStatusResponse;
@@ -27,6 +28,7 @@ import jakarta.validation.Valid;
  * Google 趨勢參考（SerpApi）：
  * <ul>
  * <li>GET /api/products/{id}/google-trend [操作+管理]：最新一筆，唯讀、不花額度</li>
+ * <li>GET /api/products/{id}/google-trend/coverage [操作+管理]：下次每週批次會不會查到、原因（唯讀）</li>
  * <li>POST /api/products/{id}/google-trend/sync [管理]：立即查詢一個商品，花 1 次額度</li>
  * <li>GET／PUT enabled／POST sync-top /api/settings/google-trends [管理]：控制面板</li>
  * </ul>
@@ -41,6 +43,12 @@ public class GoogleTrendController {
 	@GetMapping("/api/products/{id}/google-trend")
 	public ResponseEntity<ApiResponse<GoogleTrendSignalResponse>> getLatest(@PathVariable("id") Long id) {
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", googleTrendService.getLatest(id)));
+	}
+
+	/** 2026-09-30：品項詳情「尚未查詢」時說明實際原因（不花額度）。 */
+	@GetMapping("/api/products/{id}/google-trend/coverage")
+	public ResponseEntity<ApiResponse<GoogleTrendCoverageResponse>> getCoverage(@PathVariable("id") Long id) {
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", googleTrendService.getBatchCoverage(id)));
 	}
 
 	@PreAuthorize("hasRole('MANAGER')")
@@ -72,7 +80,7 @@ public class GoogleTrendController {
 		return ResponseEntity.ok(ApiResponse.success(request.getEnabled() ? "Google 趨勢來源已啟用" : "Google 趨勢來源已停用", result));
 	}
 
-	/** 立即查詢 PTT 熱度前 N 名；背景執行、立即回 202，畫面輪詢 GET 看進度。停用、無金鑰、額度用完或執行中回 409。 */
+	/** 立即執行批次（待審優先、PTT 熱度補位，最多 N 個）；背景執行、立即回 202，畫面輪詢 GET 看進度。停用、無金鑰、額度用完或執行中回 409。 */
 	@PreAuthorize("hasRole('MANAGER')")
 	@PostMapping("/api/settings/google-trends/sync-top")
 	public ResponseEntity<ApiResponse<GoogleTrendStatusResponse>> syncTop(@AuthenticationPrincipal String username) {

@@ -23,6 +23,9 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
      */
     Optional<TrendSignal> findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(Long productId, String source);
 
+    /** 指定來源最新一筆（Google 趨勢批次涵蓋說明用，見 GoogleTrendService.getBatchCoverage()）。 */
+    Optional<TrendSignal> findFirstByProductIdAndSourceOrderByCollectedAtDesc(Long productId, String source);
+
     /**
      * 2026-09-29：一次取出多個商品「各自最近 N 筆」趨勢資料（品項管理清單、熱度排行榜的「連續上升」標記用，
      * 見 RecentTrendService）。
@@ -71,6 +74,36 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
              LIMIT :limit
             """, nativeQuery = true)
     List<TrendSignal> findLatestSignalsRankedByScore(@Param("limit") int limit);
+
+    /**
+     * Google 趨勢每週批次的「PTT 熱度補位」名單（2026-09-30，見 GoogleTrendService.findCandidates()）。
+     *
+     * 與上面的排行榜查詢不同，條件全部在 SQL 內完成，LIMIT 才不會被不合格的資料佔掉名額
+     * （原本先取前 N 筆、再在 Java 端濾掉 SIMULATED／熱度 0，實際查詢數可能遠少於 N）：
+     * - 只看每個商品「最新一筆 PTT 真實資料」（source='PTT'），與評分熱度因子的取法一致；
+     * - 熱度 &gt; 0：PTT 完全沒人討論的品名，Google 多半也查無資料，不值得花額度；
+     * - 使用中商品；
+     * - :recheckSince 之後已查過 Google 趨勢的商品略過（Google 一次回傳 3 個月序列，一週查一次就夠）。
+     */
+    @Query(value = """
+            SELECT t.* FROM trend_signals t
+             INNER JOIN products p ON p.id = t.product_id
+             WHERE p.item_status = 'ACTIVE'
+               AND t.source = 'PTT'
+               AND t.popularity_score > 0
+               AND t.collected_at = (
+                     SELECT MAX(t2.collected_at) FROM trend_signals t2
+                      WHERE t2.product_id = t.product_id AND t2.source = 'PTT'
+                   )
+               AND NOT EXISTS (
+                     SELECT 1 FROM google_trend_signals g
+                      WHERE g.product_id = t.product_id AND g.collected_at >= :recheckSince
+                   )
+             ORDER BY t.popularity_score DESC, t.product_id ASC
+             LIMIT :limit
+            """, nativeQuery = true)
+    List<TrendSignal> findPttRankedForGoogleTrend(@Param("recheckSince") java.time.LocalDateTime recheckSince,
+            @Param("limit") int limit);
 
     /**
      * ⚠️ 2026-09-25 新增：品項詳情頁「熱度趨勢圖」用。

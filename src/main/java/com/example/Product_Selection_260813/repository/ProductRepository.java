@@ -285,6 +285,29 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByResaleReferenceProductId(Long resaleReferenceProductId);
 
     /**
+     * Google 趨勢每週批次的「待審優先」名單（2026-09-30，見 GoogleTrendService.findCandidates()）。
+     *
+     * 條件與選品審核待審清單相同（PENDING＋ACTIVE＋CANDIDATE），主管判斷市場風險時最需要
+     * 第二資料來源的就是這批商品，不論 PTT 熱度多少。:recheckSince 之後已查過的略過。
+     * 依送審時間由舊到新（沒有送審時間退回 updatedAt，與待審清單一致），等最久的先查。
+     */
+    @Query("""
+            SELECT p FROM Product p
+            WHERE p.reviewStatus = :reviewStatus
+              AND p.itemStatus = :itemStatus
+              AND p.candidateStatus = :candidateStatus
+              AND NOT EXISTS (SELECT g.id FROM GoogleTrendSignal g
+                              WHERE g.productId = p.id AND g.collectedAt >= :recheckSince)
+            ORDER BY COALESCE(p.submittedAt, p.updatedAt) ASC, p.id ASC
+            """)
+    List<Product> findPendingForGoogleTrend(
+            @Param("reviewStatus") ProductReviewStatus reviewStatus,
+            @Param("itemStatus") ProductItemStatus itemStatus,
+            @Param("candidateStatus") ProductCandidateStatus candidateStatus,
+            @Param("recheckSince") java.time.LocalDateTime recheckSince,
+            Pageable pageable);
+
+    /**
      * 審核併發控制：條件式UPDATE，僅在目前review_status仍等於expectedStatus時才更新成功。
      * 回傳值為實際影響筆數——Service層依此判斷0（狀態已被他人改變，回409）或1（成功）。
      *

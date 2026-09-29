@@ -42,6 +42,7 @@ import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 import com.example.Product_Selection_260813.repository.AudienceProfileRepository;
 import com.example.Product_Selection_260813.repository.DiscoveredItemEvidenceRepository;
 import com.example.Product_Selection_260813.repository.DiscoveredItemRepository;
+import com.example.Product_Selection_260813.repository.DiscoveryProcessedTitleRepository;
 import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.ProductTypeRepository;
 import com.example.Product_Selection_260813.service.crawler.MarketBuzzSignal;
@@ -76,6 +77,9 @@ class DiscoveryServiceTest {
 	private DiscoveredItemRepository discoveredItemRepository;
 	@Mock
 	private DiscoveredItemEvidenceRepository discoveredItemEvidenceRepository;
+	/** 已處理標題：預設回空清單＝每則標題都視為新標題，走完整 AI 抽取流程。 */
+	@Mock
+	private DiscoveryProcessedTitleRepository processedTitleRepository;
 	@Mock
 	private ProductRepository productRepository;
 	@Mock

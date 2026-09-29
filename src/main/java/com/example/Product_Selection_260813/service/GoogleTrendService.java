@@ -1,9 +1,12 @@
 package com.example.Product_Selection_260813.service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -18,10 +21,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.example.Product_Selection_260813.common.RunHistoryPaging;
+import com.example.Product_Selection_260813.dto.response.GoogleTrendCoverageResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendRunResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendStatusResponse;
@@ -30,8 +35,11 @@ import com.example.Product_Selection_260813.entity.GoogleTrendRun;
 import com.example.Product_Selection_260813.entity.GoogleTrendSignal;
 import com.example.Product_Selection_260813.entity.Product;
 import com.example.Product_Selection_260813.entity.TrendSignal;
+import com.example.Product_Selection_260813.enums.GoogleTrendCoverageReason;
 import com.example.Product_Selection_260813.enums.GoogleTrendStatus;
+import com.example.Product_Selection_260813.enums.ProductCandidateStatus;
 import com.example.Product_Selection_260813.enums.ProductItemStatus;
+import com.example.Product_Selection_260813.enums.ProductReviewStatus;
 import com.example.Product_Selection_260813.enums.TrendSyncRunStatus;
 import com.example.Product_Selection_260813.enums.TrendSyncTrigger;
 import com.example.Product_Selection_260813.repository.AppUserRepository;
@@ -55,8 +63,8 @@ import jakarta.annotation.PreDestroy;
  *
  * <b>額度：</b>SerpApi 免費方案每月 250 次，「查無資料」也計費。所以：
  * <ul>
- * <li>批次只查「最新一筆 PTT 真實資料、熱度 &gt; 0」的前 N 名（預設 40）——PTT 都沒人討論的冷門品名，
- * 實測 Google 也多半查無資料，查了只是白花額度</li>
+ * <li>批次每次最多 N 個（預設 40）：<b>待審商品優先</b>，剩餘名額依 PTT 熱度補滿（見 findCandidates()）</li>
+ * <li>重查間隔內（預設 7 天）已查過的略過：一次查詢就回傳近 3 個月序列，不需要每次重查</li>
  * <li>每週一次就夠：一次查詢就回傳近 3 個月的完整序列，成長率當下就算得出來，不用每天累積</li>
  * <li>每次呼叫前檢查本月剩餘額度，用完就停（單一查詢回 409、批次提早結束並記錄原因）</li>
  * </ul>
@@ -69,6 +77,9 @@ public class GoogleTrendService {
 	private static final Logger log = LoggerFactory.getLogger(GoogleTrendService.class);
 
 	public static final String SCHEDULE_DESCRIPTION = "每週一 04:00（PTT 熱度同步 02:00 之後）";
+
+	/** 給品項詳情說明文字用的短版排程時間（避免括號套括號）。 */
+	private static final String SCHEDULE_SHORT = "每週一 04:00";
 
 	@Autowired
 	private ProductRepository productRepository;
@@ -91,13 +102,17 @@ public class GoogleTrendService {
 	@Autowired
 	private GoogleTrendSettings googleTrendSettings;
 
-	/** 每次批次最多查詢的商品數（PTT 熱度前 N 名）。40 個 × 每週 1 次 ≈ 每月 170 次，在免費額度內。 */
+	/** 每次批次最多查詢的商品數（待審優先、PTT 熱度補位）。40 個 × 每週 1 次 ≈ 每月 170 次，在免費額度內。 */
 	@Value("${google-trends.batch-size:40}")
 	private int batchSize;
 
 	/** 批次中兩次呼叫的間隔，避免短時間內對 SerpApi 連續送出請求。 */
 	@Value("${google-trends.request-delay-ms:2000}")
 	private long requestDelayMs;
+
+	/** 重查間隔（天）：這段期間內查過的商品，批次略過。計算方式見 recheckSince()。 */
+	@Value("${google-trends.recheck-days:7}")
+	private int recheckDays;
 
 	private final ExecutorService manualRunExecutor = Executors.newSingleThreadExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "google-trend-manual");
@@ -170,7 +185,7 @@ public class GoogleTrendService {
 	// ========================= 批次 =========================
 
 	/**
-	 * 每週一 04:00 查詢 PTT 熱度前 N 名。排在 02:00 PTT 同步之後（要用當天的熱度挑商品）、
+	 * 每週一 04:00 執行批次（待審優先、PTT 熱度補位）。排在 02:00 PTT 同步之後（要用當天的熱度挑商品）、
 	 * 05:00 天氣同步之前。
 	 */
 	@Scheduled(cron = "0 0 4 * * MON")
@@ -197,7 +212,7 @@ public class GoogleTrendService {
 		execute(run);
 	}
 
-	/** 管理層按「立即查詢熱度前 N 名」：建立紀錄後立即回傳，查詢在背景執行。 */
+	/** 管理層按「立即查詢」：建立紀錄後立即回傳，查詢在背景執行。名單與排程相同（findCandidates()）。 */
 	public GoogleTrendStatusResponse startManualRun(String username) {
 		ensureCanCall();
 		if (!running.compareAndSet(false, true)) {
@@ -215,20 +230,119 @@ public class GoogleTrendService {
 	}
 
 	/**
-	 * 批次查詢對象：每個未封存商品最新一筆趨勢資料是 PTT 真實資料、且熱度 &gt; 0，
-	 * 依熱度由高到低取前 batchSize 個。模擬資料不算（那不是真的有人討論）。
+	 * 批次查詢對象，最多 batchSize 個（2026-09-30 改為「待審優先」）：
+	 * <ol>
+	 * <li><b>待審商品</b>（PENDING＋ACTIVE＋CANDIDATE），送審較早的先查，不看 PTT 熱度——
+	 * 主管判斷市場風險時最需要第二資料來源的就是這批商品，而 PTT 沒資料的商品正是
+	 * Google 趨勢最能補位的地方；</li>
+	 * <li>剩餘名額依<b>最新一筆 PTT 真實資料的熱度</b>由高到低補滿（熱度 &gt; 0，使用中）。</li>
+	 * </ol>
+	 * 兩段都略過重查間隔內已查過的商品。原本只取「PTT 熱度前 N 名」，PTT 熱度為 0 或
+	 * 沒有 PTT 資料的待審商品永遠查不到。
 	 */
 	public List<Product> findCandidates() {
-		List<Long> ids = trendSignalRepository.findLatestSignalsRankedByScore(batchSize).stream()
-				.filter(signal -> PttMarketBuzzProvider.SOURCE.equals(signal.getSource()))
-				.filter(signal -> signal.getPopularityScore() != null && signal.getPopularityScore().signum() > 0)
-				.map(TrendSignal::getProductId)
-				.toList();
-		Map<Long, Product> byId = productRepository.findAllById(ids).stream()
-				.filter(product -> product.getItemStatus() == ProductItemStatus.ACTIVE)
-				.collect(Collectors.toMap(Product::getId, Function.identity()));
-		// 維持熱度排序
-		return ids.stream().map(byId::get).filter(Objects::nonNull).toList();
+		LocalDateTime since = recheckSince();
+		Map<Long, Product> targets = new LinkedHashMap<>();
+		productRepository.findPendingForGoogleTrend(ProductReviewStatus.PENDING, ProductItemStatus.ACTIVE,
+				ProductCandidateStatus.CANDIDATE, since, PageRequest.of(0, batchSize))
+				.forEach(product -> targets.put(product.getId(), product));
+
+		int remainingSlots = batchSize - targets.size();
+		if (remainingSlots > 0) {
+			// 多取的部分是為了扣掉與待審名單重複的商品（最多 targets.size() 個），取 batchSize 一定夠
+			List<Long> pttIds = trendSignalRepository.findPttRankedForGoogleTrend(since, batchSize).stream()
+					.map(TrendSignal::getProductId)
+					.filter(id -> !targets.containsKey(id))
+					.distinct()
+					.limit(remainingSlots)
+					.toList();
+			Map<Long, Product> byId = productRepository.findAllById(pttIds).stream()
+					.collect(Collectors.toMap(Product::getId, Function.identity()));
+			// 維持熱度排序
+			pttIds.stream().map(byId::get).filter(Objects::nonNull)
+					.forEach(product -> targets.put(product.getId(), product));
+		}
+		return List.copyOf(targets.values());
+	}
+
+	/**
+	 * 重查間隔的起點，以<b>日期</b>計：recheckDays=7 → 今天與前 6 天查過的略過，7 天前當天查的會重查。
+	 *
+	 * 不用 now().minusDays(7)：上週一 04:00:05 查的商品，本週一 04:00:00 算起來只差
+	 * 「7 天減 5 秒」，會被判成 7 天內查過而整批略過，每週排程實際上變成兩週一次。
+	 */
+	LocalDateTime recheckSince() {
+		return LocalDate.now().minusDays(Math.max(recheckDays, 1) - 1L).atStartOfDay();
+	}
+
+	/**
+	 * GET /api/products/{id}/google-trend/coverage：這個商品下次批次會不會被查到、為什麼。
+	 *
+	 * 「會不會查到」直接用 findCandidates() 同一份名單判斷，不另寫一套近似規則，
+	 * 畫面說的與批次實際做的才不會又不一致。每次呼叫是 2～3 個查詢，只在品項詳情
+	 * 「尚未查詢」時呼叫，負擔可以接受。
+	 */
+	public GoogleTrendCoverageResponse getBatchCoverage(Long productId) {
+		Product product = productRepository.findById(productId)
+				.orElseThrow(() -> new IllegalArgumentException("商品不存在"));
+		if (!googleTrendSettings.isEnabled()) {
+			return notCovered(GoogleTrendCoverageReason.SOURCE_DISABLED, "Google 趨勢來源目前停用，每週批次不會執行。");
+		}
+		if (!trendInterestProvider.isConfigured()) {
+			return notCovered(GoogleTrendCoverageReason.NOT_CONFIGURED, "尚未設定 SerpApi 金鑰，每週批次不會執行。");
+		}
+		if (product.getItemStatus() != ProductItemStatus.ACTIVE) {
+			return notCovered(GoogleTrendCoverageReason.ARCHIVED, "已封存的商品不在每週批次範圍。");
+		}
+		Optional<GoogleTrendSignal> latest = googleTrendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(productId);
+		if (latest.isPresent() && !latest.get().getCollectedAt().isBefore(recheckSince())) {
+			return notCovered(GoogleTrendCoverageReason.RECENTLY_QUERIED,
+					"近 " + recheckDays + " 天內已查詢過，下次每週批次會略過。");
+		}
+
+		boolean pending = product.getReviewStatus() == ProductReviewStatus.PENDING
+				&& product.getCandidateStatus() == ProductCandidateStatus.CANDIDATE;
+		List<Product> candidates = findCandidates();
+		int position = indexOf(candidates, productId);
+		if (position >= 0) {
+			int remaining = googleTrendSettings.getRemainingThisMonth();
+			if (position >= remaining) {
+				return notCovered(GoogleTrendCoverageReason.QUOTA_SHORT, String.format(
+						"排在批次名單第 %d 位，但本月只剩 %d 次查詢額度，本月的批次查不到此商品。", position + 1, remaining));
+			}
+			return pending
+					? new GoogleTrendCoverageResponse(true, GoogleTrendCoverageReason.PENDING_PRIORITY,
+							"待審商品，下次批次（" + SCHEDULE_SHORT + "）會優先查詢。")
+					: new GoogleTrendCoverageResponse(true, GoogleTrendCoverageReason.PTT_RANKED,
+							"PTT 熱度在查詢名額內，下次批次（" + SCHEDULE_SHORT + "）會查詢。");
+		}
+		if (pending) {
+			return notCovered(GoogleTrendCoverageReason.PENDING_OVER_LIMIT,
+					"待審商品超過每次 " + batchSize + " 個的上限，此商品這次排不進名額。");
+		}
+		Optional<TrendSignal> ptt = trendSignalRepository
+				.findFirstByProductIdAndSourceOrderByCollectedAtDesc(productId, PttMarketBuzzProvider.SOURCE);
+		if (ptt.isEmpty()) {
+			return notCovered(GoogleTrendCoverageReason.NO_PTT_DATA, "非待審商品，且尚無 PTT 熱度資料，每週批次不會查詢。");
+		}
+		if (ptt.get().getPopularityScore() == null || ptt.get().getPopularityScore().signum() <= 0) {
+			return notCovered(GoogleTrendCoverageReason.PTT_ZERO, "非待審商品，且 PTT 熱度為 0，每週批次不會查詢。");
+		}
+		return notCovered(GoogleTrendCoverageReason.RANKED_OUT,
+				"PTT 熱度未排進查詢名額（每次最多 " + batchSize + " 個，待審商品優先），每週批次不會查詢。");
+	}
+
+	private static GoogleTrendCoverageResponse notCovered(GoogleTrendCoverageReason reason, String message) {
+		return new GoogleTrendCoverageResponse(false, reason, message);
+	}
+
+	private static int indexOf(List<Product> products, Long productId) {
+		for (int i = 0; i < products.size(); i++) {
+			if (products.get(i).getId().equals(productId)) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	// ========================= 控制面板 =========================
@@ -246,6 +360,7 @@ public class GoogleTrendService {
 				current == null ? null : current[0],
 				current == null ? null : current[1],
 				batchSize,
+				recheckDays,
 				SCHEDULE_DESCRIPTION,
 				runs.stream().map(toResponse).toList());
 	}
@@ -320,7 +435,8 @@ public class GoogleTrendService {
 				run.setMessage(String.format("本月剩餘額度 %d 次，只查詢前 %d 個商品（共 %d 個符合條件）",
 						remaining, targets.size(), candidates.size()));
 			} else if (targets.isEmpty()) {
-				run.setMessage("沒有符合條件的商品（需要最新一筆 PTT 熱度 > 0）");
+				run.setMessage(String.format("沒有需要查詢的商品（待審商品、PTT 熱度 > 0 的商品都已在 %d 天內查過，或目前沒有這類商品）",
+						recheckDays));
 			}
 			googleTrendRunRepository.save(run);
 			progress.set(new int[] { 0, targets.size() });
