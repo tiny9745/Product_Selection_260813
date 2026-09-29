@@ -96,9 +96,10 @@ public class ScoringService {
 
 	private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
 
-	// Boost Cap：企劃書「節慶加成計分規則」明訂為「暫訂+5，絕對分數」，
-	// 之後的歷史資料回測校準屬於Phase 2待辦（見十三），此處先照文件明訂值寫死。
-	private static final BigDecimal BOOST_CAP = new BigDecimal("5");
+	// Boost Cap：企劃書「節慶加成計分規則」明訂為「暫訂+5，絕對分數」。
+	// 2026-09-29 改為可調（system_settings.festival_boost_cap，見 AlgorithmSettings.getFestivalBoostCap()），
+	// 計算當下的值寫進 MatchedCampaignSnapshot.boostCap；這裡只剩「舊快照沒有 boostCap」時的後備值。
+	private static final BigDecimal LEGACY_BOOST_CAP = AlgorithmSettings.DEFAULT_FESTIVAL_BOOST_CAP;
 
 	// 季節型檔期PREPARING期間固定係數 0.20（企劃書明訂）：2026-09-24 隨急迫係數公式移到
 	// CampaignUrgencyCalculator.SEASON_PREPARING_TIME_FACTOR，數值不變。
@@ -459,7 +460,8 @@ public class ScoringService {
 		if (candidates.isEmpty()) {
 			return null;
 		}
-		return matchCampaign(productTags, candidates, loadCampaignTags(candidates), today);
+		return matchCampaign(productTags, candidates, loadCampaignTags(candidates), today,
+				algorithmSettings.getFestivalBoostCap());
 	}
 
 	/** 候選檔期的標籤，一次批次載入後依檔期分組（避免逐檔期查詢）。 */
@@ -474,7 +476,7 @@ public class ScoringService {
 	 * 提供，讓 refreshFestivalBoosts() 對整批商品只查一次檔期與標籤，單筆與批次走同一套判定。
 	 */
 	private MatchedCampaignSnapshot matchCampaign(Set<String> productTags, List<ActiveCampaignWindow> candidates,
-			Map<Long, List<FestiveCampaignTag>> tagsByCampaign, LocalDate today) {
+			Map<Long, List<FestiveCampaignTag>> tagsByCampaign, LocalDate today, BigDecimal boostCap) {
 		ActiveCampaignWindow bestWindow = null;
 		CampaignUrgencyCalculator.Result bestUrgency = null;
 		Set<String> bestMatchedTags = Set.of();
@@ -503,7 +505,7 @@ public class ScoringService {
 
 			BigDecimal matchWeight = bestMatch.getMatchTier().getMatchWeight();
 			CampaignUrgencyCalculator.Result urgency = calculateUrgencyFactor(window, today);
-			BigDecimal boost = matchWeight.multiply(urgency.urgencyFactor()).multiply(BOOST_CAP);
+			BigDecimal boost = matchWeight.multiply(urgency.urgencyFactor()).multiply(boostCap);
 
 			if (boost.compareTo(bestBoost) > 0) {
 				bestBoost = boost;
@@ -533,6 +535,7 @@ public class ScoringService {
 		snapshot.setRegions(new ArrayList<>(bestWindow.regions()));
 		snapshot.setRegionCoverageRatio(bestUrgency.regionCoverage());
 		snapshot.setTimeFactor(bestUrgency.timeFactor());
+		snapshot.setBoostCap(boostCap);
 		return snapshot;
 	}
 
@@ -694,7 +697,9 @@ public class ScoringService {
 	}
 
 	/**
-	 * Festival Boost＝matchWeight × urgencyFactor × BOOST_CAP（未命中＝0）。
+	 * Festival Boost＝matchWeight × urgencyFactor × boostCap（未命中＝0）。
+	 * boostCap 讀快照本身記錄的值（2026-09-29 起可調），舊快照沒有時退回當時寫死的 5，
+	 * 所以同一份快照不論何時重算，結果都一樣（可重現）。
 	 * calculateEvaluation()（寫入 product_evaluations）、getFestivalBoostDetail()（LIVE 明細）與
 	 * ReviewService.submitReview()（審核快照）共用這一個公式，避免各寫一份、日後只改到其中一邊
 	 * 又出現數字對不上。
@@ -703,7 +708,8 @@ public class ScoringService {
 		if (campaignSnapshot == null) {
 			return BigDecimal.ZERO;
 		}
-		return campaignSnapshot.getMatchWeight().multiply(campaignSnapshot.getUrgencyFactor()).multiply(BOOST_CAP)
+		BigDecimal boostCap = campaignSnapshot.getBoostCap() != null ? campaignSnapshot.getBoostCap() : LEGACY_BOOST_CAP;
+		return campaignSnapshot.getMatchWeight().multiply(campaignSnapshot.getUrgencyFactor()).multiply(boostCap)
 				.setScale(2, RoundingMode.HALF_UP);
 	}
 
@@ -758,6 +764,8 @@ public class ScoringService {
 				: loadCampaignTags(candidates);
 		// V26：天氣資料、對照表與設定同樣整批只載入一次。
 		WeatherBoostService.Context weatherContext = weatherBoostService.loadContext(today);
+		// 2026-09-29：節慶加成上限整批只讀一次，所有商品用同一個值。
+		BigDecimal festivalBoostCap = algorithmSettings.getFestivalBoostCap();
 
 		List<ProductEvaluation> changed = new ArrayList<>();
 		for (Product product : products) {
@@ -767,7 +775,7 @@ public class ScoringService {
 			}
 			Set<String> productTags = splitTags(product.getCampaignTags());
 			MatchedCampaignSnapshot snapshot = productTags.isEmpty() || candidates.isEmpty() ? null
-					: matchCampaign(productTags, candidates, tagsByCampaign, today);
+					: matchCampaign(productTags, candidates, tagsByCampaign, today, festivalBoostCap);
 			BigDecimal festivalBoost = calculateFestivalBoost(snapshot);
 			Long matchedCampaignId = snapshot != null ? snapshot.getCampaignId() : null;
 			BigDecimal weatherBoost = WeatherBoostService.evaluate(weatherContext, productTags).getWeatherBoost();

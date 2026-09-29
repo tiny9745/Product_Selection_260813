@@ -21,6 +21,7 @@ import com.example.Product_Selection_260813.enums.ProductReviewStatus;
  * @param withoutSubmissionBatch TRUE＝只要沒有送審批次資料的商品（submittedAt IS NULL）
  * @param reviewedFrom／reviewedToExclusive 以「最新一筆審核紀錄」的審核時間篩選
  * @param neverExported TRUE＝只要從未匯出過的商品
+ * @param createdBy 建立者 app_users.id（2026-09-29：操作層儀表板統計卡「只看我建立的」）；null＝不篩
  */
 public record ProductSearchCriteria(
 		ProductReviewStatus reviewStatus,
@@ -36,19 +37,20 @@ public record ProductSearchCriteria(
 		Boolean withoutSubmissionBatch,
 		LocalDateTime reviewedFrom,
 		LocalDateTime reviewedToExclusive,
-		Boolean neverExported) {
+		Boolean neverExported,
+		Long createdBy) {
 
 	/** 覆寫審核狀態（匯出固定只取 APPROVED）。 */
 	public ProductSearchCriteria withReviewStatus(ProductReviewStatus status) {
 		return new ProductSearchCriteria(status, itemStatus, candidateStatus, productTypeId, keyword, updatedFrom,
 				updatedTo, submittedBy, submittedFrom, submittedToExclusive, withoutSubmissionBatch, reviewedFrom,
-				reviewedToExclusive, neverExported);
+				reviewedToExclusive, neverExported, createdBy);
 	}
 
 	/** 覆寫候選狀態（Service 層套用「預設只看 CANDIDATE」的業務預設值）。 */
 	public ProductSearchCriteria withCandidateStatus(ProductCandidateStatus status) {
 		return new ProductSearchCriteria(reviewStatus, itemStatus, status, productTypeId, keyword, updatedFrom,
 				updatedTo, submittedBy, submittedFrom, submittedToExclusive, withoutSubmissionBatch, reviewedFrom,
-				reviewedToExclusive, neverExported);
+				reviewedToExclusive, neverExported, createdBy);
 	}
 }

@@ -83,11 +83,23 @@ public class DashboardService {
 
 	/**
 	 * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數。
+	 *
+	 * 2026-09-29 依登入者角色切換口徑（比照 getConversionRate()）：
+	 * <ul>
+	 * <li>MANAGER → {@link DashboardStatisticsResponse#SCOPE_COMPANY}：全公司，數字與修正前完全相同。</li>
+	 * <li>PURCHASER → {@link DashboardStatisticsResponse#SCOPE_PERSONAL}：五個數字都只算
+	 * createdBy＝自己的商品。修正前操作人員看到的是全公司數字，卡片標題卻是「我的選品」語境，
+	 * 且同頁的「我的選品轉換率」已是個人口徑，兩區塊數字對不起來。</li>
+	 * </ul>
+	 * 「自己的」以 createdBy 判斷，與 getConversionRate() 的個人口徑一致（submittedBy 在
+	 * V25 前重新送審的商品沒有回填，不適合當歸屬依據）。角色同樣以資料庫目前值為準。
 	 */
 	@Transactional(readOnly = true)
-	public DashboardStatisticsResponse getStatistics() {
+	public DashboardStatisticsResponse getStatistics(String username) {
+		AppUser user = appUserRepository.findByUsername(username)
+				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
+
 		DashboardStatisticsResponse response = new DashboardStatisticsResponse();
-		response.setTotalProducts(productRepository.count());
 		// 2026-09-16修正：pendingCount改為排除AI_SUGGESTED（尚未轉正候選）的商品，
 		// 只算candidateStatus=CANDIDATE的部分。修正前用countByReviewStatus(PENDING)
 		// 不分candidateStatus，AI建議尚未轉正的商品會被一併算進「待人工審核」，
@@ -95,12 +107,28 @@ public class DashboardService {
 		// 混在一起計算會讓這個數字失真。現在pendingCount跟aiSuggestedPendingCount
 		// 是互斥的兩個集合，不再有「pendingCount含aiSuggestedPendingCount」的
 		// 子集關係，兩者相加才等於「review_status=PENDING」的全部商品數。
-		response.setPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
-				ProductCandidateStatus.CANDIDATE, ProductReviewStatus.PENDING));
-		response.setApprovedCount(productRepository.countByReviewStatus(ProductReviewStatus.APPROVED));
-		response.setRejectedCount(productRepository.countByReviewStatus(ProductReviewStatus.REJECTED));
-		response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
-				ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING));
+		if (user.getRole() == UserRole.MANAGER) {
+			response.setScope(DashboardStatisticsResponse.SCOPE_COMPANY);
+			response.setTotalProducts(productRepository.count());
+			response.setPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
+					ProductCandidateStatus.CANDIDATE, ProductReviewStatus.PENDING));
+			response.setApprovedCount(productRepository.countByReviewStatus(ProductReviewStatus.APPROVED));
+			response.setRejectedCount(productRepository.countByReviewStatus(ProductReviewStatus.REJECTED));
+			response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
+					ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING));
+		} else {
+			Long userId = user.getId();
+			response.setScope(DashboardStatisticsResponse.SCOPE_PERSONAL);
+			response.setTotalProducts(productRepository.countByCreatedBy(userId));
+			response.setPendingCount(productRepository.countByCandidateStatusAndReviewStatusAndCreatedBy(
+					ProductCandidateStatus.CANDIDATE, ProductReviewStatus.PENDING, userId));
+			response.setApprovedCount(productRepository.countByReviewStatusAndCreatedBy(
+					ProductReviewStatus.APPROVED, userId));
+			response.setRejectedCount(productRepository.countByReviewStatusAndCreatedBy(
+					ProductReviewStatus.REJECTED, userId));
+			response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatusAndCreatedBy(
+					ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING, userId));
+		}
 		return response;
 	}
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -38,6 +40,7 @@ import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.service.campaign.ActiveCampaignWindow;
 import com.example.Product_Selection_260813.service.campaign.CampaignOccurrence;
 import com.example.Product_Selection_260813.service.campaign.FestiveCampaignRuleService;
+import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.service.weather.WeatherBoostService;
 
 /**
@@ -64,8 +67,17 @@ class ScoringServiceRefreshFestivalBoostsTest {
 	@Mock
 	private WeatherBoostService weatherBoostService;
 
+	/** 2026-09-29：節慶加成上限改為可調；預設回傳與修改前寫死相同的 5，既有案例數字不變。 */
+	@Mock
+	private AlgorithmSettings algorithmSettings;
+
 	@InjectMocks
 	private ScoringService scoringService;
+
+	@BeforeEach
+	void defaultBoostCap() {
+		lenient().when(algorithmSettings.getFestivalBoostCap()).thenReturn(new BigDecimal("5"));
+	}
 
 	private static Product product(long id, String tags) {
 		Product product = new Product();
@@ -165,5 +177,23 @@ class ScoringServiceRefreshFestivalBoostsTest {
 		assertThat(cooling.getWeatherBoost()).isEqualByComparingTo("5.00");
 		assertThat(cooling.getFestivalBoost()).isEqualByComparingTo("0");
 		assertThat(cooling.getFinalScore()).isEqualByComparingTo("75.00");
+	}
+
+	@Test
+	void 節慶加成上限可調_改為8分時核心命中且進行中加滿8分() {
+		givenActiveCampaign();
+		when(algorithmSettings.getFestivalBoostCap()).thenReturn(new BigDecimal("8"));
+		ProductEvaluation evaluation = evaluation(1L, "80.00", "5.00", "85.00");
+		when(productRepository.findByReviewStatusNot(ProductReviewStatus.APPROVED))
+				.thenReturn(List.of(product(1L, "粽子")));
+		when(productEvaluationRepository.findByProductIdIn(anyCollection()))
+				.thenReturn(new ArrayList<>(List.of(evaluation)));
+		when(weatherBoostService.loadContext(any())).thenReturn(weatherContext(Map.of(), Map.of()));
+
+		assertThat(scoringService.refreshFestivalBoosts()).isEqualTo(1);
+		assertThat(evaluation.getFestivalBoost()).isEqualByComparingTo("8.00");
+		assertThat(evaluation.getFinalScore()).isEqualByComparingTo("88.00");
+		// 整批只讀一次設定
+		verify(algorithmSettings, times(1)).getFestivalBoostCap();
 	}
 }

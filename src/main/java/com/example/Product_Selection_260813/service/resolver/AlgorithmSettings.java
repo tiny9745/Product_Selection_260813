@@ -41,6 +41,8 @@ public class AlgorithmSettings {
 	public static final String KEY_SCORE_BAND_MIN_SAMPLE_SIZE = "score_band_min_sample_size";
 	public static final String KEY_SCORE_BAND_PERCENTILE_LOWER = "score_band_percentile_lower";
 	public static final String KEY_SCORE_BAND_PERCENTILE_UPPER = "score_band_percentile_upper";
+	/** 2026-09-29：節慶加成上限（原 ScoringService.BOOST_CAP 寫死 5）。 */
+	public static final String KEY_FESTIVAL_BOOST_CAP = "festival_boost_cap";
 
 	// 預設值（與 V2 migration 的初值一致）
 	private static final int DEFAULT_MOQ_BENCHMARK_PERCENTILE = 75;
@@ -54,6 +56,8 @@ public class AlgorithmSettings {
 	private static final int DEFAULT_SCORE_BAND_MIN_SAMPLE_SIZE = 5;
 	private static final int DEFAULT_SCORE_BAND_PERCENTILE_LOWER = 10;
 	private static final int DEFAULT_SCORE_BAND_PERCENTILE_UPPER = 90;
+	/** 與修改前寫死的值相同：資料庫沒有這筆設定時，分數與修改前完全一致。 */
+	public static final BigDecimal DEFAULT_FESTIVAL_BOOST_CAP = new BigDecimal("5");
 
 	private final SystemSettingRepository systemSettingRepository;
 
@@ -112,6 +116,20 @@ public class AlgorithmSettings {
 	/** 目標區間上界採用的分位數，預設 P90。 */
 	public int getScoreBandPercentileUpper() {
 		return getInt(KEY_SCORE_BAND_PERCENTILE_UPPER, DEFAULT_SCORE_BAND_PERCENTILE_UPPER);
+	}
+
+	/**
+	 * 節慶加成上限（分）。超出 0～10 的髒資料（繞過 API 直接改資料庫）視同格式錯誤，退回預設值，
+	 * 不讓負數或過大的加成進入最終分數。
+	 */
+	public BigDecimal getFestivalBoostCap() {
+		BigDecimal cap = getDecimal(KEY_FESTIVAL_BOOST_CAP, DEFAULT_FESTIVAL_BOOST_CAP);
+		if (cap.signum() < 0 || cap.compareTo(BigDecimal.TEN) > 0) {
+			log.warn("system_settings 裡 {} 的值「{}」超出 0～10，改用預設值 {}", KEY_FESTIVAL_BOOST_CAP, cap,
+					DEFAULT_FESTIVAL_BOOST_CAP);
+			return DEFAULT_FESTIVAL_BOOST_CAP;
+		}
+		return cap;
 	}
 
 	/**

@@ -37,6 +37,11 @@ public class ProductFilterRequest {
 	private LocalDate reviewedTo;
 	/** true＝只要從未匯出過的商品；false／不帶＝不篩。 */
 	private Boolean neverExported;
+	/**
+	 * true＝只要「目前登入者建立」的商品；false／不帶＝不篩（2026-09-29，操作層儀表板統計卡連過來用）。
+	 * 刻意是布林而不是 createdBy 使用者 id：由 Service 以登入者身分換算，前端無法指定查別人的清單。
+	 */
+	private Boolean createdByMe;
 
 	public ProductReviewStatus getReviewStatus() { return reviewStatus; }
 	public void setReviewStatus(ProductReviewStatus reviewStatus) { this.reviewStatus = reviewStatus; }
@@ -56,6 +61,8 @@ public class ProductFilterRequest {
 	public void setSubmissionBatch(String submissionBatch) { this.submissionBatch = submissionBatch; }
 	public LocalDate getReviewedFrom() { return reviewedFrom; }
 	public void setReviewedFrom(LocalDate reviewedFrom) { this.reviewedFrom = reviewedFrom; }
+	public Boolean getCreatedByMe() { return createdByMe; }
+	public void setCreatedByMe(Boolean createdByMe) { this.createdByMe = createdByMe; }
 	public LocalDate getReviewedTo() { return reviewedTo; }
 	public void setReviewedTo(LocalDate reviewedTo) { this.reviewedTo = reviewedTo; }
 	public Boolean getNeverExported() { return neverExported; }

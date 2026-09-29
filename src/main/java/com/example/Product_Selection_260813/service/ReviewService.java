@@ -211,7 +211,13 @@ public class ReviewService {
 		// Gate 判定不通過的項目，對應的風險選項預先標記為系統帶入。
 		// 只標記不代表已勾選——最終是否成立由主管決定，這裡只是提供建議。
 		Map<Long, String> triggerReasons = resolveGateTriggerReasons(gateSummary);
+		// 2026-09-29：「其他」（isFreeTextOption）固定排最後，其餘依 id 升冪（＝建立順序）。
+		// findByIsActiveTrue() 沒有 ORDER BY，順序取決於資料庫；「其他」在全新資料庫是 V31 補回的，
+		// 在舊環境則是 V9 最早建立（id 最小），會排到第一個。這裡明確排序，不依賴資料庫回傳順序。
 		List<RiskOptionResponse> availableRiskOptions = riskOptionRepository.findByIsActiveTrue().stream()
+				.sorted(java.util.Comparator
+						.comparing((RiskOption option) -> Boolean.TRUE.equals(option.getIsFreeTextOption()))
+						.thenComparing(RiskOption::getId, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
 				.map(option -> {
 					RiskOptionResponse dto = RiskOptionResponse.from(option);
 					String reason = triggerReasons.get(option.getId());

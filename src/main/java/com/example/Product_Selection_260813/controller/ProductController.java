@@ -111,6 +111,9 @@ public class ProductController {
 			@org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
 			java.time.LocalDate reviewedTo,
 			@RequestParam(value = "neverExported", required = false) Boolean neverExported,
+			// 2026-09-29：操作層儀表板統計卡連過來時帶 true，只列登入者自己建立的商品（語意見 ProductFilterRequest）。
+			@RequestParam(value = "createdByMe", required = false) Boolean createdByMe,
+			@AuthenticationPrincipal String username,
 			@PageableDefault(size = 20) Pageable pageable) {
 		ProductFilterRequest filter = new ProductFilterRequest();
 		filter.setReviewStatus(reviewStatus);
@@ -124,7 +127,8 @@ public class ProductController {
 		filter.setReviewedFrom(reviewedFrom);
 		filter.setReviewedTo(reviewedTo);
 		filter.setNeverExported(neverExported);
-		Page<ProductResponse> result = productService.searchProducts(filter, pageable);
+		filter.setCreatedByMe(createdByMe);
+		Page<ProductResponse> result = productService.searchProducts(filter, username, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 
@@ -170,8 +174,11 @@ public class ProductController {
 	 */
 	@GetMapping("/ai-suggested")
 	public ResponseEntity<ApiResponse<Page<ProductResponse>>> searchAiSuggested(
+			// 2026-09-29：同 GET /api/products 的 createdByMe，儀表板「AI 建議待確認」個人口徑卡片連過來用。
+			@RequestParam(value = "createdByMe", required = false) Boolean createdByMe,
+			@AuthenticationPrincipal String username,
 			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ProductResponse> result = productService.searchAiSuggested(pageable);
+		Page<ProductResponse> result = productService.searchAiSuggested(createdByMe, username, pageable);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

@@ -110,6 +110,15 @@ public final class SystemSettingRegistry {
 		register("freight_cost_l", "運費估算", "材積 L 運費估算", "毛利率因子計算用的運費估算基準（大材積）。",
 				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.valueOf(100000), "元", "0");
 
+		// ---------------- 節慶加成（2026-09-29）----------------
+		// 原本寫死在 ScoringService.BOOST_CAP（企劃書「暫訂+5」）。上限 10 與天氣加成上限
+		// （WeatherBoostService.MAX_BOOST_CAP）一致，避免兩種加成的可調範圍不對稱。
+		// 前端在「節慶檔期」分頁編輯，不在「計分與判定參數」清單重複列出。
+		register("festival_boost_cap", "節慶加成", "節慶加成上限",
+				"節慶加成＝標籤命中權重 × 檔期急迫係數 × 這個上限；核心標籤命中、檔期進行中時加滿。"
+						+ "調整後會重算所有尚未核准商品，已核准商品維持審核當時的快照。",
+				DataType.DECIMAL, BigDecimal.ZERO, BigDecimal.TEN, "分", "5");
+
 		// ---------------- 目標區間（HISTORICAL 模式）----------------
 		register("score_band_min_sample_size", "目標區間", "歷史模式最低樣本數",
 				"切換目標區間為 HISTORICAL 模式時，低於這個樣本數會直接拒絕計算，改請使用 MANUAL 模式。",

@@ -26,6 +26,21 @@ class ProductServiceFilterCriteriaTest {
 		assertThat(criteria.withoutSubmissionBatch()).isNull();
 		assertThat(criteria.reviewedFrom()).isNull();
 		assertThat(criteria.neverExported()).isNull();
+		assertThat(criteria.createdBy()).isNull();
+	}
+
+	@Test
+	void createdByMe未勾選時不篩建立者() {
+		ProductFilterRequest filter = new ProductFilterRequest();
+		filter.setCreatedByMe(false);
+		assertThat(productService.toCriteria(filter, "buyer01").createdBy()).isNull();
+	}
+
+	@Test
+	void createdByMe卻沒有登入者時回400而不是默默回全公司() {
+		ProductFilterRequest filter = new ProductFilterRequest();
+		filter.setCreatedByMe(true);
+		assertThatThrownBy(() -> productService.toCriteria(filter)).isInstanceOf(IllegalArgumentException.class);
 	}
 
 	@Test

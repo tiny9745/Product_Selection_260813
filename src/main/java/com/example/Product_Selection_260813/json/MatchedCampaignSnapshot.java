@@ -58,6 +58,21 @@ public class MatchedCampaignSnapshot {
      */
     private BigDecimal weatherConfidenceFactor;
 
+    /**
+     * 2026-09-29：計算當下的節慶加成上限（system_settings.festival_boost_cap）。上限改為可調後，
+     * 快照要記下當時用的值，審核紀錄才能重現「matchWeight × urgencyFactor × 上限」的算式。
+     * 舊快照沒有這個 key 時為 null，代表當時是寫死的 5（見 ScoringService.calculateFestivalBoost()）。
+     */
+    private BigDecimal boostCap;
+
+    public BigDecimal getBoostCap() {
+        return boostCap;
+    }
+
+    public void setBoostCap(BigDecimal boostCap) {
+        this.boostCap = boostCap;
+    }
+
     public MatchedCampaignSnapshot() {
     }
 

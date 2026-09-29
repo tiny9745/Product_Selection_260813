@@ -92,7 +92,7 @@ public class ProductExportService {
 				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
 
 		// 這支端點的語意就是「匯出審核通過的商品」：不論前端送來的審核狀態是什麼，一律覆寫。
-		ProductSearchCriteria criteria = productService.toCriteria(filter).withReviewStatus(ProductReviewStatus.APPROVED);
+		ProductSearchCriteria criteria = productService.toCriteria(filter, username).withReviewStatus(ProductReviewStatus.APPROVED);
 		List<Product> products = productRepository.search(criteria, Pageable.unpaged()).getContent();
 		if (products.size() > MAX_EXPORT_ROWS) {
 			throw new IllegalStateException(

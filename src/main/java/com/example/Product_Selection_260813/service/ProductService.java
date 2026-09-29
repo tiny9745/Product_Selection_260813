@@ -229,10 +229,10 @@ public class ProductService {
 	 * Repository.search()維持通用（null=不篩選），由呼叫端決定要不要套用預設值。
 	 */
 	@Transactional(readOnly = true)
-	public Page<ProductResponse> searchProducts(ProductFilterRequest filter, Pageable pageable) {
+	public Page<ProductResponse> searchProducts(ProductFilterRequest filter, String username, Pageable pageable) {
 		// 2026-09：參數改為 ProductFilterRequest，與 POST /api/products/export 共用同一套篩選
 		// （見 toCriteria()），確保「畫面上看到的清單」與「匯出的內容」條件一致。
-		Page<Product> page = productRepository.search(toCriteria(filter), pageable);
+		Page<Product> page = productRepository.search(toCriteria(filter, username), pageable);
 
 		// 批次查一次 createdBy／submittedBy 對應的姓名，避免在 .map() 裡逐筆查詢（N+1）。
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
@@ -264,7 +264,22 @@ public class ProductService {
 	 * </ul>
 	 */
 	public ProductSearchCriteria toCriteria(ProductFilterRequest filter) {
+		return toCriteria(filter, null);
+	}
+
+	/**
+	 * 同上，另外把 createdByMe（2026-09-29）換算成登入者的 app_users.id。
+	 * createdByMe＝TRUE 卻沒有登入者時直接 400——不能默默忽略條件，回傳全公司清單。
+	 */
+	public ProductSearchCriteria toCriteria(ProductFilterRequest filter, String username) {
 		ProductFilterRequest f = filter != null ? filter : new ProductFilterRequest();
+		Long createdBy = null;
+		if (Boolean.TRUE.equals(f.getCreatedByMe())) {
+			if (username == null) {
+				throw new IllegalArgumentException("「只看我建立的」需要登入者身分");
+			}
+			createdBy = resolveUserId(username);
+		}
 		if (f.getReviewedFrom() != null && f.getReviewedTo() != null && f.getReviewedFrom().isAfter(f.getReviewedTo())) {
 			throw new IllegalArgumentException("審核日期起日不可晚於迄日");
 		}
@@ -284,7 +299,8 @@ public class ProductService {
 				withoutBatch ? Boolean.TRUE : null,
 				f.getReviewedFrom() == null ? null : f.getReviewedFrom().atStartOfDay(),
 				f.getReviewedTo() == null ? null : f.getReviewedTo().plusDays(1).atStartOfDay(),
-				Boolean.TRUE.equals(f.getNeverExported()) ? Boolean.TRUE : null);
+				Boolean.TRUE.equals(f.getNeverExported()) ? Boolean.TRUE : null,
+				createdBy);
 	}
 
 	/**
@@ -338,8 +354,12 @@ public class ProductService {
 	 * GET /api/products/ai-suggested：AI建議清單（candidate_status=AI_SUGGESTED）。
 	 */
 	@Transactional(readOnly = true)
-	public Page<ProductResponse> searchAiSuggested(Pageable pageable) {
-		Page<Product> page = productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
+	public Page<ProductResponse> searchAiSuggested(Boolean createdByMe, String username, Pageable pageable) {
+		// 2026-09-29：createdByMe＝TRUE 時只列登入者建立的商品（與 GET /api/products 同語意）。
+		Page<Product> page = Boolean.TRUE.equals(createdByMe)
+				? productRepository.findByCandidateStatusAndCreatedBy(ProductCandidateStatus.AI_SUGGESTED,
+						resolveUserId(username), pageable)
+				: productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
 		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
 		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
 		// 2026-09-28：Google 趨勢參考一次批次帶出，不逐筆查詢

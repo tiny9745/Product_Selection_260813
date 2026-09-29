@@ -34,10 +34,14 @@ public class DashboardController {
 
 	/**
 	 * GET /api/dashboard/statistics：取得商品總數、待審核數、通過數、拒絕數等統計。
+	 *
+	 * 2026-09-29 起比照 /conversion-rate 依登入者角色切換口徑（PURCHASER 個人／MANAGER
+	 * 全公司，見 DashboardStatisticsResponse 類別註解），所以需要 {@code @AuthenticationPrincipal}。
 	 */
 	@GetMapping("/statistics")
-	public ResponseEntity<ApiResponse<DashboardStatisticsResponse>> getStatistics() {
-		DashboardStatisticsResponse result = dashboardService.getStatistics();
+	public ResponseEntity<ApiResponse<DashboardStatisticsResponse>> getStatistics(
+			@AuthenticationPrincipal String username) {
+		DashboardStatisticsResponse result = dashboardService.getStatistics(username);
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
 	}
 

@@ -59,6 +59,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
                       AND r.reviewedAt = (SELECT MAX(r2.reviewedAt) FROM ReviewRecord r2 WHERE r2.productId = p.id)))
               AND (:neverExported IS NULL OR NOT EXISTS (
                     SELECT l.id FROM ProductExportLog l WHERE l.productId = p.id))
+              AND (:createdBy IS NULL OR p.createdBy = :createdBy)
             """)
     Page<Product> search(
             @Param("reviewStatus") ProductReviewStatus reviewStatus,
@@ -75,13 +76,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             @Param("reviewedFrom") java.time.LocalDateTime reviewedFrom,
             @Param("reviewedToExclusive") java.time.LocalDateTime reviewedToExclusive,
             @Param("neverExported") Boolean neverExported,
+            @Param("createdBy") Long createdBy,
             Pageable pageable);
 
     /** 以參數物件呼叫上方查詢：參數對應只寫在這一個地方，避免呼叫端對調同型別參數。 */
     default Page<Product> search(ProductSearchCriteria c, Pageable pageable) {
         return search(c.reviewStatus(), c.itemStatus(), c.candidateStatus(), c.productTypeId(), c.keyword(),
                 c.updatedFrom(), c.updatedTo(), c.submittedBy(), c.submittedFrom(), c.submittedToExclusive(),
-                c.withoutSubmissionBatch(), c.reviewedFrom(), c.reviewedToExclusive(), c.neverExported(), pageable);
+                c.withoutSubmissionBatch(), c.reviewedFrom(), c.reviewedToExclusive(), c.neverExported(), c.createdBy(),
+                pageable);
     }
 
     /**
@@ -107,6 +110,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * candidate_status=AI_SUGGESTED的商品，操作人員可「加入候選」轉為CANDIDATE。
      */
     Page<Product> findByCandidateStatus(ProductCandidateStatus candidateStatus, Pageable pageable);
+
+    /** 同上，只列 createdBy = 指定使用者（2026-09-29，AI 建議清單「只看我建立的」）。 */
+    Page<Product> findByCandidateStatusAndCreatedBy(ProductCandidateStatus candidateStatus, Long createdBy,
+            Pageable pageable);
 
     /**
      * 選品審核待審清單（GET /api/reviews/pending）：預設「未審核＋使用中」。
@@ -193,6 +200,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     /** 同上，但只算 createdBy = 指定使用者的部分，供操作人員的個人化選品轉換率使用。 */
     long countByReviewStatusAndCreatedBy(ProductReviewStatus reviewStatus, Long createdBy);
+
+    /**
+     * 操作層儀表板（2026-09-29）：只算 createdBy = 指定使用者的商品總數，
+     * 口徑與管理層的 productRepository.count() 相同（不分審核／品項／候選狀態）。
+     */
+    long countByCreatedBy(Long createdBy);
+
+    /** 同 countByCandidateStatusAndReviewStatus()，但只算 createdBy = 指定使用者（操作層儀表板，2026-09-29）。 */
+    long countByCandidateStatusAndReviewStatusAndCreatedBy(
+            ProductCandidateStatus candidateStatus, ProductReviewStatus reviewStatus, Long createdBy);
 
     /**
      * Dashboard「待人工審核」／「AI建議待確認」統計（GET /api/dashboard/statistics）
