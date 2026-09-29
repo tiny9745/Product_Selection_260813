@@ -60,4 +60,28 @@ public final class PttSelectors {
 
 	/** 推文數「X1」~「X9」代表淨噓 10~90，以 10 倍計。 */
 	public static final String PUSH_BOO_PREFIX = "X";
+
+	// ---------------- 看板文章列表（2026-09-29，PTT 新品探索用）----------------
+	// 結構與搜尋結果頁相同（div.r-ent），差異只有三點：
+	// 1. 最新一頁網址是 /bbs/{看板}/index.html，往舊翻頁靠「‹ 上頁」按鈕的 href（/bbs/{看板}/index1234.html）；
+	// 2. 最新一頁底部有置底公告，與一般文章之間以 div.r-list-sep 分隔，分隔線之後的文章要略過；
+	// 3. 需要讀文章標題文字（搜尋頁只用到發文時間與推文數）。
+
+	/** 看板最新一頁的路徑。 */
+	public static final String INDEX_PATH_FORMAT = "/bbs/%s/index.html";
+
+	/** 看板列表頁的路徑格式（翻頁連結必須符合這個格式才會跟隨，避免被導到其他網站或看板）。 */
+	public static final Pattern INDEX_PAGE_PATH = Pattern.compile("^/bbs/[A-Za-z0-9_-]+/index\\d*\\.html$");
+
+	/** 翻頁按鈕列。 */
+	public static final String PAGING_LINKS = "div.btn-group-paging a";
+
+	/** 往舊一頁的按鈕文字（「‹ 上頁」）。 */
+	public static final String PREVIOUS_PAGE_TEXT = "上頁";
+
+	/** 置底公告的分隔線。 */
+	public static final String LIST_SEPARATOR = "div.r-list-sep";
+
+	/** 依文件順序同時選出文章列與分隔線，用來判斷哪些文章在置底區。 */
+	public static final String ENTRY_OR_SEPARATOR = "div.r-ent, div.r-list-sep";
 }

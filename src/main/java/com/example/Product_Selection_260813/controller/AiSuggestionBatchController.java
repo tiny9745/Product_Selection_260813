@@ -41,7 +41,7 @@ public class AiSuggestionBatchController {
 	@PostMapping("/batch-generate")
 	public ApiResponse<BatchResult> triggerBatch() {
 		BatchResult result = aiSuggestionBatchService.runBatch();
-		String message = String.format("批次執行完成，檢查%d個商品，新增%d個AI建議候選",
+		String message = String.format("批次執行完成，檢查%d個商品，新增%d個熱度建議候選",
 				result.checkedCount(), result.suggestedCount());
 		return ApiResponse.success(message, result);
 	}

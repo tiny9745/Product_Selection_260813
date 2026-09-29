@@ -56,6 +56,28 @@ public class PttClient {
 		}
 	}
 
+	/**
+	 * 抓取看板文章列表頁（2026-09-29，PTT 新品探索用）。與搜尋共用同一個請求間隔與
+	 * User-Agent；path 必須是 /bbs/{看板}/index{數字}.html 格式（見 PttSelectors.INDEX_PAGE_PATH），
+	 * 由呼叫端先驗證，這裡不接受任意網址。
+	 *
+	 * @throws IOException 連線失敗、逾時、看板不存在
+	 */
+	public synchronized Document fetchBoardPage(String path) throws IOException {
+		if (path == null || !PttSelectors.INDEX_PAGE_PATH.matcher(path).matches()) {
+			throw new IllegalArgumentException("不是 PTT 看板列表頁路徑：" + path);
+		}
+		waitForRateLimit();
+		try {
+			return Jsoup.connect(PttSelectors.BASE_URL + path)
+					.userAgent(USER_AGENT)
+					.timeout(timeoutSeconds * 1000)
+					.get();
+		} finally {
+			lastRequestAtMillis = System.currentTimeMillis();
+		}
+	}
+
 	private void waitForRateLimit() throws IOException {
 		long waitMillis = lastRequestAtMillis + requestDelayMs - System.currentTimeMillis();
 		if (waitMillis <= 0) {

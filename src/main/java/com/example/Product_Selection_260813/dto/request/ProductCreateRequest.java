@@ -156,6 +156,20 @@ public class ProductCreateRequest {
 	 */
 	private Map<String, Object> customFieldValues;
 
+	/**
+	 * 2026-09-29：從「PTT 新品探索」建立商品時帶入探索項目 id（選填）。ProductService 建立成功後
+	 * 在同一個交易裡把該項目標成「已建立商品」；項目已經轉過商品時整筆回 409、商品不會建立。
+	 */
+	private Long discoveredItemId;
+
+	public Long getDiscoveredItemId() {
+		return discoveredItemId;
+	}
+
+	public void setDiscoveredItemId(Long discoveredItemId) {
+		this.discoveredItemId = discoveredItemId;
+	}
+
 	public Long getProductTypeId() {
 		return productTypeId;
 	}

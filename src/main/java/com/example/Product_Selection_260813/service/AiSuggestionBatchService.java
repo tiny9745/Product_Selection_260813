@@ -17,7 +17,11 @@ import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 
 /**
- * AI主動選品批次規則。
+ * AI主動選品批次規則（2026-09-29 起畫面與 log 改稱「熱度規則選品」）。
+ *
+ * 改名原因：這支批次只有固定門檻規則，沒有呼叫任何 AI；真正用 Gemini 找新品的是
+ * PTT 新品探索（service/discovery）。類別名稱、API 路徑、candidateStatus=AI_SUGGESTED
+ * 都維持不變，避免牽動資料與前端契約。
  *
  * 對應規格書七、新增功能精簡化設計：
  * 「沿用模擬市場資料集，用單一閾值規則（熱度分數>70 或 連續3天呈上升趨勢，
@@ -57,9 +61,9 @@ public class AiSuggestionBatchService {
 	// ⚠️ 必須晚於 TrendSyncRunService.scheduledRun()（02:00 PTT 熱度同步），否則永遠讀到前一天的討論量
 	@Scheduled(cron = "0 0 3 * * *")
 	public void runDailyBatch() {
-		log.info("開始執行AI主動選品批次規則（Daily Cron）");
+		log.info("開始執行熱度規則選品批次（Daily Cron）");
 		BatchResult result = runBatch();
-		log.info("AI主動選品批次規則執行完畢：檢查{}個商品，新增{}個AI_SUGGESTED候選",
+		log.info("熱度規則選品批次執行完畢：檢查{}個商品，新增{}個AI_SUGGESTED候選",
 				result.checkedCount(), result.suggestedCount());
 	}
 
@@ -141,7 +145,7 @@ public class AiSuggestionBatchService {
 					}
 					product.setCandidateStatus(ProductCandidateStatus.AI_SUGGESTED);
 					productRepository.save(product);
-					log.debug("商品ID={}（{}）符合AI主動選品條件，標記為AI_SUGGESTED", productId, product.getName());
+					log.debug("商品ID={}（{}）符合熱度規則選品條件，標記為AI_SUGGESTED", productId, product.getName());
 					return true;
 				})
 				.orElse(false);

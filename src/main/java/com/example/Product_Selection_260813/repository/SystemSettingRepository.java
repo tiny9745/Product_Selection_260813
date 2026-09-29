@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.Product_Selection_260813.entity.SystemSetting;
 
@@ -32,7 +33,13 @@ public interface SystemSettingRepository extends JpaRepository<SystemSetting, St
 	 * session/交易時序）會誤判成StaleObjectStateException並整個丟出來，
 	 * 即使實際上沒有真正的併發衝突。原子UPSERT完全繞開這個問題，而且
 	 * 同時把「讀出來改完再寫回去」中間的競態條件也一併解決了。
+	 *
+	 * 2026-09-29：加上 @Transactional。@Modifying 查詢必須在交易內執行，原本靠呼叫端提供交易；
+	 * PTT 新品探索在背景執行緒呼叫 Gemini（刻意不包交易，避免長時間佔住連線），
+	 * 直接呼叫這支就丟出「No active transaction for update or delete query」。
+	 * 預設 REQUIRED：呼叫端已有交易時加入該交易（行為不變），沒有時自己開一個短交易。
 	 */
+	@Transactional
 	@Modifying
 	@Query(value = "INSERT INTO system_settings (setting_key, setting_value, updated_at) "
 			+ "VALUES (:key, '1', NOW()) "

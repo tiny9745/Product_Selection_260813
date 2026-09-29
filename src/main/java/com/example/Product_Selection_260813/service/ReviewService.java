@@ -370,7 +370,7 @@ public class ReviewService {
 		// productId不保證一定來自待審清單畫面，這裡的檢查是真正的防線，
 		// 不能只靠上游清單過濾就假設安全。
 		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
-			throw new IllegalStateException("AI建議商品須先加入正式候選才能送審核決策");
+			throw new IllegalStateException("熱度建議商品須先加入正式候選才能送審核決策");
 		}
 
 		validateRejectionReason(request);

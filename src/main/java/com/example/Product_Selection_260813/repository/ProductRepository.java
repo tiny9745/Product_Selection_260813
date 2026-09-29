@@ -111,6 +111,13 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      */
     Page<Product> findByCandidateStatus(ProductCandidateStatus candidateStatus, Pageable pageable);
 
+    /**
+     * PTT 新品探索（2026-09-29）比對「是不是既有商品」用：只取名稱，不載入整個 Product。
+     * 包含所有狀態（含已封存、已拒絕）——曾經評估過的商品也不該再被當成新品推薦。
+     */
+    @Query("SELECT p.name FROM Product p")
+    List<String> findAllNames();
+
     /** 同上，只列 createdBy = 指定使用者（2026-09-29，AI 建議清單「只看我建立的」）。 */
     Page<Product> findByCandidateStatusAndCreatedBy(ProductCandidateStatus candidateStatus, Long createdBy,
             Pageable pageable);

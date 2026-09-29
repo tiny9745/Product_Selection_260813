@@ -66,7 +66,7 @@ public class GoogleTrendService {
 
 	private static final Logger log = LoggerFactory.getLogger(GoogleTrendService.class);
 
-	public static final String SCHEDULE_DESCRIPTION = "每週一 04:00（PTT 熱度同步 02:00、AI 選品批次 03:00 之後）";
+	public static final String SCHEDULE_DESCRIPTION = "每週一 04:00（PTT 熱度同步 02:00、熱度規則選品 03:00 之後）";
 
 	@Autowired
 	private ProductRepository productRepository;

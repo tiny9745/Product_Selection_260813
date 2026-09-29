@@ -109,6 +109,10 @@ public class ProductService {
 	@Autowired
 	private ScoringService scoringService;
 
+	/** 2026-09-29：PTT 新品探索轉成商品（見 createProduct()）。DiscoveredItemService 不依賴本類別，無循環依賴。 */
+	@Autowired
+	private com.example.Product_Selection_260813.service.discovery.DiscoveredItemService discoveredItemService;
+
 	/**
 	 * GET /api/products/{id} 組裝 gateResults 用（見 getProduct()）。這裡直接
 	 * 依賴 GateEvaluationService，寫法與 ReviewService.getReviewDetail() 一致；
@@ -601,6 +605,12 @@ public class ProductService {
 		// 見 validateAndSaveCustomFieldValues() 的類別註解。
 		validateAndSaveCustomFieldValues(saved, request.getCustomFieldValues(), false);
 
+		// 2026-09-29：從 PTT 新品探索建立的商品，同一個交易內把探索項目標成已建立商品。
+		// 放在評分之前：項目已被轉過（409）時整筆回滾，不必白算一次分數。
+		if (request.getDiscoveredItemId() != null) {
+			discoveredItemService.markConverted(request.getDiscoveredItemId(), saved.getId(), userId);
+		}
+
 		// Demo緊急補上的觸發點（見ScoringService類別Java Doc）：新增成功後立即
 		// 重算評估分數，讓品項詳情頁一建立就有分數可看，不用等使用者手動觸發其他動作。
 		scoringService.calculateEvaluation(saved.getId(), null);
@@ -771,7 +781,7 @@ public class ProductService {
 		Product product = findProductOrThrow(id);
 
 		if (product.getCandidateStatus() != ProductCandidateStatus.AI_SUGGESTED) {
-			throw new IllegalStateException("僅AI建議（尚未加入候選）的商品可執行此操作");
+			throw new IllegalStateException("僅熱度建議（尚未加入候選）的商品可執行此操作");
 		}
 
 		product.setCandidateStatus(ProductCandidateStatus.CANDIDATE);
@@ -806,7 +816,7 @@ public class ProductService {
 		// 資料修復或未來其他路徑可能造成）被重新送審後，又回到待審清單
 		// 被再審一次，重複同一個漏洞。
 		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
-			throw new IllegalStateException("AI建議商品須先加入正式候選才能重新送審");
+			throw new IllegalStateException("熱度建議商品須先加入正式候選才能重新送審");
 		}
 
 		int updated = productRepository.conditionalUpdateReviewStatus(id, ProductReviewStatus.REJECTED,

@@ -54,7 +54,7 @@ public class TrendSyncRunService {
 	/** 超過這個時間會壓到 03:00 的 AI 建議批次（見 scheduledRun() 說明）。 */
 	private static final Duration SCHEDULE_WARNING_DURATION = Duration.ofMinutes(50);
 
-	public static final String SCHEDULE_DESCRIPTION = "每天 02:00（早於 03:00 AI 主動選品批次）";
+	public static final String SCHEDULE_DESCRIPTION = "每天 02:00（早於 03:00 熱度規則選品）";
 
 	@Autowired
 	private TrendService trendService;
@@ -227,7 +227,7 @@ public class TrendSyncRunService {
 				run.getStatus(), run.getRealCount(), run.getFallbackCount(), run.getFailedCount(),
 				elapsed.toSeconds());
 		if (run.getTriggerType() == TrendSyncTrigger.SCHEDULED && elapsed.compareTo(SCHEDULE_WARNING_DURATION) > 0) {
-			log.warn("每日 PTT 熱度同步耗時超過 50 分鐘，可能壓到 03:00 的 AI 建議批次，請減少看板數或請求間隔");
+			log.warn("每日 PTT 熱度同步耗時超過 50 分鐘，可能壓到 03:00 的熱度規則選品批次，請減少看板數或請求間隔");
 		}
 	}
 
