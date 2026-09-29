@@ -8,8 +8,8 @@ import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 /**
  * 把 PTT 原始討論量轉成 0~100 分。純函式、不碰網路與資料庫，方便單元測試把邊界行為釘死。
  *
- * <b>為什麼不能直接用討論則數當分數：</b>AiSuggestionBatchService 的「熱度 &gt;70 標記
- * AI_SUGGESTED」門檻，是照原本模擬資料「基準 50、±5 波動」的分佈校準的。PTT 真實
+ * <b>為什麼不能直接用討論則數當分數：</b>熱度分數的尺度（當初「熱度 &gt;70」門檻，2026-09-29 已隨
+ * 熱度規則選品移除）是照原本模擬資料「基準 50、±5 波動」的分佈校準的，評分因子也沿用同一尺度。PTT 真實
  * 討論量是長尾分佈——2026-09-24 以 7 個預設看板、90 天窗口實測：
  * <pre>
  *   0      鳳梨酥、滴雞精、電風扇、藍芽耳機、月餅
@@ -100,7 +100,7 @@ public final class MarketBuzzNormalizer {
 	 * 刻意不沿用模擬資料「跟上一筆比大小」的做法：上一筆可能是 SIMULATED 資料，
 	 * 拿隨機值跟真實值比沒有意義；而且 PTT 統計窗口是滾動的 90 天，每天重疊 89 天，
 	 * 逐日比大小會被微小雜訊主導。以「近期速度是否明顯高於平均」判斷，
-	 * AiSuggestionBatchService 的「連續 3 筆 UP」才真的代表連續幾天持續升溫。
+	 * 「連續上升」標記（RecentTrendService，最近 3 筆都 UP）才真的代表連續幾天持續升溫。
 	 */
 	public static TrendSignalTrendDirection direction(BigDecimal trendScore) {
 		if (trendScore.compareTo(UP_THRESHOLD) >= 0) {

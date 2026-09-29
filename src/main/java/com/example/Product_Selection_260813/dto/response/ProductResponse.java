@@ -133,84 +133,51 @@ public class ProductResponse {
 	/** 送審人姓名，與 createdByName 同一種「批次查詢後才填入」的例外（withSubmittedByName）。 */
 	private String submittedByName;
 	/**
-	 * 「為什麼被 AI 推薦」的說明文字。只有 GET /api/products/ai-suggested
-	 * 這支端點會填值，其餘所有回傳 ProductResponse 的端點一律是 null——
-	 * 原本前端這個欄位是恆為 null 的死欄位，因為判定「要不要推薦」的
-	 * AiSuggestionBatchService 只把結果寫成一個布林值（改
-	 * candidate_status），沒有把「為什麼」這件事存下來或回傳過。
-	 * 這裡不改動批次判定邏輯本身，只是在查詢清單時，用同樣的兩個判定
-	 * 條件（最新熱度分數／連續三天上升趨勢）重新算一次，組成一句人看得懂
-	 * 的說明——判定條件是固定、可重現的，不需要在批次當下就存起來。
-	 */
-	private String suggestionReason;
-
-	/**
-	 * 跟 suggestionReason 同一批、同一個判定來源
-	 * （AiSuggestionBatchService.shouldSuggest() 用的最新一筆 TrendSignal），
-	 * 只是這裡回傳結構化數字而不是文字，給前端「AI建議清單」畫面直接顯示
-	 * 趨勢分數與方向用，不用自己解析 suggestionReason 這句文字。
-	 * 語意同 suggestionReason：只有 GET /api/products/ai-suggested 會填值，
-	 * 其餘端點恆為 null。
+	 * 2026-09-29：最新熱度摘要，只有品項清單 GET /api/products 會填值（見 RecentTrendService），其餘端點為 null。
+	 * 原本這組欄位只給已移除的熱度建議清單（GET /api/products/ai-suggested）使用；suggestionReason、googleTrend
+	 * 隨之移除。沒有任何熱度資料的商品也是 null（畫面顯示「—」），不是 0。
+	 *
+	 * trendScore：最新一筆的熱度分數（trend_signals.popularity_score，不是 trend_score）；
+	 * trendDirection／trendSource：最新一筆的方向與來源（PTT／SIMULATED）；
+	 * recentTrendDirections：最近最多 3 筆的方向（新到舊）；
+	 * consecutiveRise：最近 3 次同步都上升（唯讀提醒，不改變狀態、不參與評分）。
 	 */
 	private BigDecimal trendScore;
 	private TrendSignalTrendDirection trendDirection;
-
-	/**
-	 * 2026-09-28：AI 建議清單的「趨勢說明」，語意同上（只有 GET /api/products/ai-suggested 會填值）。
-	 * trendSource：最新一筆的來源（PTT／SIMULATED），讓畫面標出是否為模擬資料；
-	 * recentTrendDirections：最近最多 3 筆的方向（新到舊），對應「連續 3 天上升」這個判定條件；
-	 * googleTrend：Google 趨勢參考的最新一筆（沒查過為 null），只作參考、不參與建議判定。
-	 */
 	private String trendSource;
 	private List<TrendSignalTrendDirection> recentTrendDirections;
-	private GoogleTrendSignalResponse googleTrend;
+	private Boolean consecutiveRise;
+
+	/** 補上最新熱度摘要，鏈式呼叫；trend 為 null（沒有熱度資料）時所有欄位維持 null。 */
+	public ProductResponse withRecentTrend(com.example.Product_Selection_260813.service.RecentTrendService.RecentTrend trend) {
+		if (trend != null) {
+			this.trendScore = trend.popularityScore();
+			this.trendDirection = trend.trendDirection();
+			this.trendSource = trend.source();
+			this.recentTrendDirections = trend.recentTrendDirections();
+			this.consecutiveRise = trend.consecutiveRise();
+		}
+		return this;
+	}
 
 	public String getTrendSource() {
 		return trendSource;
-	}
-
-	public void setTrendSource(String trendSource) {
-		this.trendSource = trendSource;
 	}
 
 	public List<TrendSignalTrendDirection> getRecentTrendDirections() {
 		return recentTrendDirections;
 	}
 
-	public void setRecentTrendDirections(List<TrendSignalTrendDirection> recentTrendDirections) {
-		this.recentTrendDirections = recentTrendDirections;
-	}
-
-	public GoogleTrendSignalResponse getGoogleTrend() {
-		return googleTrend;
-	}
-
-	public void setGoogleTrend(GoogleTrendSignalResponse googleTrend) {
-		this.googleTrend = googleTrend;
-	}
-
-	public String getSuggestionReason() {
-		return suggestionReason;
-	}
-
-	public void setSuggestionReason(String suggestionReason) {
-		this.suggestionReason = suggestionReason;
+	public Boolean getConsecutiveRise() {
+		return consecutiveRise;
 	}
 
 	public BigDecimal getTrendScore() {
 		return trendScore;
 	}
 
-	public void setTrendScore(BigDecimal trendScore) {
-		this.trendScore = trendScore;
-	}
-
 	public TrendSignalTrendDirection getTrendDirection() {
 		return trendDirection;
-	}
-
-	public void setTrendDirection(TrendSignalTrendDirection trendDirection) {
-		this.trendDirection = trendDirection;
 	}
 
 	public static ProductResponse from(Product product) {

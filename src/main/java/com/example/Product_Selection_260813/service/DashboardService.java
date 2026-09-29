@@ -52,10 +52,9 @@ public class DashboardService {
 
 	// GET /api/dashboard/recommendations 固定回傳前10筆（企劃書明訂「前10項商品」）
 	private static final int RECOMMENDATIONS_LIMIT = 10;
-	// ⚠️ 2026-09-25 新增：熱度排行榜刻意只取前 5 名，比 AI推薦Top10 的 10 筆
-	// 少——這張表資訊密度高（每列只有名稱/分數/方向），榜單太長反而失去
-	// 「一眼看出誰在飆升」的價值，5 筆足夠當作儀表板的快速總覽。
-	private static final int TREND_LEADERBOARD_LIMIT = 5;
+	// 2026-09-29：熱度排行榜 5 → 10 筆。儀表板改成「推薦 Top 10／熱度排行」同一張卡片的兩個頁籤，
+	// 兩邊筆數一致，切換頁籤時卡片高度不會跳動（原本 5 筆是因為獨立成一整列、怕太佔版面）。
+	private static final int TREND_LEADERBOARD_LIMIT = 10;
 
 	@Autowired
 	private ProductRepository productRepository;
@@ -81,6 +80,9 @@ public class DashboardService {
 	@Autowired
 	private GoogleTrendService googleTrendService;
 
+	@Autowired
+	private RecentTrendService recentTrendService;
+
 	/**
 	 * GET /api/dashboard/statistics：商品總數、待審核數、通過數、拒絕數。
 	 *
@@ -100,13 +102,9 @@ public class DashboardService {
 				.orElseThrow(() -> new IllegalArgumentException("使用者不存在"));
 
 		DashboardStatisticsResponse response = new DashboardStatisticsResponse();
-		// 2026-09-16修正：pendingCount改為排除AI_SUGGESTED（尚未轉正候選）的商品，
-		// 只算candidateStatus=CANDIDATE的部分。修正前用countByReviewStatus(PENDING)
-		// 不分candidateStatus，AI建議尚未轉正的商品會被一併算進「待人工審核」，
-		// 但那些商品其實還不該進入人工審核（見getPendingReviews()的說明），
-		// 混在一起計算會讓這個數字失真。現在pendingCount跟aiSuggestedPendingCount
-		// 是互斥的兩個集合，不再有「pendingCount含aiSuggestedPendingCount」的
-		// 子集關係，兩者相加才等於「review_status=PENDING」的全部商品數。
+		// pendingCount 只算 candidateStatus=CANDIDATE（與待審清單 getPendingReviews() 同一個條件）。
+		// 2026-09-29 移除熱度建議（AI_SUGGESTED）與 aiSuggestedPendingCount 後，正常資料全部是 CANDIDATE，
+		// 這個條件保留是與待審清單口徑一致，不是另有一群商品被排除。
 		if (user.getRole() == UserRole.MANAGER) {
 			response.setScope(DashboardStatisticsResponse.SCOPE_COMPANY);
 			response.setTotalProducts(productRepository.count());
@@ -114,8 +112,6 @@ public class DashboardService {
 					ProductCandidateStatus.CANDIDATE, ProductReviewStatus.PENDING));
 			response.setApprovedCount(productRepository.countByReviewStatus(ProductReviewStatus.APPROVED));
 			response.setRejectedCount(productRepository.countByReviewStatus(ProductReviewStatus.REJECTED));
-			response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatus(
-					ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING));
 		} else {
 			Long userId = user.getId();
 			response.setScope(DashboardStatisticsResponse.SCOPE_PERSONAL);
@@ -126,8 +122,6 @@ public class DashboardService {
 					ProductReviewStatus.APPROVED, userId));
 			response.setRejectedCount(productRepository.countByReviewStatusAndCreatedBy(
 					ProductReviewStatus.REJECTED, userId));
-			response.setAiSuggestedPendingCount(productRepository.countByCandidateStatusAndReviewStatusAndCreatedBy(
-					ProductCandidateStatus.AI_SUGGESTED, ProductReviewStatus.PENDING, userId));
 		}
 		return response;
 	}
@@ -168,6 +162,8 @@ public class DashboardService {
 		// 2026-09-28：Google 趨勢參考，同樣一次批次查出
 		Map<Long, com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse> googleTrendById = googleTrendService
 				.latestByProductIds(productIds);
+		// 2026-09-29：「連續上升」標記（原熱度規則選品的連續 3 次上升條件，改為唯讀提醒）
+		Map<Long, RecentTrendService.RecentTrend> recentById = recentTrendService.byProductIds(productIds);
 
 		List<DashboardTrendLeaderboardItem> result = new ArrayList<>();
 		for (TrendSignal signal : signals) {
@@ -185,6 +181,8 @@ public class DashboardService {
 			item.setSource(signal.getSource());
 			item.setKeyword(signal.getKeyword());
 			item.setGoogleTrend(googleTrendById.get(product.getId()));
+			RecentTrendService.RecentTrend recent = recentById.get(product.getId());
+			item.setConsecutiveRise(recent != null && recent.consecutiveRise());
 			result.add(item);
 		}
 		return result;
@@ -324,10 +322,8 @@ public class DashboardService {
 		String scope;
 		if (user.getRole() == UserRole.MANAGER) {
 			scope = DashboardConversionRateResponse.SCOPE_COMPANY;
-			// 2026-09-24：管理層口徑剔除 AI 建議（candidateStatus=AI_SUGGESTED）的商品——那些商品已從
-			// 正式候選移出、尚未經人工轉正，不在待審流程內（同 getStatistics() 的 pendingCount 口徑）。
-			// 分子也限定 CANDIDATE：AI 建議只會標記 PENDING 商品，正常情況下已核准商品不會是 AI_SUGGESTED，
-			// 但分子分母用同一個候選條件，才保證分子一定是分母的子集合。
+			// 分子分母都限定 CANDIDATE，保證分子一定是分母的子集合。2026-09-29 移除熱度建議（AI_SUGGESTED）後
+			// 正常資料全部是 CANDIDATE，原本「管理層口徑剔除 AI 建議」的差異已不存在，條件保留作防禦。
 			approvedCount = productRepository.countByCandidateStatusAndReviewStatus(ProductCandidateStatus.CANDIDATE,
 					ProductReviewStatus.APPROVED);
 			submittedCount = productRepository.countBySubmissionCountGreaterThanAndCandidateStatus(0,

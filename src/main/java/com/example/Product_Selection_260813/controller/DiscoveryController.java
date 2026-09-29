@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.example.Product_Selection_260813.common.ApiResponse;
 import com.example.Product_Selection_260813.dto.request.DiscoveredItemDismissRequest;
 import com.example.Product_Selection_260813.dto.response.DiscoveredItemResponse;
+import com.example.Product_Selection_260813.dto.response.DiscoveryRunResponse;
 import com.example.Product_Selection_260813.dto.response.DiscoveryStatusResponse;
 import com.example.Product_Selection_260813.enums.DiscoveredItemStatus;
 import com.example.Product_Selection_260813.service.discovery.DiscoveredItemService;
@@ -79,6 +80,15 @@ public class DiscoveryController {
 	@GetMapping("/api/settings/discovery")
 	public ResponseEntity<ApiResponse<DiscoveryStatusResponse>> getStatus() {
 		return ResponseEntity.ok(ApiResponse.success("查詢成功", discoveryRunService.getStatus()));
+	}
+
+	/** 執行紀錄分頁（2026-09-29）：GET /api/settings/discovery/runs?page=0&size=10，新到舊。 */
+	@PreAuthorize("hasRole('MANAGER')")
+	@GetMapping("/api/settings/discovery/runs")
+	public ResponseEntity<ApiResponse<Page<DiscoveryRunResponse>>> getRuns(
+			@RequestParam(value = "page", defaultValue = "0") int page,
+			@RequestParam(value = "size", defaultValue = "10") int size) {
+		return ResponseEntity.ok(ApiResponse.success("查詢成功", discoveryRunService.getRuns(page, size)));
 	}
 
 	/** 立即執行一次探索（背景執行，立即回 202；畫面輪詢 GET 看狀態）。無法執行時回 409。 */

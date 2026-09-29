@@ -363,14 +363,10 @@ public class ReviewService {
 		if (product.getReviewStatus() != ProductReviewStatus.PENDING) {
 			throw new IllegalStateException("僅未審核商品可提交審核結果");
 		}
-		// 2026-09-16修正：補上候選狀態檢查，堵住「AI建議商品未經人工轉正候選
-		// 就被直接審核」的漏洞（見 getPendingReviews() 的修正說明）。理論上
-		// 待審清單查詢已經排除了AI_SUGGESTED，這裡不該有機會走到，但
-		// submitReview() 是獨立的公開API（POST /api/reviews），前端傳的
-		// productId不保證一定來自待審清單畫面，這裡的檢查是真正的防線，
-		// 不能只靠上游清單過濾就假設安全。
+		// 2026-09-16修正：候選狀態檢查。2026-09-29 移除熱度建議（AI_SUGGESTED）後正常資料一律是 CANDIDATE
+		// （V36 已轉換舊資料），保留作防禦：submitReview() 是獨立的公開 API，productId 不保證來自待審清單。
 		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
-			throw new IllegalStateException("熱度建議商品須先加入正式候選才能送審核決策");
+			throw new IllegalStateException("非正式候選的商品不可送審核決策");
 		}
 
 		validateRejectionReason(request);

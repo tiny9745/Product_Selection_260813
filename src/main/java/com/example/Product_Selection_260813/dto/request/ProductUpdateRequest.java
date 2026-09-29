@@ -42,7 +42,7 @@ import jakarta.validation.constraints.Size;
  *
  * review_status／candidate_status／pricing_status／item_status／submission_count
  * 這五個狀態欄位刻意不開放由這支DTO傳入：狀態轉換一律透過對應的專屬端點
- * （resubmit／archive／restore／promote-to-candidate）處理，PUT只負責「資料」，
+ * （resubmit／archive／restore）處理，PUT只負責「資料」，
  * 不負責「狀態機」，混在一起會讓同一個欄位有兩條互相打架的修改路徑。
  */
 public class ProductUpdateRequest {

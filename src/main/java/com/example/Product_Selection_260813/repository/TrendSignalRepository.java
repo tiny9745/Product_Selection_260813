@@ -17,15 +17,27 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
     // 取得該商品最新一筆趨勢資料（顯示「最後同步時間」用）
     Optional<TrendSignal> findFirstByProductIdOrderByCollectedAtDesc(Long productId);
 
-    // AI主動選品批次規則（規格書七）：取得所有曾經有趨勢資料的商品ID，
-    // 作為批次要逐一檢查的範圍。
-    @Query("SELECT DISTINCT t.productId FROM TrendSignal t")
-    List<Long> findDistinctProductIds();
-
-    // AI主動選品批次規則：取得單一商品最近3筆趨勢資料（依日期新到舊），
-    // 用於「連續3天呈上升趨勢」判斷。若該商品記錄不足3筆，回傳的List會小於3筆，
-    // 由呼叫端（AiSuggestionBatchService）自行判斷筆數不足時此條件不成立。
-    List<TrendSignal> findTop3ByProductIdOrderByCollectedAtDesc(Long productId);
+    /**
+     * 2026-09-29：一次取出多個商品「各自最近 N 筆」趨勢資料（品項管理清單、熱度排行榜的「連續上升」標記用，
+     * 見 RecentTrendService）。
+     *
+     * 取代原本熱度規則選品批次逐商品呼叫的 findTop3ByProductIdOrderByCollectedAtDesc()——清單一頁 20 筆
+     * 若逐筆查就是 N+1。每組取前 N 筆是 greatest-n-per-group，用 MySQL 8 的 ROW_NUMBER() 視窗函數；
+     * 外層只選 trend_signals 本身的欄位，讓 Hibernate 能直接對應成 TrendSignal。
+     * 結果依 product_id、collected_at 新到舊排序；同一時間戳以 id 大者為新。
+     * productIds 不可為空集合（IN () 是 SQL 語法錯誤），由呼叫端先判斷。
+     */
+    @Query(value = """
+            SELECT ts.* FROM trend_signals ts
+              JOIN (SELECT id,
+                           ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY collected_at DESC, id DESC) AS rn
+                      FROM trend_signals
+                     WHERE product_id IN (:productIds)) ranked ON ranked.id = ts.id
+             WHERE ranked.rn <= :perProduct
+             ORDER BY ts.product_id, ts.collected_at DESC, ts.id DESC
+            """, nativeQuery = true)
+    List<TrendSignal> findRecentByProductIds(@Param("productIds") java.util.Collection<Long> productIds,
+            @Param("perProduct") int perProduct);
 
     /**
      * ⚠️ 2026-09-25 新增：儀表板「熱度排行榜」用。

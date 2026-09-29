@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
  * PTT 網頁版（www.ptt.cc）搜尋結果頁的 CSS selector 與網址格式，集中在這裡。
  *
  * PTT 版面偶爾會調整，selector 一旦失效，爬蟲不會報錯，只會「每個看板都抓到
- * 0 篇」——分數全部掉到 0，AI 主動選品悄悄停擺。所以刻意不把 selector 寫死在
+ * 0 篇」——分數全部掉到 0，熱度排行與評分悄悄失準。所以刻意不把 selector 寫死在
  * PttSearchPageParser 的邏輯裡：版面改了只需要改這個檔案，再跑
  * PttSearchPageParserTest（用真實頁面結構做成的 HTML 樣本）確認即可。
  *

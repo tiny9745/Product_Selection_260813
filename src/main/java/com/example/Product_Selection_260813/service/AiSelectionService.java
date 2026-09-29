@@ -18,9 +18,8 @@ import com.example.Product_Selection_260813.repository.ProductRepository;
  * 以及AiSelectionController掛的兩支端點（GET /api/products/{id}/ai-analysis、
  * POST /api/products/{id}/ai-analysis/generate）。
  *
- * <b>不包含</b>「AI主動選品」批次生成邏輯（POST /api/products/ai-suggested/batch-generate，
- * 由獨立的{@link AiSuggestionBatchService}負責，屬於三、品項管理範圍，
- * 僅供Daily Cron排程觸發，非本Controller/Service職責）。
+ * （原「AI主動選品」批次 POST /api/products/ai-suggested/batch-generate 已於 2026-09-29 移除，
+ * 系統主動找新品改由 PTT 新品探索 service/discovery 負責。）
  *
  * <b>LLM串接現況（2026-08-28更新，取代已過時的TODO註解）：</b>
  * generateAndReturnResponse()透過{@link LlmAnalysisService}介面取得分析結果，

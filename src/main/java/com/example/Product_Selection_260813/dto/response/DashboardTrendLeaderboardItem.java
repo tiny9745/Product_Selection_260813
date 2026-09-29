@@ -28,6 +28,19 @@ public class DashboardTrendLeaderboardItem {
 	 * 不參與排序——Google 的 0～100 是相對值，不同商品之間不可比。
 	 */
 	private GoogleTrendSignalResponse googleTrend;
+	/**
+	 * 2026-09-29：最近 3 次同步都上升（見 RecentTrendService）。原熱度規則選品的條件之一，
+	 * 改成唯讀提醒標記，不改變商品狀態、不參與排序。
+	 */
+	private boolean consecutiveRise;
+
+	public boolean isConsecutiveRise() {
+		return consecutiveRise;
+	}
+
+	public void setConsecutiveRise(boolean consecutiveRise) {
+		this.consecutiveRise = consecutiveRise;
+	}
 
 	public GoogleTrendSignalResponse getGoogleTrend() {
 		return googleTrend;

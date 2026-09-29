@@ -170,19 +170,6 @@ public class ProductController {
 	static final String EXPORT_COUNT_HEADER = "X-Export-Count";
 
 	/**
-	 * GET /api/products/ai-suggested：AI建議清單（candidate_status=AI_SUGGESTED）。
-	 */
-	@GetMapping("/ai-suggested")
-	public ResponseEntity<ApiResponse<Page<ProductResponse>>> searchAiSuggested(
-			// 2026-09-29：同 GET /api/products 的 createdByMe，儀表板「AI 建議待確認」個人口徑卡片連過來用。
-			@RequestParam(value = "createdByMe", required = false) Boolean createdByMe,
-			@AuthenticationPrincipal String username,
-			@PageableDefault(size = 20) Pageable pageable) {
-		Page<ProductResponse> result = productService.searchAiSuggested(createdByMe, username, pageable);
-		return ResponseEntity.ok(ApiResponse.success("查詢成功", result));
-	}
-
-	/**
 	 * GET /api/products/{id}：商品核心資料。
 	 * 評估／趨勢／AI／風險等聚合資訊由前端另外呼叫ScoringController／TrendController／
 	 * AiSelectionController取得（見十二-13分層決議），此端點不在Controller層做跨Service組裝，
@@ -365,16 +352,6 @@ public class ProductController {
 	public ResponseEntity<ApiResponse<ProductResponse>> restore(@PathVariable("id") Long id) {
 		ProductResponse result = productService.restore(id);
 		return ResponseEntity.ok(ApiResponse.success("已復用", result));
-	}
-
-	/**
-	 * POST /api/products/{id}/promote-to-candidate：AI_SUGGESTED -&gt; CANDIDATE。
-	 */
-	@PreAuthorize("hasRole('PURCHASER')")
-	@PostMapping("/{id}/promote-to-candidate")
-	public ResponseEntity<ApiResponse<ProductResponse>> promoteToCandidate(@PathVariable("id") Long id) {
-		ProductResponse result = productService.promoteToCandidate(id);
-		return ResponseEntity.ok(ApiResponse.success("已加入候選", result));
 	}
 
 	/**

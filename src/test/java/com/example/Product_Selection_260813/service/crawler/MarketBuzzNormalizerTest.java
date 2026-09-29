@@ -13,7 +13,7 @@ import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 /**
  * 把 MarketBuzzNormalizer 的校準結果釘死。數值取自 2026-09-24 PTT 實測（見該類別註解），
  * 之後若調整公式或預設錨點，這裡的分數落點會先壞，提醒一併檢查
- * AiSuggestionBatchService 的 &gt;70 門檻是否還合理。
+ * 熱度排行與評分因子的分數分佈是否還合理。
  */
 class MarketBuzzNormalizerTest {
 

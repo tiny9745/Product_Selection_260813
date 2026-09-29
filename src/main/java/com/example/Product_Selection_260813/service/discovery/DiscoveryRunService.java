@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -15,9 +16,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Page;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.example.Product_Selection_260813.common.RunHistoryPaging;
 import com.example.Product_Selection_260813.dto.response.DiscoveryRunResponse;
 import com.example.Product_Selection_260813.dto.response.DiscoveryStatusResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
@@ -34,7 +37,7 @@ import jakarta.annotation.PreDestroy;
  * PTT 新品探索的排程、手動觸發與執行紀錄（比照 TrendSyncRunService 的寫法）。
  * 處理流程本身在 {@link DiscoveryService}。
  *
- * <b>排程時間 01:30：</b>排在 02:00 熱度同步、03:00 熱度規則選品之前。三者互不依賴，
+ * <b>排程時間 01:30：</b>排在 02:00 熱度同步之前。兩者互不依賴，
  * 但都會打 PTT；錯開時間讓每一段的請求量與耗時都容易觀察。PttClient 本身 synchronized，
  * 即使重疊也不會加倍請求速度。
  *
@@ -143,9 +146,7 @@ public class DiscoveryRunService {
 
 	public DiscoveryStatusResponse getStatus() {
 		List<DiscoveryRun> runs = discoveryRunRepository.findTop10ByOrderByStartedAtDesc();
-		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
-				.map(DiscoveryRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
-				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
+		Function<DiscoveryRun, DiscoveryRunResponse> toResponse = toRunResponse(runs);
 		int[] quota = groqDiscoveryClient.quotaUsage();
 		return new DiscoveryStatusResponse(
 				trendCrawlerSettings.isPttEnabled(),
@@ -154,8 +155,23 @@ public class DiscoveryRunService {
 				SCHEDULE_DESCRIPTION,
 				quota[0],
 				quota[1],
-				runs.stream().map(run -> DiscoveryRunResponse.from(run,
-						run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()))).toList());
+				runs.stream().map(toResponse).toList());
+	}
+
+	/** GET /api/settings/discovery/runs：執行紀錄分頁（2026-09-29，每頁預設 10 筆）。 */
+	public Page<DiscoveryRunResponse> getRuns(int page, int size) {
+		Page<DiscoveryRun> runs = discoveryRunRepository
+				.findAllByOrderByStartedAtDescIdDesc(RunHistoryPaging.of(page, size));
+		return runs.map(toRunResponse(runs.getContent()));
+	}
+
+	/** 一次批次查出觸發者姓名（避免逐筆查詢），回傳轉換函式。 */
+	private Function<DiscoveryRun, DiscoveryRunResponse> toRunResponse(List<DiscoveryRun> runs) {
+		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
+				.map(DiscoveryRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
+				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
+		return run -> DiscoveryRunResponse.from(run,
+				run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()));
 	}
 
 	/** running 旗標必須已由呼叫端設為 true；結束時一定會放掉。 */

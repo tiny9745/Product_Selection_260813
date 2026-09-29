@@ -26,7 +26,7 @@ import jakarta.validation.constraints.Size;
  *
  * 對應企劃書「新增品項」：操作人員手動建立即代表已確認要送審，Service層會直接 帶入
  * review_status=PENDING／item_status=ACTIVE／candidate_status=CANDIDATE，
- * 這三個狀態欄位不開放由這支DTO傳入（見QA4：手動新增不是AI_SUGGESTED，
+ * 這三個狀態欄位不開放由這支DTO傳入（見QA4：手動新增一律是 CANDIDATE，
  * 語意上這三個狀態欄位在「新增」當下本來就沒有選擇空間，不屬於Request的職責）。
  *
  * pricing_status不在這支DTO：pricing_type=NEW時Service層固定帶入PENDING_PRICING，

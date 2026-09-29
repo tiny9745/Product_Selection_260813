@@ -17,9 +17,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Page;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.example.Product_Selection_260813.common.RunHistoryPaging;
 import com.example.Product_Selection_260813.dto.response.TrendCrawlerStatusResponse;
 import com.example.Product_Selection_260813.dto.response.TrendSyncRunResponse;
 import com.example.Product_Selection_260813.entity.AppUser;
@@ -51,10 +53,10 @@ public class TrendSyncRunService {
 
 	private static final Logger log = LoggerFactory.getLogger(TrendSyncRunService.class);
 
-	/** 超過這個時間會壓到 03:00 的 AI 建議批次（見 scheduledRun() 說明）。 */
+	/** 每日同步耗時超過這個時間就記警告（見 scheduledRun() 說明）。 */
 	private static final Duration SCHEDULE_WARNING_DURATION = Duration.ofMinutes(50);
 
-	public static final String SCHEDULE_DESCRIPTION = "每天 02:00（早於 03:00 熱度規則選品）";
+	public static final String SCHEDULE_DESCRIPTION = "每天 02:00";
 
 	@Autowired
 	private TrendService trendService;
@@ -105,10 +107,9 @@ public class TrendSyncRunService {
 	/**
 	 * 每天 02:00 同步所有未封存商品的 PTT 熱度。
 	 *
-	 * ⚠️ 排程順序不可調換：02:00 本排程 → 03:00 AiSuggestionBatchService →
-	 * 05:00 WeatherCampaignSyncService。AI 建議批次讀的是 trend_signals 最新資料，
-	 * 本排程若晚於 03:00，AI 建議永遠看到前一天的討論量，而且不會有任何錯誤提示。
-	 * 每個商品約 8 秒，若總耗時接近 1 小時會壓到 03:00，屆時需要減少看板數或請求間隔。
+	 * 排程順序：01:30 PTT 新品探索 → 02:00 本排程 → 週一 04:00 Google 趨勢批次（依當天熱度挑前 N 名）
+	 * → 05:00 天氣同步。2026-09-29 移除 03:00 熱度規則選品批次後，本排程不再有緊接在後、讀同一份資料的批次；
+	 * 每個商品約 8 秒，總耗時超過 50 分鐘仍記警告，代表看板數或請求間隔需要調整。
 	 */
 	@Scheduled(cron = "0 0 2 * * *")
 	public void scheduledRun() {
@@ -155,14 +156,13 @@ public class TrendSyncRunService {
 		return getStatus();
 	}
 
-	/** 系統設定畫面：開關狀態、是否執行中與進度、最近 10 次執行紀錄。 */
+	/**
+	 * 系統設定畫面：開關狀態、是否執行中與進度、最近 10 次執行紀錄。
+	 * recentRuns 保留給輪詢與第 1 頁使用；更早的紀錄走 {@link #getRuns(int, int)} 分頁。
+	 */
 	public TrendCrawlerStatusResponse getStatus() {
 		List<TrendSyncRun> runs = trendSyncRunRepository.findTop10ByOrderByStartedAtDesc();
-		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
-				.map(TrendSyncRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
-				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
-		Function<TrendSyncRun, TrendSyncRunResponse> toResponse = run -> TrendSyncRunResponse.from(run,
-				run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()));
+		Function<TrendSyncRun, TrendSyncRunResponse> toResponse = toRunResponse(runs);
 
 		SyncAllResult current = running.get() ? progress.get() : null;
 		return new TrendCrawlerStatusResponse(
@@ -172,6 +172,22 @@ public class TrendSyncRunService {
 				current == null ? null : current.total(),
 				SCHEDULE_DESCRIPTION,
 				runs.stream().map(toResponse).toList());
+	}
+
+	/** GET /api/settings/trend-crawler/runs：執行紀錄分頁（2026-09-29，每頁預設 10 筆）。 */
+	public Page<TrendSyncRunResponse> getRuns(int page, int size) {
+		Page<TrendSyncRun> runs = trendSyncRunRepository
+				.findAllByOrderByStartedAtDescIdDesc(RunHistoryPaging.of(page, size));
+		return runs.map(toRunResponse(runs.getContent()));
+	}
+
+	/** 一次批次查出觸發者姓名（避免逐筆查詢），回傳轉換函式。 */
+	private Function<TrendSyncRun, TrendSyncRunResponse> toRunResponse(List<TrendSyncRun> runs) {
+		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
+				.map(TrendSyncRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
+				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
+		return run -> TrendSyncRunResponse.from(run,
+				run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()));
 	}
 
 	public TrendCrawlerStatusResponse setEnabled(boolean enabled, String username) {
@@ -227,7 +243,7 @@ public class TrendSyncRunService {
 				run.getStatus(), run.getRealCount(), run.getFallbackCount(), run.getFailedCount(),
 				elapsed.toSeconds());
 		if (run.getTriggerType() == TrendSyncTrigger.SCHEDULED && elapsed.compareTo(SCHEDULE_WARNING_DURATION) > 0) {
-			log.warn("每日 PTT 熱度同步耗時超過 50 分鐘，可能壓到 03:00 的熱度規則選品批次，請減少看板數或請求間隔");
+			log.warn("每日 PTT 熱度同步耗時超過 50 分鐘，請減少看板數或請求間隔（週一 04:00 Google 趨勢批次需要當天的熱度）");
 		}
 	}
 

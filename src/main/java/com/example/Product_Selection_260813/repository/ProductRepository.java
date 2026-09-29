@@ -106,21 +106,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     long countWithoutSubmissionBatch();
 
     /**
-     * AI建議清單（GET /api/products/ai-suggested）：
-     * candidate_status=AI_SUGGESTED的商品，操作人員可「加入候選」轉為CANDIDATE。
-     */
-    Page<Product> findByCandidateStatus(ProductCandidateStatus candidateStatus, Pageable pageable);
-
-    /**
      * PTT 新品探索（2026-09-29）比對「是不是既有商品」用：只取名稱，不載入整個 Product。
      * 包含所有狀態（含已封存、已拒絕）——曾經評估過的商品也不該再被當成新品推薦。
      */
     @Query("SELECT p.name FROM Product p")
     List<String> findAllNames();
-
-    /** 同上，只列 createdBy = 指定使用者（2026-09-29，AI 建議清單「只看我建立的」）。 */
-    Page<Product> findByCandidateStatusAndCreatedBy(ProductCandidateStatus candidateStatus, Long createdBy,
-            Pageable pageable);
 
     /**
      * 選品審核待審清單（GET /api/reviews/pending）：預設「未審核＋使用中」。
@@ -128,10 +118,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * ⚠️ 2026-09-16修正（原設計漏洞）：這支原本沒有candidateStatus條件，
      * 只要review_status=PENDING、item_status=ACTIVE就會出現在待審清單，
      * 即使該商品candidate_status還是AI_SUGGESTED（尚未經人工「加入候選」
-     * 轉正）。實際後果：管理者可以直接審核一筆從未被轉正候選的AI建議商品，
-     * 跳過「AI建議→人工轉正候選→人工審核」中間那一步，這與AiSuggestions
-     * 頁面文件明確寫的規則矛盾（「只有人工轉為CANDIDATE後才可進入...審核；
-     * AI不會自行核准商品」）。改用下面這支多一個candidateStatus條件的版本，
+     * 轉正）。改用下面這支多一個candidateStatus條件的版本（2026-09-29 熱度建議移除後，
+     * 正常資料一律是 CANDIDATE，這個條件保留作防禦），
      * 舊的findByReviewStatusAndItemStatus()保留給其他仍需要「不分候選狀態」
      * 語意的呼叫端（目前沒有其他呼叫端，保留是避免不必要的連鎖修改）。
      */
@@ -219,13 +207,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             ProductCandidateStatus candidateStatus, ProductReviewStatus reviewStatus, Long createdBy);
 
     /**
-     * Dashboard「待人工審核」／「AI建議待確認」統計（GET /api/dashboard/statistics）
+     * Dashboard「待人工審核」統計（GET /api/dashboard/statistics）與轉換率
      * 共用的衍生查詢：candidate_status=X 且 review_status=Y 的商品數。
-     *
-     * 2026-09-16修正：DashboardService.getStatistics() 現在用這支方法算
-     * pendingCount（candidateStatus=CANDIDATE）跟aiSuggestedPendingCount
-     * （candidateStatus=AI_SUGGESTED）——兩者互斥，不再是子集關係，
-     * AI建議尚未轉正候選的商品不會被算進「待人工審核」。
+     * （2026-09-29：「AI建議待確認」統計隨熱度建議清單移除。）
      */
     long countByCandidateStatusAndReviewStatus(
             ProductCandidateStatus candidateStatus, ProductReviewStatus reviewStatus);

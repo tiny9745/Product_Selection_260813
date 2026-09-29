@@ -71,8 +71,6 @@ import com.example.Product_Selection_260813.service.gate.GateResult;
  * TrendService／AiSelectionService的職責，見企劃書十二-13分層決議）：
  *
  * GET    /api/products                            -&gt; searchProducts()<br>
- * GET    /api/products/ai-suggested               -&gt; searchAiSuggested()<br>
- * POST   /api/products/{id}/promote-to-candidate  -&gt; promoteToCandidate()<br>
  * GET    /api/products/{id}                       -&gt; getProduct()<br>
  * POST   /api/products                            -&gt; createProduct()<br>
  * POST   /api/products/batch                      -&gt; createProductsBatch()<br>
@@ -82,8 +80,8 @@ import com.example.Product_Selection_260813.service.gate.GateResult;
  * POST   /api/products/{id}/archive               -&gt; archive()<br>
  * POST   /api/products/{id}/restore               -&gt; restore()
  *
- * （POST /api/products/ai-suggested/batch-generate屬於系統排程專用，<br>
- * 由 AiSelectionService負責寫入AI_SUGGESTED商品，不在ProductService範圍內。）
+ * （2026-09-29：熱度建議清單 GET /api/products/ai-suggested、加入候選 POST /api/products/{id}/promote-to-candidate
+ * 與熱度規則選品批次一併移除，商品只有 CANDIDATE 一種候選狀態，見 RecentTrendService 說明。）
  *
  * 例外處理沿用專案既有GlobalExceptionHandler慣例，不新增例外類別： - 資源不存在（商品／商品類型查無資料） -&gt;
  * IllegalArgumentException（400） - 目前狀態不允許此操作（狀態機不合法轉換、審核通過後改核心資料）-&gt;
@@ -130,10 +128,10 @@ public class ProductService {
 	private TrendSignalRepository trendSignalRepository;
 
 	@Autowired
-	private com.example.Product_Selection_260813.repository.GoogleTrendSignalRepository googleTrendSignalRepository;
+	private RecentTrendService recentTrendService;
 
 	@Autowired
-	private GoogleTrendService googleTrendService;
+	private com.example.Product_Selection_260813.repository.GoogleTrendSignalRepository googleTrendSignalRepository;
 
 	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
@@ -243,6 +241,9 @@ public class ProductService {
 		// 同理批次查一次評估結果；該商品若尚無評估紀錄，evaluation 為 null，
 		// withEvaluationSummary 兩個參數一起傳 null，畫面顯示「—」而非 0。
 		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
+		// 2026-09-29：最新熱度與「連續上升」標記（取代已移除的熱度建議清單），同樣一次批次查詢
+		Map<Long, RecentTrendService.RecentTrend> trendById = recentTrendService
+				.byProductIds(page.getContent().stream().map(Product::getId).toList());
 		return page.map(product -> {
 			ProductEvaluation evaluation = evaluationById.get(product.getId());
 			return ProductResponse.from(product)
@@ -252,7 +253,8 @@ public class ProductService {
 							product.getSubmittedBy() == null ? null : createdByNameById.get(product.getSubmittedBy()))
 					.withEvaluationSummary(
 							evaluation != null ? evaluation.getFinalScore() : null,
-							evaluation != null ? evaluation.getDataCompleteness() : null);
+							evaluation != null ? evaluation.getDataCompleteness() : null)
+					.withRecentTrend(trendById.get(product.getId()));
 		});
 	}
 
@@ -354,108 +356,6 @@ public class ProductService {
 		return java.time.LocalDate.parse(value.toString().substring(0, 10));
 	}
 
-	/**
-	 * GET /api/products/ai-suggested：AI建議清單（candidate_status=AI_SUGGESTED）。
-	 */
-	@Transactional(readOnly = true)
-	public Page<ProductResponse> searchAiSuggested(Boolean createdByMe, String username, Pageable pageable) {
-		// 2026-09-29：createdByMe＝TRUE 時只列登入者建立的商品（與 GET /api/products 同語意）。
-		Page<Product> page = Boolean.TRUE.equals(createdByMe)
-				? productRepository.findByCandidateStatusAndCreatedBy(ProductCandidateStatus.AI_SUGGESTED,
-						resolveUserId(username), pageable)
-				: productRepository.findByCandidateStatus(ProductCandidateStatus.AI_SUGGESTED, pageable);
-		Map<Long, String> createdByNameById = resolveCreatedByNames(page.getContent());
-		Map<Long, ProductEvaluation> evaluationById = resolveEvaluations(page.getContent());
-		// 2026-09-28：Google 趨勢參考一次批次帶出，不逐筆查詢
-		Map<Long, com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse> googleTrendById = googleTrendService
-				.latestByProductIds(page.getContent().stream().map(Product::getId).toList());
-		return page.map(product -> {
-			ProductEvaluation evaluation = evaluationById.get(product.getId());
-			ProductResponse dto = ProductResponse.from(product)
-					.withCreatedByName(
-							product.getCreatedBy() == null ? null : createdByNameById.get(product.getCreatedBy()))
-					.withEvaluationSummary(
-							evaluation != null ? evaluation.getFinalScore() : null,
-							evaluation != null ? evaluation.getDataCompleteness() : null);
-			applySuggestionInfo(dto, product.getId());
-			dto.setGoogleTrend(googleTrendById.get(product.getId()));
-			return dto;
-		});
-	}
-
-	/**
-	 * 用跟 AiSuggestionBatchService.shouldSuggest() 完全一樣的兩個判定條件
-	 * （門檻值、天數都刻意保持一致，避免兩處各自維護一份、日後改了一邊
-	 * 忘記改另一邊），重新算一次「為什麼」，同時組成人看得懂的文字說明，
-	 * 以及給前端畫面直接顯示用的結構化趨勢數字（trendScore／trendDirection）。
-	 *
-	 * 原本這裡只組文字（buildSuggestionReason），數字沒有回傳過，前端
-	 * 「AI建議清單」畫面的趨勢欄位因此永遠是空的。這裡改成同一次查詢
-	 * （只查一次 recentSignals，不重複查兩次資料庫）同時填入 dto 的三個
-	 * 欄位，維持「不在批次當下存理由，查詢時重算」的原則不變。
-	 *
-	 * 不在批次當下把這句話存起來的原因：判定條件是固定、可重現的計算，
-	 * 每次查詢重算一次的成本很低，不需要為了省這點計算就多維護一個欄位、
-	 * 多一種「資料庫存的理由」跟「批次邏輯」不同步的風險。
-	 */
-	private static final java.math.BigDecimal AI_SUGGEST_POPULARITY_THRESHOLD = java.math.BigDecimal.valueOf(70);
-	private static final int AI_SUGGEST_CONSECUTIVE_UP_DAYS = 3;
-
-	private void applySuggestionInfo(ProductResponse dto, Long productId) {
-		List<com.example.Product_Selection_260813.entity.TrendSignal> recentSignals = trendSignalRepository
-				.findTop3ByProductIdOrderByCollectedAtDesc(productId);
-		if (recentSignals.isEmpty()) {
-			dto.setSuggestionReason(null);
-			return;
-		}
-
-		com.example.Product_Selection_260813.entity.TrendSignal latest = recentSignals.get(0);
-		// 不管符不符合建議門檻，只要有最新一筆資料就回傳結構化數字給畫面顯示；
-		// 「為什麼被建議」的文字說明才需要判斷門檻，兩者分開處理。
-		dto.setTrendScore(latest.getPopularityScore());
-		dto.setTrendDirection(latest.getTrendDirection());
-		// 2026-09-28：趨勢說明用——來源與最近 3 筆方向（同一次查詢的結果，不另外查）
-		dto.setTrendSource(latest.getSource());
-		dto.setRecentTrendDirections(recentSignals.stream()
-				.map(com.example.Product_Selection_260813.entity.TrendSignal::getTrendDirection).toList());
-
-		if (latest.getPopularityScore() != null
-				&& latest.getPopularityScore().compareTo(AI_SUGGEST_POPULARITY_THRESHOLD) > 0) {
-			dto.setSuggestionReason(String.format("最新熱度分數 %s 分%s，超過 %s 分門檻。",
-					latest.getPopularityScore().toPlainString(), describeTrendSource(latest.getSource()),
-					AI_SUGGEST_POPULARITY_THRESHOLD.toPlainString()));
-			return;
-		}
-
-		if (recentSignals.size() >= AI_SUGGEST_CONSECUTIVE_UP_DAYS
-				&& recentSignals.stream()
-						.limit(AI_SUGGEST_CONSECUTIVE_UP_DAYS)
-						.allMatch(signal -> signal.getTrendDirection() == com.example.Product_Selection_260813.enums.TrendSignalTrendDirection.UP)) {
-			dto.setSuggestionReason(String.format("連續 %d 天呈上升趨勢%s。", AI_SUGGEST_CONSECUTIVE_UP_DAYS,
-					describeTrendSource(latest.getSource())));
-			return;
-		}
-
-		// 理論上不會走到這裡——商品會被標記 AI_SUGGESTED，代表批次當下
-		// 一定符合上述兩個條件之一。如果真的發生（例如條件後來被人為
-		// 改過但商品狀態沒有重新計算過），誠實顯示「無法重建理由」，
-		// 不要編造一個看似合理但其實是猜的說法。
-		dto.setSuggestionReason("（依當時的判定條件標記為建議，目前重新計算對不上任何條件，可能是判定邏輯之後有調整過）");
-	}
-
-	/**
-	 * 建議原因後面標註資料來源：讓人看得出是依 PTT 真實討論量，還是 PTT 取不到時的
-	 * 模擬資料建議的——兩者可信度不同，不能混在同一句話裡看不出差別。
-	 */
-	private static String describeTrendSource(String source) {
-		if ("PTT".equals(source)) {
-			return "（PTT 討論量）";
-		}
-		if ("SIMULATED".equals(source)) {
-			return "（模擬資料，PTT 當時無法取得）";
-		}
-		return source == null ? "" : "（" + source + "）";
-	}
 
 	/**
 	 * GET /api/products/{id}：商品核心資料，含 Gate 判定結果。
@@ -774,21 +674,6 @@ public class ProductService {
 	// ========================= 狀態轉換 =========================
 
 	/**
-	 * POST /api/products/{id}/promote-to-candidate：AI_SUGGESTED -&gt; CANDIDATE。
-	 */
-	@Transactional
-	public ProductResponse promoteToCandidate(Long id) {
-		Product product = findProductOrThrow(id);
-
-		if (product.getCandidateStatus() != ProductCandidateStatus.AI_SUGGESTED) {
-			throw new IllegalStateException("僅熱度建議（尚未加入候選）的商品可執行此操作");
-		}
-
-		product.setCandidateStatus(ProductCandidateStatus.CANDIDATE);
-		return ProductResponse.from(productRepository.save(product));
-	}
-
-	/**
 	 * POST /api/products/{id}/resubmit：REJECTED -&gt; PENDING，submission_count+1。
 	 *
 	 * review_status的轉換沿用ProductRepository既有的conditionalUpdateReviewStatus()
@@ -811,12 +696,10 @@ public class ProductService {
 		if (product.getItemStatus() != ProductItemStatus.ACTIVE) {
 			throw new IllegalStateException("商品目前已封存，請先復用後再重新送審");
 		}
-		// 2026-09-16修正：與submitReview()的candidateStatus檢查對稱——避免
-		// 一筆candidateStatus仍是AI_SUGGESTED的商品（理論上不該存在，但
-		// 資料修復或未來其他路徑可能造成）被重新送審後，又回到待審清單
-		// 被再審一次，重複同一個漏洞。
+		// 2026-09-16修正：與submitReview()的candidateStatus檢查對稱。2026-09-29 移除熱度建議（AI_SUGGESTED）後
+		// 正常資料一律是 CANDIDATE（V36 已轉換舊資料），保留這道防禦性檢查，避免手動修資料造成的非正式候選被重新送審。
 		if (product.getCandidateStatus() != ProductCandidateStatus.CANDIDATE) {
-			throw new IllegalStateException("熱度建議商品須先加入正式候選才能重新送審");
+			throw new IllegalStateException("非正式候選的商品不可重新送審");
 		}
 
 		int updated = productRepository.conditionalUpdateReviewStatus(id, ProductReviewStatus.REJECTED,

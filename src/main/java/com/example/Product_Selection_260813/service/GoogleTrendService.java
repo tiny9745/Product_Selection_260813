@@ -17,9 +17,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.domain.Page;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.example.Product_Selection_260813.common.RunHistoryPaging;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendRunResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendSignalResponse;
 import com.example.Product_Selection_260813.dto.response.GoogleTrendStatusResponse;
@@ -48,7 +50,7 @@ import jakarta.annotation.PreDestroy;
  * Google 趨勢（第二資料源）：單一商品查詢、每週批次、執行紀錄與控制面板狀態。
  *
  * <b>定位：獨立參考資訊，不併入熱度分數。</b>結果寫在 google_trend_signals，不碰 trend_signals，
- * 所以熱度排行榜、AI 主動選品（熱度 &gt; 70 門檻）、評分與 Gemini prompt 完全不受影響，
+ * 所以熱度排行榜、評分與 Gemini prompt 完全不受影響，
  * 也不需要重新校準門檻。理由見 V30 migration 說明。
  *
  * <b>額度：</b>SerpApi 免費方案每月 250 次，「查無資料」也計費。所以：
@@ -66,7 +68,7 @@ public class GoogleTrendService {
 
 	private static final Logger log = LoggerFactory.getLogger(GoogleTrendService.class);
 
-	public static final String SCHEDULE_DESCRIPTION = "每週一 04:00（PTT 熱度同步 02:00、熱度規則選品 03:00 之後）";
+	public static final String SCHEDULE_DESCRIPTION = "每週一 04:00（PTT 熱度同步 02:00 之後）";
 
 	@Autowired
 	private ProductRepository productRepository;
@@ -169,7 +171,7 @@ public class GoogleTrendService {
 
 	/**
 	 * 每週一 04:00 查詢 PTT 熱度前 N 名。排在 02:00 PTT 同步之後（要用當天的熱度挑商品）、
-	 * 05:00 天氣同步之前；Google 趨勢不影響 03:00 AI 選品批次，所以先後無所謂。
+	 * 05:00 天氣同步之前。
 	 */
 	@Scheduled(cron = "0 0 4 * * MON")
 	public void scheduledRun() {
@@ -233,9 +235,7 @@ public class GoogleTrendService {
 
 	public GoogleTrendStatusResponse getStatus() {
 		List<GoogleTrendRun> runs = googleTrendRunRepository.findTop10ByOrderByStartedAtDesc();
-		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
-				.map(GoogleTrendRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
-				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
+		Function<GoogleTrendRun, GoogleTrendRunResponse> toResponse = toRunResponse(runs);
 		int[] current = running.get() ? progress.get() : null;
 		return new GoogleTrendStatusResponse(
 				googleTrendSettings.isEnabled(),
@@ -247,8 +247,23 @@ public class GoogleTrendService {
 				current == null ? null : current[1],
 				batchSize,
 				SCHEDULE_DESCRIPTION,
-				runs.stream().map(run -> GoogleTrendRunResponse.from(run,
-						run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()))).toList());
+				runs.stream().map(toResponse).toList());
+	}
+
+	/** GET /api/settings/google-trends/runs：執行紀錄分頁（2026-09-29，每頁預設 10 筆）。 */
+	public Page<GoogleTrendRunResponse> getRuns(int page, int size) {
+		Page<GoogleTrendRun> runs = googleTrendRunRepository
+				.findAllByOrderByStartedAtDescIdDesc(RunHistoryPaging.of(page, size));
+		return runs.map(toRunResponse(runs.getContent()));
+	}
+
+	/** 一次批次查出觸發者姓名（避免逐筆查詢），回傳轉換函式。 */
+	private Function<GoogleTrendRun, GoogleTrendRunResponse> toRunResponse(List<GoogleTrendRun> runs) {
+		Map<Long, String> userNames = appUserRepository.findAllById(runs.stream()
+				.map(GoogleTrendRun::getTriggeredBy).filter(Objects::nonNull).distinct().toList())
+				.stream().collect(Collectors.toMap(AppUser::getId, AppUser::getName, (a, b) -> a));
+		return run -> GoogleTrendRunResponse.from(run,
+				run.getTriggeredBy() == null ? null : userNames.get(run.getTriggeredBy()));
 	}
 
 	public GoogleTrendStatusResponse setEnabled(boolean enabled, String username) {
