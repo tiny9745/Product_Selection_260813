@@ -85,4 +85,7 @@ public interface ReviewRecordRepository extends JpaRepository<ReviewRecord, Long
     // APPROVED商品Final Score凍結快照讀取：核准後不會再重新送審，
     // 故該商品最新一筆審核紀錄即為凍結快照來源
     Optional<ReviewRecord> findFirstByProductIdOrderByReviewedAtDesc(Long productId);
+
+    /** 刪除商品前的防禦性檢查（ProductService.deleteProduct()）：審核快照不可被連帶刪除。 */
+    boolean existsByProductId(Long productId);
 }

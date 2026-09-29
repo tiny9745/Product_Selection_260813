@@ -215,8 +215,15 @@ public class TrendSyncRunService {
 				run.setStatus(TrendSyncRunStatus.FAILED);
 				run.setMessage(String.format("執行途中 PTT 來源被停用，已處理 %d / %d 個商品後停止",
 						result.processed(), result.total()));
+			} else if (result.total() > 0 && result.failedCount() == result.total()) {
+				// 2026-09-29：抓不到不再改用模擬資料，全部失敗時要讓管理者一眼看出來，不能顯示「已完成」
+				run.setStatus(TrendSyncRunStatus.FAILED);
+				run.setMessage("所有商品都無法取得 PTT 熱度（可能是 PTT 暫時無法連線），已保留各商品上一筆熱度資料");
 			} else {
 				run.setStatus(TrendSyncRunStatus.COMPLETED);
+				if (result.failedCount() > 0) {
+					run.setMessage(String.format("%d 個商品本次無法取得 PTT 熱度，已保留上一筆熱度資料", result.failedCount()));
+				}
 			}
 		} catch (RuntimeException e) {
 			log.error("PTT 熱度全商品同步中斷", e);

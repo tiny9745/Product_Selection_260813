@@ -9,7 +9,6 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -22,6 +21,7 @@ import com.example.Product_Selection_260813.repository.ProductRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.service.crawler.MarketBuzzProvider;
 import com.example.Product_Selection_260813.service.crawler.MarketBuzzSignal;
+import com.example.Product_Selection_260813.service.crawler.MarketBuzzUnavailableException;
 import com.example.Product_Selection_260813.service.crawler.StubMarketBuzzProvider;
 import com.example.Product_Selection_260813.service.crawler.TrendCrawlerSettings;
 
@@ -39,9 +39,13 @@ import com.example.Product_Selection_260813.service.crawler.TrendCrawlerSettings
  * <b>2026-09-24：模擬資料改為真實 PTT 討論量。</b>原本 generateSimulatedTrendSignal()
  * 的 Random 邏輯搬到 StubMarketBuzzProvider，本類別改透過 MarketBuzzProvider 介面
  * 取得資料（Spring 預設注入 @Primary 的 PttMarketBuzzProvider），架構比照
- * service/weather/。PTT 整體抓不到資料時退回模擬資料，同步流程不中斷；
- * source 欄位誠實標記實際來源（PTT／SIMULATED），兩者並存於 trend_signals，
- * 每次同步都是新增一筆，不覆寫舊資料。
+ * service/weather/。每次同步都是新增一筆，不覆寫舊資料。
+ *
+ * <b>2026-09-29：PTT 抓不到時不再改用模擬資料。</b>模擬資料是隨機漫步，會直接進入評分的熱度因子、
+ * 熱度排行與「連續上升」判定，破壞分數的可解釋性。現在改為：不寫入新資料、保留上一筆真實資料，
+ * 照常重算評分（熱度時效衰減以計算當下為準，舊資料會逐日收斂到中性分），再把失敗往外拋——
+ * 全商品同步計為「失敗」，單一商品手動同步回 502 並說明已保留上一筆資料。
+ * 既有的 SIMULATED 資料仍保留在 trend_signals（歷史紀錄，畫面照樣標示），但評分與連續上升判定會排除。
  *
  * <b>交易邊界：</b>爬 PTT 一個商品要數秒到數十秒（多個看板、每次請求間隔 1 秒），
  * 所以刻意不在 @Transactional 裡爬——先在交易外取得資料，拿到結果後才開交易
@@ -79,11 +83,6 @@ public class TrendService {
 	/** 預設為 @Primary 的 PttMarketBuzzProvider。 */
 	@Autowired
 	private MarketBuzzProvider marketBuzzProvider;
-
-	/** 主要來源抓不到資料時的備援。 */
-	@Autowired
-	@Qualifier("stubMarketBuzzProvider")
-	private MarketBuzzProvider fallbackMarketBuzzProvider;
 
 	@Autowired
 	private PlatformTransactionManager transactionManager;
@@ -135,7 +134,11 @@ public class TrendService {
 		return scoringService.buildTrendHistory(productId);
 	}
 
-	/** 全商品同步的統計結果；processed = 已處理（成功＋備援＋失敗）的商品數。 */
+	/**
+	 * 全商品同步的統計結果；processed = 已處理（成功＋模擬＋失敗）的商品數。
+	 * fallbackCount：來源是 SIMULATED 的筆數。2026-09-29 起只有開發時把 StubMarketBuzzProvider 設為 @Primary
+	 * 才會出現；PTT 抓不到改計入 failedCount。欄位保留，舊執行紀錄的數字仍有意義。
+	 */
 	public record SyncAllResult(int total, int realCount, int fallbackCount, int failedCount) {
 		public int processed() {
 			return realCount + fallbackCount + failedCount;
@@ -172,6 +175,11 @@ public class TrendService {
 				} else {
 					realCount++;
 				}
+			} catch (MarketBuzzUnavailableException e) {
+				// PTT 暫時抓不到是預期中會發生的情況（已保留上一筆資料），不印整段 stack trace
+				failedCount++;
+				log.warn("商品 {}（{}）本次無法取得 PTT 熱度，繼續下一個商品：{}", product.getId(), product.getName(),
+						e.getMessage());
 			} catch (RuntimeException e) {
 				failedCount++;
 				log.error("商品 {}（{}）熱度同步失敗，繼續下一個商品", product.getId(), product.getName(), e);
@@ -181,11 +189,24 @@ public class TrendService {
 		return new SyncAllResult(products.size(), realCount, fallbackCount, failedCount);
 	}
 
-	/** 取得熱度（交易外）→ 寫入 trend_signals 並重算評分（交易內）。 */
+	/**
+	 * 取得熱度（交易外）→ 寫入 trend_signals 並重算評分（交易內）。
+	 *
+	 * @throws MarketBuzzUnavailableException PTT 這次抓不到：不寫入任何資料（保留上一筆），評分照常重算後拋出
+	 */
 	private TrendSignal syncProduct(Product product) {
 		TrendSignal previous = trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(product.getId())
 				.orElse(null);
-		MarketBuzzSignal buzz = fetchWithFallback(toSearchKeyword(product.getName()), previous);
+		String keyword = toSearchKeyword(product.getName());
+		MarketBuzzSignal buzz;
+		try {
+			buzz = marketBuzzProvider.fetch(keyword, previous);
+		} catch (RuntimeException e) {
+			log.warn("取得「{}」市場熱度失敗，保留上一筆資料、不寫入模擬資料：{}", keyword, e.getMessage());
+			recalculateKeepingPrevious(product);
+			throw new MarketBuzzUnavailableException(
+					"暫時無法從 PTT 取得「" + keyword + "」的熱度，已保留上一筆熱度資料，請稍後再試", e);
+		}
 
 		TrendSignal signal = new TrendSignal();
 		signal.setProductId(product.getId());
@@ -203,12 +224,17 @@ public class TrendService {
 		});
 	}
 
-	private MarketBuzzSignal fetchWithFallback(String keyword, TrendSignal previous) {
+	/**
+	 * 抓不到新資料時仍重算評分：熱度時效衰減以「計算當下」距採集日的天數計算，不重算的話分數會停在
+	 * 上一次同步時的衰減程度（原本改用模擬資料時也會重算，維持每天都重算的行為）。
+	 * 重算本身失敗只記錄，不蓋掉「抓不到 PTT」這個真正的原因。
+	 */
+	private void recalculateKeepingPrevious(Product product) {
 		try {
-			return marketBuzzProvider.fetch(keyword, previous);
-		} catch (RuntimeException e) {
-			log.warn("取得「{}」市場熱度失敗，改用模擬資料：{}", keyword, e.getMessage());
-			return fallbackMarketBuzzProvider.fetch(keyword, previous);
+			new TransactionTemplate(transactionManager)
+					.executeWithoutResult(status -> scoringService.calculateEvaluation(product.getId(), null));
+		} catch (RuntimeException recalcFailure) {
+			log.error("商品 {}（{}）保留上一筆熱度後重算評分失敗", product.getId(), product.getName(), recalcFailure);
 		}
 	}
 

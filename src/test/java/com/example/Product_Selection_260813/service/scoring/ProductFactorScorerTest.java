@@ -302,7 +302,7 @@ class ProductFactorScorerTest {
 
 		@Test
 		void 查無趨勢訊號時回傳null() {
-			when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L)).thenReturn(Optional.empty());
+			when(trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(1L, "SIMULATED")).thenReturn(Optional.empty());
 			assertThat(scorer.scoreTrendHeat(newProduct())).isNull();
 		}
 
@@ -310,7 +310,7 @@ class ProductFactorScorerTest {
 		void 趨勢分與熱門度分皆無值時回傳null() {
 			TrendSignal signal = new TrendSignal();
 			signal.setCollectedAt(LocalDateTime.now());
-			when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L))
+			when(trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(1L, "SIMULATED"))
 					.thenReturn(Optional.of(signal));
 
 			assertThat(scorer.scoreTrendHeat(newProduct())).isNull();
@@ -322,7 +322,7 @@ class ProductFactorScorerTest {
 			signal.setTrendScore(new BigDecimal("80"));
 			signal.setPopularityScore(new BigDecimal("60"));
 			signal.setCollectedAt(null);
-			when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L))
+			when(trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(1L, "SIMULATED"))
 					.thenReturn(Optional.of(signal));
 
 			// (80+60)/2 = 70，且因為沒有採集時間，不應呼叫 algorithmSettings
@@ -337,7 +337,7 @@ class ProductFactorScorerTest {
 			signal.setTrendScore(new BigDecimal("90"));
 			signal.setPopularityScore(new BigDecimal("90"));
 			signal.setCollectedAt(LocalDateTime.now());
-			when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L))
+			when(trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(1L, "SIMULATED"))
 					.thenReturn(Optional.of(signal));
 			when(algorithmSettings.getTrendHalfLifeDays()).thenReturn(14);
 			when(algorithmSettings.getNeutralBaselineScore()).thenReturn(BigDecimal.valueOf(50));
@@ -352,7 +352,7 @@ class ProductFactorScorerTest {
 			TrendSignal signal = new TrendSignal();
 			signal.setTrendScore(new BigDecimal("90"));
 			signal.setCollectedAt(LocalDateTime.now().minusDays(365));
-			when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L))
+			when(trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(1L, "SIMULATED"))
 					.thenReturn(Optional.of(signal));
 			when(algorithmSettings.getTrendHalfLifeDays()).thenReturn(14);
 			when(algorithmSettings.getNeutralBaselineScore()).thenReturn(BigDecimal.valueOf(50));

@@ -52,9 +52,6 @@ class TrendServiceTest {
 	private MarketBuzzProvider marketBuzzProvider;
 
 	@Mock
-	private MarketBuzzProvider fallbackMarketBuzzProvider;
-
-	@Mock
 	private PlatformTransactionManager transactionManager;
 
 	@Mock
@@ -65,9 +62,6 @@ class TrendServiceTest {
 
 	private static final MarketBuzzSignal PTT_SIGNAL = new MarketBuzzSignal("PTT", "氣炸鍋",
 			new BigDecimal("56.00"), new BigDecimal("63.00"), TrendSignalTrendDirection.UP, 58);
-
-	private static final MarketBuzzSignal SIMULATED_SIGNAL = new MarketBuzzSignal("SIMULATED", "氣炸鍋",
-			new BigDecimal("51.00"), new BigDecimal("49.00"), TrendSignalTrendDirection.UP, null);
 
 	private static Product product(long id, String name) {
 		Product product = new Product();
@@ -99,22 +93,40 @@ class TrendServiceTest {
 		assertThat(saved.getTrendDirection()).isEqualTo(TrendSignalTrendDirection.UP);
 		assertThat(saved.getCollectedAt()).isNotNull();
 		verify(scoringService).calculateEvaluation(1L, null);
-		verify(fallbackMarketBuzzProvider, never()).fetch(anyString(), any());
 	}
 
+	// 2026-09-29：抓不到時不再寫入模擬資料——保留上一筆、照常重算評分（讓時效衰減繼續），再回報失敗
 	@Test
-	void PTT抓不到資料時改用模擬資料_同步不中斷_來源標記SIMULATED() {
+	void PTT抓不到資料時不寫入模擬資料_保留上一筆_照常重算評分後回報失敗() {
 		TrendSignal previous = new TrendSignal();
 		when(productRepository.findById(1L)).thenReturn(Optional.of(product(1L, "氣炸鍋")));
 		when(trendCrawlerSettings.isPttEnabled()).thenReturn(true);
 		when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(1L)).thenReturn(Optional.of(previous));
 		when(marketBuzzProvider.fetch("氣炸鍋", previous)).thenThrow(new MarketBuzzUnavailableException("全部逾時"));
-		when(fallbackMarketBuzzProvider.fetch("氣炸鍋", previous)).thenReturn(SIMULATED_SIGNAL);
 
-		trendService.syncTrend(1L);
-
-		assertThat(savedSignal().getSource()).isEqualTo("SIMULATED");
+		assertThatThrownBy(() -> trendService.syncTrend(1L))
+				.isInstanceOf(MarketBuzzUnavailableException.class)
+				.hasMessageContaining("氣炸鍋")
+				.hasMessageContaining("已保留上一筆");
+		verify(trendSignalRepository, never()).save(any());
 		verify(scoringService).calculateEvaluation(1L, null);
+	}
+
+	@Test
+	void 全商品同步_PTT抓不到的商品計為失敗_不計為模擬資料() {
+		when(marketBuzzProvider.fetch(anyString(), isNull())).thenReturn(PTT_SIGNAL);
+		when(marketBuzzProvider.fetch(eq("衛生紙"), isNull())).thenThrow(new MarketBuzzUnavailableException("全部逾時"));
+		when(trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(any())).thenReturn(Optional.empty());
+		when(trendSignalRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		TrendService.SyncAllResult result = trendService.syncAll(
+				List.of(product(1L, "氣炸鍋"), product(2L, "衛生紙")), () -> true, r -> {
+				});
+
+		assertThat(result).isEqualTo(new TrendService.SyncAllResult(2, 1, 0, 1));
+		// 抓不到的商品也重算（時效衰減）
+		verify(scoringService).calculateEvaluation(2L, null);
+		verify(trendSignalRepository, times(1)).save(any());
 	}
 
 	@Test
@@ -126,7 +138,6 @@ class TrendServiceTest {
 				.isInstanceOf(IllegalStateException.class)
 				.hasMessageContaining("已停用");
 		verify(marketBuzzProvider, never()).fetch(anyString(), any());
-		verify(fallbackMarketBuzzProvider, never()).fetch(anyString(), any());
 		verify(trendSignalRepository, never()).save(any());
 	}
 

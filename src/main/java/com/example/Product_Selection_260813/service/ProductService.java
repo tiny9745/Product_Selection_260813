@@ -47,6 +47,9 @@ import com.example.Product_Selection_260813.repository.CustomFieldDefinitionRepo
 import com.example.Product_Selection_260813.repository.ProductCustomFieldValueRepository;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.repository.AiAnalysisRepository;
+import com.example.Product_Selection_260813.repository.GroupBuyRecordRepository;
+import com.example.Product_Selection_260813.repository.ProductExportLogRepository;
+import com.example.Product_Selection_260813.repository.ReviewRecordRepository;
 import com.example.Product_Selection_260813.entity.AppUser;
 import com.example.Product_Selection_260813.entity.CustomFieldDefinition;
 import com.example.Product_Selection_260813.entity.ProductCustomFieldValue;
@@ -135,6 +138,16 @@ public class ProductService {
 
 	@Autowired
 	private AiAnalysisRepository aiAnalysisRepository;
+
+	/** 以下三個只給 deleteProduct() 做刪除前的參照檢查／解除連結用。 */
+	@Autowired
+	private GroupBuyRecordRepository groupBuyRecordRepository;
+
+	@Autowired
+	private ReviewRecordRepository reviewRecordRepository;
+
+	@Autowired
+	private ProductExportLogRepository productExportLogRepository;
 
 	@Autowired
 	private SettingsService settingsService;
@@ -787,6 +800,31 @@ public class ProductService {
 			throw new IllegalStateException("僅尚未審核過（第 1 次送審中）的商品可刪除");
 		}
 
+		// 2026-09-29 根源修正：原本只處理「實際撞過」的外鍵，group_buy_records
+		// （fk_gbr_product）沒處理到，新增商品後認領歷史紀錄再刪除就 500。
+		// 改成把 products 的每一個外鍵都明確歸類，並由
+		// ProductDeletionForeignKeyCoverageTest 掃 migration 守住——之後新增參照
+		// products 的外鍵而沒在這裡決定處理方式，測試就會失敗，不會再等到上線才撞。
+		//
+		// 【A. 業務／稽核資料：擋下，回 409 並說明原因】
+		//   review_records（fk_review_records_product）：審核快照不可覆蓋。上面的
+		//     狀態條件已推導出不會有，這裡仍防禦性檢查，避免狀態欄位被手動改過時連帶刪掉快照。
+		//   product_export_logs（fk_product_export_logs_product）：匯出稽核紀錄。
+		//   products.resale_reference_product_id（fk_product_resale_reference）：
+		//     其他商品的歷史分數靠它查商品層成團率，不能替別人的商品清空設定。
+		// 【B. 外部營運資料：解除連結，紀錄保留】
+		//   group_buy_records（fk_gbr_product）：見 GroupBuyRecordRepository.unlinkProduct()。
+		// 【C. 本商品衍生資料：隨商品刪除】ai_analyses、product_evaluations、
+		//   trend_signals、google_trend_signals（下方原有步驟）。
+		// 【D. 資料庫層已處理】product_custom_field_values（ON DELETE CASCADE）、
+		//   discovered_items.converted_product_id（ON DELETE SET NULL）。
+		assertNoBlockingReferences(product);
+
+		int unlinked = groupBuyRecordRepository.unlinkProduct(id);
+		if (unlinked > 0) {
+			log.info("刪除商品 {}：{} 筆歷史開團紀錄已解除連結，回到待認領清單", id, unlinked);
+		}
+
 		// ⚠️ 修正：products 被三張表參照，且沒有任何一個外鍵設 ON DELETE CASCADE：
 		//   - product_evaluations.product_id → products.id
 		//   - trend_signals.product_id       → products.id
@@ -803,7 +841,7 @@ public class ProductService {
 		// 否則先刪 product_evaluations 只是把 500 換成撞另一個外鍵。
 		// trend_signals 跟這兩張表沒有關聯，順序無關緊要。
 		//
-		// 四個步驟都在同一個 @Transactional 內，任一步失敗整筆都會回滾，
+		// 所有步驟（含上面的檢查與解除連結）都在同一個 @Transactional 內，任一步失敗整筆都會回滾，
 		// 不會留下刪了一半的狀態。
 		aiAnalysisRepository.deleteByProductId(id);
 		productEvaluationRepository.findByProductId(id)
@@ -813,6 +851,30 @@ public class ProductService {
 		googleTrendSignalRepository.deleteByProductId(id);
 
 		productRepository.delete(product);
+	}
+
+	/**
+	 * deleteProduct() 的 A 類參照檢查：任一存在就丟 IllegalStateException（409），
+	 * 訊息直接告訴使用者卡在哪裡、該怎麼處理，而不是讓 DELETE 撞外鍵回 500。
+	 */
+	private void assertNoBlockingReferences(Product product) {
+		Long id = product.getId();
+		if (reviewRecordRepository.existsByProductId(id)) {
+			throw new IllegalStateException("此商品已有審核紀錄，不可刪除");
+		}
+		if (productExportLogRepository.existsByProductId(id)) {
+			throw new IllegalStateException("此商品已有匯出紀錄，不可刪除");
+		}
+		List<Product> referencing = productRepository.findByResaleReferenceProductId(id);
+		if (!referencing.isEmpty()) {
+			String names = referencing.stream()
+					.limit(3)
+					.map(p -> "「" + p.getName() + "」")
+					.collect(Collectors.joining("、"));
+			String more = referencing.size() > 3 ? " 等 " + referencing.size() + " 件商品" : "";
+			throw new IllegalStateException("此商品被 " + names + more
+					+ " 設為再販售參考商品，請先修改這些商品的參考商品後再刪除");
+		}
 	}
 
 	/**

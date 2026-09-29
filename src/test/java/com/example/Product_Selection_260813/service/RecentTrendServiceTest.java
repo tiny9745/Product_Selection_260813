@@ -40,12 +40,28 @@ class RecentTrendServiceTest {
 	void 摘要取最新一筆的分數與來源_方向最多三筆() {
 		TrendSignal latest = signal(UP, "72.50", "PTT");
 		RecentTrendService.RecentTrend trend = RecentTrendService.summarize(
-				List.of(latest, signal(UP, "60", "PTT"), signal(UP, "55", "SIMULATED"), signal(DOWN, "50", "PTT")));
+				List.of(latest, signal(UP, "60", "PTT"), signal(UP, "55", "PTT"), signal(DOWN, "50", "PTT")));
 
 		assertThat(trend.popularityScore()).isEqualByComparingTo("72.50");
 		assertThat(trend.trendDirection()).isEqualTo(UP);
 		assertThat(trend.source()).isEqualTo("PTT");
 		assertThat(trend.recentTrendDirections()).containsExactly(UP, UP, UP);
+		assertThat(trend.consecutiveRise()).isTrue();
+	}
+
+	// 2026-09-29 修正：舊版寫入的模擬資料（隨機方向）不能觸發連續上升
+	@Test
+	void 最近三筆含模擬資料_即使方向都是上升也不算連續上升() {
+		RecentTrendService.RecentTrend trend = RecentTrendService.summarize(
+				List.of(signal(UP, "72", "PTT"), signal(UP, "60", "SIMULATED"), signal(UP, "55", "PTT")));
+		assertThat(trend.recentTrendDirections()).containsExactly(UP, UP, UP);
+		assertThat(trend.consecutiveRise()).isFalse();
+	}
+
+	@Test
+	void 模擬資料在第四筆以後_不影響最近三筆的判定() {
+		RecentTrendService.RecentTrend trend = RecentTrendService.summarize(List.of(signal(UP, "72", "PTT"),
+				signal(UP, "60", "PTT"), signal(UP, "55", "PTT"), signal(UP, "50", "SIMULATED")));
 		assertThat(trend.consecutiveRise()).isTrue();
 	}
 

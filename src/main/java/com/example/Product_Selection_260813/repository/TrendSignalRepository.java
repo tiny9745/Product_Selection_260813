@@ -18,6 +18,12 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
     Optional<TrendSignal> findFirstByProductIdOrderByCollectedAtDesc(Long productId);
 
     /**
+     * 2026-09-29：最新一筆「非指定來源」的趨勢資料。評分用（ProductFactorScorer.scoreTrendHeat()），
+     * 傳入 SIMULATED 以排除舊版 PTT 抓不到時寫入的模擬資料——隨機值不該影響評分。
+     */
+    Optional<TrendSignal> findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(Long productId, String source);
+
+    /**
      * 2026-09-29：一次取出多個商品「各自最近 N 筆」趨勢資料（品項管理清單、熱度排行榜的「連續上升」標記用，
      * 見 RecentTrendService）。
      *

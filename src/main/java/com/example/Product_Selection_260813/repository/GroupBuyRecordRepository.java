@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -80,6 +81,22 @@ public interface GroupBuyRecordRepository extends JpaRepository<GroupBuyRecord, 
 	 * 人工核對後補上連結（見 GroupBuyRecordService.claimRecords()）。
 	 */
 	List<GroupBuyRecord> findByProductIdIsNullAndProductTypeId(Long productTypeId);
+
+	/**
+	 * 解除指定商品與歷史紀錄的連結（claimRecords() 的反向操作），供刪除商品時使用。
+	 *
+	 * 2026-09-29：刪除「第 1 次送審中」的商品撞 fk_gbr_product。歷史開團紀錄是
+	 * 外部匯入的營運資料、不是商品的附屬資料，商品刪了紀錄也不能跟著刪；
+	 * 把 product_id 設回 null，紀錄就回到 findByProductIdIsNullAndProductTypeId()
+	 * 的待認領池，之後新增正確的商品還能再認領。品類層統計（成團率、分位數、
+	 * 毛利率區間）只看 product_type_id，不受影響。
+	 *
+	 * 批次 UPDATE 不經過 persistence context，所以 clearAutomatically：同一交易內
+	 * 若已載入過這些紀錄，之後讀到的才不會是舊的 productId。
+	 */
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("UPDATE GroupBuyRecord g SET g.productId = NULL WHERE g.productId = :productId")
+	int unlinkProduct(@Param("productId") Long productId);
 
 	// ---------------- 歷史毛利率／折扣深度區間計算 ----------------
 

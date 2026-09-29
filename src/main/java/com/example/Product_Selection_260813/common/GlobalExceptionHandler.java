@@ -3,6 +3,7 @@ package com.example.Product_Selection_260813.common;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -86,6 +87,19 @@ public class GlobalExceptionHandler {
 		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.failure(ex.getMessage()));
 	}
 
+	// ========== 資料完整性衝突（外鍵仍被引用、唯一鍵重複）==========
+	// 2026-09-29：原本併入下方 DataAccessException 回 500「伺服器發生錯誤」，使用者
+	// 無從判斷是系統壞了還是資料狀態不允許。這類錯誤是「目前資料狀態不允許」，
+	// 語意上與 IllegalStateException 相同，回 409。它是保底網——正常流程應在
+	// Service 層先檢查並給出具體原因（例如 ProductService.deleteProduct()）；
+	// 走到這裡代表有漏網的參照，log 留 constraint 名稱方便追查，回應不外洩 SQL。
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+		log.warn("資料完整性衝突：{}", ex.getMostSpecificCause().getMessage());
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(ApiResponse.failure("資料仍被其他紀錄引用或與既有資料重複，無法完成此操作"));
+	}
+
 	// ========== 資料庫存取例外（SQL錯誤、連線失敗、表不存在等）==========
 	@ExceptionHandler(DataAccessException.class)
 	public ResponseEntity<ApiResponse<Void>> handleDataAccessException(DataAccessException ex) {
@@ -122,6 +136,16 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleTrendInterestUnavailable(
 			com.example.Product_Selection_260813.service.trends.TrendInterestUnavailableException ex) {
 		log.warn("Google 趨勢查詢失敗：{}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.failure(ex.getMessage()));
+	}
+
+	// ========== PTT 熱度暫時抓不到（2026-09-29）==========
+	// 單一商品手動同步：不再改用模擬資料，而是保留上一筆資料並回報失敗。跟 Google 趨勢一樣是
+	// 上游來源的暫時性問題，回 502；訊息由 TrendService 組好（只含商品關鍵字），可直接顯示。
+	@ExceptionHandler(com.example.Product_Selection_260813.service.crawler.MarketBuzzUnavailableException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMarketBuzzUnavailable(
+			com.example.Product_Selection_260813.service.crawler.MarketBuzzUnavailableException ex) {
+		log.warn("PTT 熱度同步失敗：{}", ex.getMessage());
 		return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(ApiResponse.failure(ex.getMessage()));
 	}
 

@@ -106,6 +106,20 @@ class TrendSyncRunServiceTest {
 	}
 
 	@Test
+	void 所有商品都抓不到PTT時標記為中斷_不顯示已完成() {
+		when(trendCrawlerSettings.isPttEnabled()).thenReturn(true);
+		when(trendService.findProductsToSync()).thenReturn(products(3));
+		when(trendService.syncAll(any(), any(), any())).thenReturn(new SyncAllResult(3, 0, 0, 3));
+
+		service.scheduledRun();
+
+		TrendSyncRun run = lastSaved();
+		assertThat(run.getStatus()).isEqualTo(TrendSyncRunStatus.FAILED);
+		assertThat(run.getFailedCount()).isEqualTo(3);
+		assertThat(run.getMessage()).contains("已保留各商品上一筆熱度資料");
+	}
+
+	@Test
 	void 排程執行_完成後留下各項筆數() {
 		when(trendCrawlerSettings.isPttEnabled()).thenReturn(true);
 		when(trendService.findProductsToSync()).thenReturn(products(5));
@@ -120,6 +134,8 @@ class TrendSyncRunServiceTest {
 		assertThat(run.getRealCount()).isEqualTo(3);
 		assertThat(run.getFallbackCount()).isEqualTo(1);
 		assertThat(run.getFailedCount()).isEqualTo(1);
+		// 2026-09-29：有商品抓不到時註明「已保留上一筆」，不再暗示改用了模擬資料
+		assertThat(run.getMessage()).isEqualTo("1 個商品本次無法取得 PTT 熱度，已保留上一筆熱度資料");
 		assertThat(run.getFinishedAt()).isNotNull();
 		assertThat(run.getTriggeredBy()).isNull();
 		// 第一次寫入就是 RUNNING，執行途中畫面才看得到「執行中」

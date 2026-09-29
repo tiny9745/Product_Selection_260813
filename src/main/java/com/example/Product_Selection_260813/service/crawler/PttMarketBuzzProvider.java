@@ -31,7 +31,7 @@ import com.example.Product_Selection_260813.service.crawler.PttSearchPageParser.
  *
  * <b>容錯策略（比照 OpenMeteoWeatherSignalProvider）：</b>單一看板失敗（逾時、看板
  * 不存在）只記錄警告並略過，用其餘看板的結果繼續算；所有看板都沒有成功取得資料時，
- * 才拋 MarketBuzzUnavailableException，由 TrendService 改用模擬資料。
+ * 才拋 MarketBuzzUnavailableException，由 TrendService 保留上一筆真實資料並記為失敗（2026-09-29 起不再改用模擬資料）。
  * 「搜尋成功、但 0 篇討論」是正常結果（分數就是 0），不會觸發備援。
  */
 @Component

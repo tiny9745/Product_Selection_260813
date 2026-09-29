@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.example.Product_Selection_260813.entity.TrendSignal;
 import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
+import com.example.Product_Selection_260813.service.crawler.StubMarketBuzzProvider;
 
 /**
  * 商品「最近幾次熱度同步」的摘要（2026-09-29）：最新熱度分數、方向、來源、最近 3 次方向，以及是否「連續上升」。
@@ -22,12 +23,19 @@ import com.example.Product_Selection_260813.repository.TrendSignalRepository;
  * 改成唯讀標記，顯示在品項管理清單與儀表板熱度排行。兩處共用這裡的判定，只有一份規則。
  *
  * 「連續上升」只是提醒，不改變任何商品狀態，也不參與評分（熱度本身已經是評分因子之一）。
+ *
+ * <b>只認真實資料（2026-09-29 修正）：</b>最近 3 筆必須都是真實來源（不是 SIMULATED）才算連續上升。
+ * 舊版 PTT 抓不到時會寫入隨機漫步的模擬資料，方向約一半機率是 UP，若不排除會被雜訊觸發。
+ * 模擬資料已停止產生（見 TrendService），這裡排除的是資料庫裡既有的舊資料。
  */
 @Service
 public class RecentTrendService {
 
 	/** 連續上升需要的次數：最近這幾次同步的方向都必須是 UP，筆數不足不算。 */
 	public static final int CONSECUTIVE_RISE_COUNT = 3;
+
+	/** 模擬資料的來源標記（同 StubMarketBuzzProvider.SOURCE），不算真實資料。 */
+	static final String SIMULATED_SOURCE = StubMarketBuzzProvider.SOURCE;
 
 	@Autowired
 	private TrendSignalRepository trendSignalRepository;
@@ -63,8 +71,10 @@ public class RecentTrendService {
 		TrendSignal latest = recentNewestFirst.get(0);
 		List<TrendSignalTrendDirection> directions = recentNewestFirst.stream()
 				.limit(CONSECUTIVE_RISE_COUNT).map(TrendSignal::getTrendDirection).toList();
+		boolean allReal = recentNewestFirst.stream().limit(CONSECUTIVE_RISE_COUNT)
+				.noneMatch(signal -> SIMULATED_SOURCE.equals(signal.getSource()));
 		return new RecentTrend(latest.getPopularityScore(), latest.getTrendDirection(), latest.getSource(), directions,
-				isConsecutiveRise(directions));
+				allReal && isConsecutiveRise(directions));
 	}
 
 	/** 最近 {@value #CONSECUTIVE_RISE_COUNT} 次（新到舊）全部是 UP 才成立；筆數不足、含 null 都不成立。 */

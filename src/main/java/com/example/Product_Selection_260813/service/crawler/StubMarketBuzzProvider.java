@@ -14,10 +14,11 @@ import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
  * 原封不動搬過來——以上一筆趨勢資料為基準（沒有則 50 分），每次隨機波動
  * ±(FLUCTUATION_RANGE/2) 分，來源標記固定為 SIMULATED。
  *
- * 用途有兩個：
+ * 用途（2026-09-29 起只剩開發除錯）：
  * <ol>
- * <li>PttMarketBuzzProvider 抓不到資料時，TrendService 改呼叫這裡，讓同步流程不中斷。
- * <li>要暫時停用 PTT 爬蟲（除錯、PTT 大規模異常）時，把 {@code @Primary} 從
+ * <li>（已停用）原本 PttMarketBuzzProvider 抓不到資料時，TrendService 改呼叫這裡。隨機值會進入評分與
+ *     「連續上升」判定，所以改為保留上一筆真實資料、記為失敗，見 TrendService.syncProduct()。
+ * <li>開發除錯、不想打 PTT 時，把 {@code @Primary} 從
  *     PttMarketBuzzProvider 移到本類別即可，TrendService 不需要任何更動。
  *     注意是「移過來」而不是只拿掉——兩個實作都沒有 {@code @Primary} 時，
  *     Spring 會因為無法決定注入哪一個而啟動失敗。

@@ -33,6 +33,7 @@ import com.example.Product_Selection_260813.repository.ProductCustomFieldValueRe
 import com.example.Product_Selection_260813.repository.TrendSignalRepository;
 import com.example.Product_Selection_260813.service.resolver.AlgorithmSettings;
 import com.example.Product_Selection_260813.service.resolver.ScoreBandResolver;
+import com.example.Product_Selection_260813.service.crawler.StubMarketBuzzProvider;
 
 /**
  * 逐一計算既有七個扁平因子，再加上 factor_definitions 裡目前生效中的自訂因子，
@@ -325,13 +326,17 @@ public class ProductFactorScorer {
 	 *
 	 * 沒有衰減的話，三個月前同步的一筆熱度會與今天的資料同等影響排序——
 	 * 而熱度本來就是時效性最強的訊號。
+	 *
+	 * 2026-09-29：只取最新一筆<b>真實</b>資料，排除舊版寫入的 SIMULATED（隨機漫步，不能當市場訊號）。
+	 * PTT 暫時抓不到時系統已不再寫入模擬資料，而是保留上一筆真實資料，由上面的衰減逐日收斂到中性分；
+	 * 從來沒有真實資料的商品回傳 null（資料不足），不以隨機值代替。
 	 */
 	public BigDecimal scoreTrendHeat(Product product) {
 		if (product.getId() == null) {
 			return null;
 		}
-		Optional<TrendSignal> latest = trendSignalRepository
-				.findFirstByProductIdOrderByCollectedAtDesc(product.getId());
+		Optional<TrendSignal> latest = trendSignalRepository.findFirstByProductIdAndSourceNotOrderByCollectedAtDesc(
+				product.getId(), StubMarketBuzzProvider.SOURCE);
 		if (latest.isEmpty()) {
 			return null;
 		}

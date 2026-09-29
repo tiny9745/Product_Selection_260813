@@ -281,6 +281,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     /** 換圖時判斷舊圖檔是否仍被其他商品共用（再販售商品會沿用參考商品的圖片路徑）。 */
     boolean existsByImageUrl(String imageUrl);
 
+    /** 以指定商品為「再販售參考商品」的其他商品（刪除前檢查，見 ProductService.deleteProduct()）。 */
+    List<Product> findByResaleReferenceProductId(Long resaleReferenceProductId);
+
     /**
      * 審核併發控制：條件式UPDATE，僅在目前review_status仍等於expectedStatus時才更新成功。
      * 回傳值為實際影響筆數——Service層依此判斷0（狀態已被他人改變，回409）或1（成功）。
