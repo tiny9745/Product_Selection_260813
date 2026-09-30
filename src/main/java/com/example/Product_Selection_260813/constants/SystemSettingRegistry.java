@@ -95,7 +95,8 @@ public final class SystemSettingRegistry {
 				"品類沒有專屬門檻時使用的全域效期天數門檻。",
 				DataType.INTEGER, BigDecimal.ONE, BigDecimal.valueOf(3650), "天", "21");
 		register("supported_temperature_zones", "溫層判定", "通路支援溫層",
-				"",
+				"勾選通路目前能配送的溫層。未勾選的溫層：可行性判定會標示不通過、AI 商品雷達會標示通路不支援，"
+						+ "AI 適配度評分也會把它視為本店無法出貨。預設三種全開；冷鏈條件變動（合約到期、配送暫停）時取消勾選即可立即生效。",
 				DataType.STRING, null, null, null, "NORMAL,CHILLED,FROZEN");
 
 		// ---------------- 運費估算 ----------------
