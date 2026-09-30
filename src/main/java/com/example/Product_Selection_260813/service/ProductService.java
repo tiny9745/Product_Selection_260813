@@ -465,6 +465,7 @@ public class ProductService {
 		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
 		validateResaleReferenceProduct(request.getPricingType(), request.getResaleReferenceProductId(),
 				request.getProductTypeId(), null);
+		assertReferenceIsReviewed(request.getResaleReferenceProductId());
 
 		Long userId = resolveUserId(username);
 
@@ -626,6 +627,11 @@ public class ProductService {
 		validatePriceRelations(request.getPricingType(), request.getCostPrice(), request.getSalePrice());
 		validateResaleReferenceProduct(request.getPricingType(), request.getResaleReferenceProductId(),
 				request.getProductTypeId(), product.getId());
+		// 2026-09-30：只在參考商品「改變」時檢查未審核限制——既有資料裡已經引用未審核商品的
+		// 品項（修正前建立的）仍要能照常編輯圖片、名稱等其他欄位，不因為舊的引用被整筆擋下。
+		if (!Objects.equals(product.getResaleReferenceProductId(), request.getResaleReferenceProductId())) {
+			assertReferenceIsReviewed(request.getResaleReferenceProductId());
+		}
 
 		if (product.getReviewStatus() == ProductReviewStatus.APPROVED) {
 			assertCoreDataUnchanged(product, request);
@@ -1024,6 +1030,30 @@ public class ProductService {
 	 * GET /api/products/similar-candidates 加上人工確認要負責的事，這支方法
 	 * 只確認資料形式合法（商品存在、品類相符），不做語意層級的相似度判斷。
 	 */
+	/**
+	 * 2026-09-30 根源修正：參考商品不可為「未審核（PENDING）」的品項。
+	 *
+	 * 再販售的參考商品語意是「以前賣過、這次要再賣一次的舊商品」，用途是讓歷史分數的
+	 * 商品層查到它的開團紀錄。未審核品項還在選品流程中、通常沒有任何開團紀錄，
+	 * 引用它對分數沒有任何作用；更嚴重的是未審核正是唯一可以刪除的狀態，一旦被引用，
+	 * 刪除會被 assertNoBlockingReferences() 擋下，而引用方審核通過後參考商品又鎖定
+	 * 不能改，形成永遠刪不掉的死結（實例：#139 引用 #122「台灣豬五花禮盒」）。
+	 *
+	 * 候選清單（ProductRepository.findCandidatesBy*）已排除 PENDING，這裡是後端防線，
+	 * 避免繞過畫面直接呼叫 API 建立同樣的引用。
+	 */
+	private void assertReferenceIsReviewed(Long resaleReferenceProductId) {
+		if (resaleReferenceProductId == null) {
+			return;
+		}
+		productRepository.findById(resaleReferenceProductId)
+				.filter(reference -> reference.getReviewStatus() == ProductReviewStatus.PENDING)
+				.ifPresent(reference -> {
+					throw new IllegalArgumentException("參考商品「" + reference.getName()
+							+ "」尚未審核，不可作為再販售參考商品；請選擇已審核（通過或拒絕）的既有品項");
+				});
+	}
+
 	private void validateResaleReferenceProduct(ProductPricingType pricingType, Long resaleReferenceProductId,
 			Long productTypeId, Long selfId) {
 		if (resaleReferenceProductId == null) {

@@ -344,7 +344,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
      * 不排除呼叫端自己（selfId 為 null 時代表新增情境，本來就沒有自己可排除）
      * 的篩選交給呼叫端在 Java 層處理，這裡只負責基本的候選池查詢。
      */
-    @Query("SELECT p FROM Product p WHERE p.productTypeId = :productTypeId AND p.itemStatus <> 'ARCHIVED'")
+    /*
+     * 2026-09-30 根源修正：再排除 review_status = PENDING（未審核）的商品。
+     * 未審核品項還在選品流程中、沒有販售歷史，不是「要再賣一次的舊商品」；
+     * 而且它正是唯一可以被刪除的狀態（見 ProductService.deleteProduct()）——
+     * 一旦被別的商品引用，就會永遠刪不掉（引用方審核通過後參考商品鎖定、無法改掉），
+     * 實例：「台灣豬五花禮盒」#122（NEW／未審核）被 #139（RESALE／審核通過）引用。
+     */
+    @Query("SELECT p FROM Product p WHERE p.productTypeId = :productTypeId AND p.itemStatus <> 'ARCHIVED'"
+            + " AND p.reviewStatus <> 'PENDING'")
     List<Product> findCandidatesByProductType(@Param("productTypeId") Long productTypeId);
 
     /**
@@ -367,13 +375,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     /**
      * RESALE 逐層過濾參考商品：第二層，選定分類＋供應商之後列出可選的商品，
      * 供第三層下拉選單使用。篩選邏輯與 findCandidatesByProductType() 一致
-     * （排除 ARCHIVED），差別只在多一個供應商精準比對條件。
+     * （排除 ARCHIVED 與未審核 PENDING），差別只在多一個供應商精準比對條件。
      */
     @Query("""
             SELECT p FROM Product p
              WHERE p.productTypeId = :productTypeId
                AND p.supplierName = :supplierName
                AND p.itemStatus <> 'ARCHIVED'
+               AND p.reviewStatus <> 'PENDING'
              ORDER BY p.name
             """)
     List<Product> findCandidatesByProductTypeAndSupplier(
