@@ -480,7 +480,7 @@ public class GroqDiscoveryClient {
 		String monthKey = QUOTA_COUNTER_PREFIX + YearMonth.now();
 		int used = readInt(monthKey, 0);
 		if (used >= limit) {
-			throw new DiscoveryQuotaExceededException("本月 PTT 新品探索的 AI 呼叫次數已達上限（" + limit
+			throw new DiscoveryQuotaExceededException("本月 AI 商品雷達的呼叫次數已達上限（" + limit
 					+ " 次），請調整 system_settings 的 " + QUOTA_LIMIT_KEY + "，或等待下月自動重置");
 		}
 		systemSettingRepository.incrementCounter(monthKey);
