@@ -38,6 +38,8 @@ public class ProductResponse {
 	private Long productTypeId;
 	private ProductPricingType pricingType;
 	private String name;
+	/** 2026-09-30：使用者設定的搜尋關鍵字；null＝未設定（同步時由商品名稱自動簡化）。 */
+	private String searchKeyword;
 	private String description;
 	private String imageUrl;
 	private String supplierName;
@@ -186,6 +188,7 @@ public class ProductResponse {
 		dto.productTypeId = product.getProductTypeId();
 		dto.pricingType = product.getPricingType();
 		dto.name = product.getName();
+		dto.searchKeyword = product.getSearchKeyword();
 		dto.description = product.getDescription();
 		dto.imageUrl = product.getImageUrl();
 		dto.supplierName = product.getSupplierName();
@@ -300,6 +303,14 @@ public class ProductResponse {
 
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	public String getSearchKeyword() {
+		return searchKeyword;
+	}
+
+	public void setSearchKeyword(String searchKeyword) {
+		this.searchKeyword = searchKeyword;
 	}
 
 	public String getDescription() {

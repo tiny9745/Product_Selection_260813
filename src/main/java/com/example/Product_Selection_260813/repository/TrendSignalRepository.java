@@ -61,6 +61,12 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
      * 每個 product_id 的最新 collected_at，再照 popularity_score 排序。
      * 只納入 item_status='ACTIVE' 的商品（跟既有的 findTopRecommendations
      * 篩選精神一致，封存商品不該出現在任何排行榜上）。
+     *
+     * 2026-09-30：
+     * - 只列「最新一筆熱度 &gt; 0」的商品。熱度 0＝PTT 近 90 天完全搜不到討論，原本會拿來補滿 10 個名額，
+     *   排名沒有意義；有討論的商品不足 10 個時就只回傳那幾個，由前端說明其餘商品沒有討論。
+     *   條件套在「最新一筆」上：最新一筆是 0 的商品不會退回去用舊的非 0 資料。
+     * - 同分時依 product_id 排序，避免同分商品每次重新整理順序都不同。
      */
     @Query(value = """
             SELECT t.* FROM trend_signals t
@@ -70,7 +76,8 @@ public interface TrendSignalRepository extends JpaRepository<TrendSignal, Long> 
                      SELECT MAX(t2.collected_at) FROM trend_signals t2
                       WHERE t2.product_id = t.product_id
                    )
-             ORDER BY t.popularity_score DESC
+               AND t.popularity_score > 0
+             ORDER BY t.popularity_score DESC, t.product_id ASC
              LIMIT :limit
             """, nativeQuery = true)
     List<TrendSignal> findLatestSignalsRankedByScore(@Param("limit") int limit);

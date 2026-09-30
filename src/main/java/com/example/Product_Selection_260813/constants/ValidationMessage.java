@@ -10,6 +10,7 @@ public class ValidationMessage {
 	public static final String PRODUCT_PRICING_TYPE_NULL = "商品分流不可為空";
 	public static final String PRODUCT_NAME_NULL = "商品名稱不可為空";
 	public static final String PRODUCT_NAME_TOO_LONG = "商品名稱長度不可超過100字元";
+	public static final String PRODUCT_SEARCH_KEYWORD_TOO_LONG = "搜尋關鍵字長度不可超過100字元";
 	/**
 	 * ⚠️ 2026-09-19補上：目標客群描述直接餵給 ScoringService.scoreAudienceMatch()
 	 * 計算客群契合度分數（七大計分因子之一），前端表單也標成必填（<em>*</em>）、

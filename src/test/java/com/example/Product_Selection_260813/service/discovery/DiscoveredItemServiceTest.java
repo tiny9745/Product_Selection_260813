@@ -79,7 +79,8 @@ class DiscoveredItemServiceTest {
 	void 轉成商品_已轉過的回409_不存在的回400() {
 		DiscoveredItem dismissed = item(DiscoveredItemStatus.DISMISSED);
 		when(discoveredItemRepository.findById(5L)).thenReturn(Optional.of(dismissed));
-		service.markConverted(5L, 88L, 3L);
+		// 2026-09-30：回傳被標記的項目本身，ProductService 用它的 searchKeyword 帶入新商品
+		assertThat(service.markConverted(5L, 88L, 3L)).isSameAs(dismissed);
 		assertThat(dismissed.getStatus()).isEqualTo(DiscoveredItemStatus.CONVERTED);
 		assertThat(dismissed.getConvertedProductId()).isEqualTo(88L);
 

@@ -180,6 +180,7 @@ public class DashboardService {
 			item.setTrendDirection(signal.getTrendDirection());
 			item.setSource(signal.getSource());
 			item.setKeyword(signal.getKeyword());
+			item.setCollectedAt(signal.getCollectedAt());
 			item.setGoogleTrend(googleTrendById.get(product.getId()));
 			RecentTrendService.RecentTrend recent = recentById.get(product.getId());
 			item.setConsecutiveRise(recent != null && recent.consecutiveRise());

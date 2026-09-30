@@ -197,7 +197,7 @@ public class TrendService {
 	private TrendSignal syncProduct(Product product) {
 		TrendSignal previous = trendSignalRepository.findFirstByProductIdOrderByCollectedAtDesc(product.getId())
 				.orElse(null);
-		String keyword = toSearchKeyword(product.getName());
+		String keyword = resolveSearchKeyword(product);
 		MarketBuzzSignal buzz;
 		try {
 			buzz = marketBuzzProvider.fetch(keyword, previous);
@@ -236,6 +236,20 @@ public class TrendService {
 		} catch (RuntimeException recalcFailure) {
 			log.error("商品 {}（{}）保留上一筆熱度後重算評分失敗", product.getId(), product.getName(), recalcFailure);
 		}
+	}
+
+	/**
+	 * 2026-09-30：商品實際使用的搜尋關鍵字（PTT 熱度同步與 Google 趨勢共用，兩邊一定用同一個詞）。
+	 * 使用者設定了 products.search_keyword 就用它（去頭尾空白）；沒設定時沿用 {@link #toSearchKeyword(String)}
+	 * 從商品名稱自動簡化——規則只能去掉「數字＋單位」與括號，「麻豆文旦 10台斤禮盒」這類名稱仍會整串送出，
+	 * 所以才開放人工指定（從 AI 商品雷達建立的商品會自動帶入雷達抽出的關鍵字）。
+	 */
+	public static String resolveSearchKeyword(Product product) {
+		String custom = product.getSearchKeyword();
+		if (custom != null && !custom.isBlank()) {
+			return custom.trim();
+		}
+		return toSearchKeyword(product.getName());
 	}
 
 	/**

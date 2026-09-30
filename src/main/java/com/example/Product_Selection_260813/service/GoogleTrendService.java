@@ -404,7 +404,8 @@ public class GoogleTrendService {
 
 	/** 呼叫來源 → 計入額度 → 寫入一筆。呼叫失敗直接往外丟，不計額度（SerpApi 失敗不計費）、不寫資料。 */
 	private GoogleTrendSignal fetchAndSave(Product product) {
-		String keyword = TrendService.toSearchKeyword(product.getName());
+		// 2026-09-30：與 PTT 熱度同步共用同一個關鍵字（使用者指定優先，見 TrendService.resolveSearchKeyword()）
+		String keyword = TrendService.resolveSearchKeyword(product);
 		TrendInterest interest = trendInterestProvider.fetch(keyword);
 		googleTrendSettings.recordCall();
 

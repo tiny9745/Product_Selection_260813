@@ -44,6 +44,13 @@ public class ProductCreateRequest {
 	@Size(max = 100, message = ValidationMessage.PRODUCT_NAME_TOO_LONG)
 	private String name;
 
+	/**
+	 * 2026-09-30：PTT 熱度同步與 Google 趨勢使用的搜尋關鍵字（選填）。留空時：從 AI 商品雷達建立的商品
+	 * 自動帶入雷達抽出的關鍵字，其餘由商品名稱自動簡化（見 TrendService.resolveSearchKeyword()）。
+	 */
+	@Size(max = 100, message = ValidationMessage.PRODUCT_SEARCH_KEYWORD_TOO_LONG)
+	private String searchKeyword;
+
 	// description對應TEXT欄位，不設長度上限
 	private String description;
 
@@ -157,7 +164,7 @@ public class ProductCreateRequest {
 	private Map<String, Object> customFieldValues;
 
 	/**
-	 * 2026-09-29：從「PTT 新品探索」建立商品時帶入探索項目 id（選填）。ProductService 建立成功後
+	 * 2026-09-29：從「AI 商品雷達」建立商品時帶入商品線索 id（選填）。ProductService 建立成功後
 	 * 在同一個交易裡把該項目標成「已建立商品」；項目已經轉過商品時整筆回 409、商品不會建立。
 	 */
 	private Long discoveredItemId;
@@ -264,6 +271,14 @@ public class ProductCreateRequest {
 
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	public String getSearchKeyword() {
+		return searchKeyword;
+	}
+
+	public void setSearchKeyword(String searchKeyword) {
+		this.searchKeyword = searchKeyword;
 	}
 
 	public String getDescription() {

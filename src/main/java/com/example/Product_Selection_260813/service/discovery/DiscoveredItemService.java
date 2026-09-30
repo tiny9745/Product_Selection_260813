@@ -26,7 +26,7 @@ import com.example.Product_Selection_260813.repository.DiscoveredItemRepository;
 import com.example.Product_Selection_260813.service.crawler.PttSelectors;
 
 /**
- * PTT 新品探索結果的查詢與人工處理（略過／復原／轉成商品）。
+ * AI 商品雷達的商品線索的查詢與人工處理（略過／復原／轉成商品）。
  *
  * <b>轉成商品</b>不是這裡建立 Product：商品一律走既有的 POST /api/products（欄位驗證、
  * 送審批次、評分都在 ProductService），前端在請求裡帶 discoveredItemId，ProductService
@@ -127,25 +127,27 @@ public class DiscoveredItemService {
 	 * 由 ProductService.createProduct() 在同一個交易內呼叫。已略過的項目也允許轉成商品
 	 * （人工改變心意），已經轉過的回 409，避免同一個線索建立兩件商品。
 	 *
+	 * @return 已標記的項目（2026-09-30：ProductService 用它的 searchKeyword 帶入新商品的搜尋關鍵字）
 	 * @throws IllegalArgumentException 項目不存在（400）
 	 * @throws IllegalStateException    已建立過商品（409）
 	 */
 	@Transactional
-	public void markConverted(Long id, Long productId, Long userId) {
+	public DiscoveredItem markConverted(Long id, Long productId, Long userId) {
 		DiscoveredItem item = find(id);
 		if (item.getStatus() == DiscoveredItemStatus.CONVERTED) {
-			throw new IllegalStateException("這個探索項目已經建立過商品（商品 ID " + item.getConvertedProductId() + "）");
+			throw new IllegalStateException("這筆商品線索已經建立過商品（商品 ID " + item.getConvertedProductId() + "）");
 		}
 		item.setStatus(DiscoveredItemStatus.CONVERTED);
 		item.setConvertedProductId(productId);
 		item.setHandledBy(userId);
 		item.setHandledAt(LocalDateTime.now());
 		discoveredItemRepository.save(item);
+		return item;
 	}
 
 	private DiscoveredItem find(Long id) {
 		return discoveredItemRepository.findById(id)
-				.orElseThrow(() -> new IllegalArgumentException("探索項目不存在：" + id));
+				.orElseThrow(() -> new IllegalArgumentException("商品線索不存在：" + id));
 	}
 
 	private AppUser resolveUser(String username) {

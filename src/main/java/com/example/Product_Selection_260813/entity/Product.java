@@ -40,6 +40,13 @@ public class Product {
 	@Column(name = "name", nullable = false, length = 100)
 	private String name;
 
+	/**
+	 * V37（2026-09-30）：PTT 熱度同步與 Google 趨勢使用的搜尋關鍵字，選填。
+	 * null／空白時由 TrendService.resolveSearchKeyword() 從商品名稱自動簡化。
+	 */
+	@Column(name = "search_keyword", length = 100)
+	private String searchKeyword;
+
 	@Column(name = "description", columnDefinition = "TEXT")
 	private String description;
 
@@ -194,6 +201,14 @@ public class Product {
 
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	public String getSearchKeyword() {
+		return searchKeyword;
+	}
+
+	public void setSearchKeyword(String searchKeyword) {
+		this.searchKeyword = searchKeyword;
 	}
 
 	public String getDescription() {

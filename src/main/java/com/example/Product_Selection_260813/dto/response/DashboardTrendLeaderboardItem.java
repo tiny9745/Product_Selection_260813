@@ -1,6 +1,7 @@
 package com.example.Product_Selection_260813.dto.response;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import com.example.Product_Selection_260813.enums.TrendSignalTrendDirection;
 
@@ -23,6 +24,8 @@ public class DashboardTrendLeaderboardItem {
 	private TrendSignalTrendDirection trendDirection;
 	private String source;
 	private String keyword;
+	/** 2026-09-30：這筆熱度的採集時間（PTT 熱度同步寫入的時間），前端顯示排行的資料時間。 */
+	private LocalDateTime collectedAt;
 	/**
 	 * 2026-09-28：Google 趨勢參考的最新一筆（沒查過為 null）。只顯示方向與成長率，
 	 * 不參與排序——Google 的 0～100 是相對值，不同商品之間不可比。
@@ -96,5 +99,13 @@ public class DashboardTrendLeaderboardItem {
 
 	public void setKeyword(String keyword) {
 		this.keyword = keyword;
+	}
+
+	public LocalDateTime getCollectedAt() {
+		return collectedAt;
+	}
+
+	public void setCollectedAt(LocalDateTime collectedAt) {
+		this.collectedAt = collectedAt;
 	}
 }

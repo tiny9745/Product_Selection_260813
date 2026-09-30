@@ -110,7 +110,7 @@ public class ProductService {
 	@Autowired
 	private ScoringService scoringService;
 
-	/** 2026-09-29：PTT 新品探索轉成商品（見 createProduct()）。DiscoveredItemService 不依賴本類別，無循環依賴。 */
+	/** 2026-09-29：AI 商品雷達轉成商品（見 createProduct()）。DiscoveredItemService 不依賴本類別，無循環依賴。 */
 	@Autowired
 	private com.example.Product_Selection_260813.service.discovery.DiscoveredItemService discoveredItemService;
 
@@ -472,6 +472,7 @@ public class ProductService {
 		product.setProductTypeId(request.getProductTypeId());
 		product.setPricingType(request.getPricingType());
 		product.setName(request.getName());
+		product.setSearchKeyword(trimToNull(request.getSearchKeyword()));
 		product.setDescription(request.getDescription());
 		product.setImageUrl(request.getImageUrl());
 		product.setSupplierName(request.getSupplierName());
@@ -518,10 +519,15 @@ public class ProductService {
 		// 見 validateAndSaveCustomFieldValues() 的類別註解。
 		validateAndSaveCustomFieldValues(saved, request.getCustomFieldValues(), false);
 
-		// 2026-09-29：從 PTT 新品探索建立的商品，同一個交易內把探索項目標成已建立商品。
+		// 2026-09-29：從 AI 商品雷達建立的商品，同一個交易內把商品線索標成已建立商品。
 		// 放在評分之前：項目已被轉過（409）時整筆回滾，不必白算一次分數。
 		if (request.getDiscoveredItemId() != null) {
-			discoveredItemService.markConverted(request.getDiscoveredItemId(), saved.getId(), userId);
+			var discoveredItem = discoveredItemService.markConverted(request.getDiscoveredItemId(), saved.getId(), userId);
+			// 2026-09-30：使用者沒填搜尋關鍵字時，帶入雷達 AI 抽出的關鍵字（通常比完整商品名稱更容易在 PTT 搜到）。
+			// saved 是這個交易內的受管實體，改值會在交易提交時寫回，不需要再 save 一次。
+			if (saved.getSearchKeyword() == null) {
+				saved.setSearchKeyword(trimToNull(discoveredItem.getSearchKeyword()));
+			}
 		}
 
 		// Demo緊急補上的觸發點（見ScoringService類別Java Doc）：新增成功後立即
@@ -627,6 +633,8 @@ public class ProductService {
 
 		// 一般基本資料：任何審核狀態下都可改
 		product.setName(request.getName());
+		// 2026-09-30：搜尋關鍵字不直接計分，歸在一般基本資料（名稱本來就會影響自動簡化的關鍵字，也是任何狀態都可改）
+		product.setSearchKeyword(trimToNull(request.getSearchKeyword()));
 		product.setDescription(request.getDescription());
 		product.setImageUrl(request.getImageUrl());
 		product.setSupplierName(request.getSupplierName());
@@ -1203,6 +1211,15 @@ public class ProductService {
 	 */
 	private static String nameOrNull(Enum<?> value) {
 		return value == null ? null : value.name();
+	}
+
+	/** 2026-09-30：選填文字欄位（搜尋關鍵字）去頭尾空白，空白字串視為未設定（null），避免存進只有空白的關鍵字。 */
+	private static String trimToNull(String value) {
+		if (value == null) {
+			return null;
+		}
+		String trimmed = value.trim();
+		return trimmed.isEmpty() ? null : trimmed;
 	}
 
 

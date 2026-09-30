@@ -201,4 +201,20 @@ class TrendServiceTest {
 	void 清完變空字串時退回原始名稱() {
 		assertThat(TrendService.toSearchKeyword("500g")).isEqualTo("500g");
 	}
+
+	// 2026-09-30：使用者指定的搜尋關鍵字優先，沒指定才由商品名稱自動簡化
+	@Test
+	void 有指定搜尋關鍵字時優先使用_去頭尾空白() {
+		Product product = product(1L, "麻豆文旦 10台斤禮盒");
+		product.setSearchKeyword("  文旦 ");
+		assertThat(TrendService.resolveSearchKeyword(product)).isEqualTo("文旦");
+	}
+
+	@Test
+	void 未指定或空白時由商品名稱自動簡化() {
+		Product product = product(1L, "飛利浦 海星氣炸鍋 4.2L");
+		assertThat(TrendService.resolveSearchKeyword(product)).isEqualTo("飛利浦 海星氣炸鍋");
+		product.setSearchKeyword("   ");
+		assertThat(TrendService.resolveSearchKeyword(product)).isEqualTo("飛利浦 海星氣炸鍋");
+	}
 }

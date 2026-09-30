@@ -57,6 +57,10 @@ public class ProductUpdateRequest {
 	@Size(max = 100, message = ValidationMessage.PRODUCT_NAME_TOO_LONG)
 	private String name;
 
+	/** 2026-09-30：搜尋關鍵字（選填，屬一般基本資料，任何審核狀態下都可改）；留空＝由商品名稱自動簡化。 */
+	@Size(max = 100, message = ValidationMessage.PRODUCT_SEARCH_KEYWORD_TOO_LONG)
+	private String searchKeyword;
+
 	// description對應TEXT欄位，不設長度上限
 	private String description;
 
@@ -232,6 +236,14 @@ public class ProductUpdateRequest {
 
 	public void setName(String name) {
 		this.name = name;
+	}
+
+	public String getSearchKeyword() {
+		return searchKeyword;
+	}
+
+	public void setSearchKeyword(String searchKeyword) {
+		this.searchKeyword = searchKeyword;
 	}
 
 	public String getDescription() {
